@@ -2558,13 +2558,13 @@ namespace TestDisplay {
   }
 
   // CHẾ ĐỘ 5: APP HÌNH NỀN (TÙY CHỈNH MÀN HÌNH CHỜ)
-  static void drawWallpaperAppScreen(bool fullRedraw = true) {
-    if (!tft) return;
+  static int lastDrawnWallpaperCursor = -1;
+  static int lastDrawnWallpaperFirstRow = -1;
+
+  static void drawSingleWallpaperRow(int idx, int vis, bool sel) {
+    if (!tft || idx < 0 || idx >= 10 || vis < 0 || vis >= 7) return;
     int w = tft->width();
-    if (fullRedraw) {
-      tft->fillRect(0, 22, w, tft->height() - 44, C_DARK_BG);
-      drawSymbianChrome("TÙY CHỈNH HÌNH NỀN", "Lưu (OK)", "< Đổi giá trị >", "Quay lại");
-    }
+    int ry = 30 + vis * 37;
 
     String imgLabel = stCfg.bgImage;
     if (imgLabel.startsWith("/")) imgLabel = imgLabel.substring(1);
@@ -2578,7 +2578,7 @@ namespace TestDisplay {
     else if (stCfg.clockColor == C_NEON_PURPLE) colorName = "Tím";
     else if (stCfg.clockColor == C_WHITE) colorName = "Trắng";
 
-    String labels[10] = {
+    const char* labels[10] = {
       "1. Chế độ hình nền",
       "2. Ảnh nền đã chọn",
       "3. Độ tối lớp phủ nền",
@@ -2604,27 +2604,49 @@ namespace TestDisplay {
       "Bấm OK để xem ->"
     };
 
+    tft->fillRect(6, ry, w - 12, 33, C_DARK_BG);
+    drawThemedBox(6, ry, w - 12, 33, sel);
+
+    tft->setTextSize(1);
+    tft->setTextColor(sel ? C_YELLOW : C_WHITE, sel ? C_CARD_SEL : C_CARD_BG);
+    tft->setCursor(12, ry + 6);
+    tft->print(labels[idx]);
+
+    tft->setTextColor(sel ? C_NEON_GREEN : C_NEON_CYAN, sel ? C_CARD_SEL : C_CARD_BG);
+    tft->setCursor(18, ry + 19);
+    tft->printf("< %s >", values[idx].c_str());
+  }
+
+  static void drawWallpaperAppScreen(bool fullRedraw = true) {
+    if (!tft) return;
+    int w = tft->width();
+    if (fullRedraw) {
+      tft->fillRect(0, 22, w, tft->height() - 44, C_DARK_BG);
+      drawSymbianChrome("TÙY CHỈNH HÌNH NỀN", "Lưu (OK)", "< Đổi giá trị >", "Quay lại");
+      lastDrawnWallpaperCursor = -1;
+      lastDrawnWallpaperFirstRow = -1;
+    }
+
     int firstRow = 0;
     if (s40WallpaperCursor >= 7) firstRow = s40WallpaperCursor - 6;
+
+    // Tối ưu chống quét màn hình: Nếu không đổi khung cuộn trang -> Chỉ vẽ lại 2 ô thay đổi (< 2ms)
+    if (!fullRedraw && firstRow == lastDrawnWallpaperFirstRow && lastDrawnWallpaperCursor >= 0 && lastDrawnWallpaperCursor != s40WallpaperCursor) {
+      int oldVis = lastDrawnWallpaperCursor - firstRow;
+      int newVis = s40WallpaperCursor - firstRow;
+      if (oldVis >= 0 && oldVis < 7) drawSingleWallpaperRow(lastDrawnWallpaperCursor, oldVis, false);
+      if (newVis >= 0 && newVis < 7) drawSingleWallpaperRow(s40WallpaperCursor, newVis, true);
+      lastDrawnWallpaperCursor = s40WallpaperCursor;
+      return;
+    }
 
     for (int vis = 0; vis < 7; vis++) {
       int idx = firstRow + vis;
       if (idx >= 10) break;
-      int ry = 30 + vis * 37;
-      bool sel = (idx == s40WallpaperCursor);
-
-      tft->fillRect(6, ry, w - 12, 33, C_DARK_BG);
-      drawThemedBox(6, ry, w - 12, 33, sel);
-
-      tft->setTextSize(1);
-      tft->setTextColor(sel ? C_YELLOW : C_WHITE, sel ? C_CARD_SEL : C_CARD_BG);
-      tft->setCursor(12, ry + 6);
-      tft->print(labels[idx]);
-
-      tft->setTextColor(sel ? C_NEON_GREEN : C_NEON_CYAN, sel ? C_CARD_SEL : C_CARD_BG);
-      tft->setCursor(18, ry + 19);
-      tft->printf("< %s >", values[idx].c_str());
+      drawSingleWallpaperRow(idx, vis, idx == s40WallpaperCursor);
     }
+    lastDrawnWallpaperCursor = s40WallpaperCursor;
+    lastDrawnWallpaperFirstRow = firstRow;
   }
 
   // ============================================================================
@@ -2856,13 +2878,13 @@ namespace TestDisplay {
   }
 
   // CHẾ ĐỘ 6: APP CÀI ĐẶT HỆ THỐNG & CHỦ ĐỀ GIAO DIỆN (5 PHONG CÁCH CHÍNH THỨC)
-  static void drawSettingsAppScreen(bool fullRedraw = true) {
-    if (!tft) return;
+  static int lastDrawnSettingsCursor = -1;
+  static int lastDrawnSettingsFirstRow = -1;
+
+  static void drawSingleSettingsRow(int idx, int vis, bool sel) {
+    if (!tft || idx < 0 || idx >= 10 || vis < 0 || vis >= 7) return;
     int w = tft->width();
-    if (fullRedraw) {
-      tft->fillRect(0, 22, w, tft->height() - 44, C_DARK_BG);
-      drawSymbianChrome("CÀI ĐẶT HỆ THỐNG", "Đổi (OK)", "< Trái / Phải >", "Quay lại");
-    }
+    int ry = 30 + vis * 37;
 
     int spkVol = TestAudio::getSpeakerVolumePct();
     const char* micSensNames[3] = { "Thấp", "Tiêu chuẩn", "Cao" };
@@ -2873,7 +2895,7 @@ namespace TestDisplay {
       "3. Đồng hồ kim (Analog)"
     };
 
-    String labels[10] = {
+    const char* labels[10] = {
       "1. Phong cách Giao diện",
       "2. Độ sáng màn hình",
       "3. Thời gian tắt màn hình",
@@ -2899,53 +2921,82 @@ namespace TestDisplay {
       String(TestWindmill::getModeName())
     };
 
+    tft->fillRect(6, ry, w - 12, 34, C_DARK_BG);
+    drawThemedBox(6, ry, w - 12, 34, sel);
+
+    tft->setTextSize(1);
+    tft->setTextColor(sel ? C_YELLOW : C_WHITE, sel ? C_CARD_SEL : C_CARD_BG);
+    tft->setCursor(12, ry + 5);
+    tft->print(labels[idx]);
+
+    if (idx == 0) {
+      // Hiển thị tên Chủ đề + 4 ô màu mẫu (Swatch) bên góc phải
+      tft->setTextColor(C_NEON_CYAN, sel ? C_CARD_SEL : C_CARD_BG);
+      tft->setCursor(12, ry + 19);
+      tft->printf("< %s >", values[0].c_str());
+      int sx = w - 48;
+      tft->fillRect(sx,      ry + 6, 7, 7, C_DARK_BG);
+      tft->drawRect(sx,      ry + 6, 7, 7, C_WHITE);
+      tft->fillRect(sx + 9,  ry + 6, 7, 7, C_NEON_CYAN);
+      tft->fillRect(sx + 18, ry + 6, 7, 7, C_NEON_GREEN);
+      tft->fillRect(sx + 27, ry + 6, 7, 7, C_NEON_PINK);
+    } else if (idx == 1 || idx == 4) {
+      int pct = (idx == 1) ? screenBrightnessPct : spkVol;
+      uint16_t barCol = (idx == 1) ? C_NEON_AMBER : C_NEON_GREEN;
+      int bx = 12, by = ry + 19, bw = 136, bh = 10;
+      tft->drawRect(bx, by, bw, bh, barCol);
+      int fillW = ((bw - 4) * constrain(pct, 0, 100)) / 100;
+      if (fillW > 0) tft->fillRect(bx + 2, by + 2, fillW, bh - 4, barCol);
+      if (fillW < bw - 4) tft->fillRect(bx + 2 + fillW, by + 2, (bw - 4) - fillW, bh - 4, C_BLACK);
+
+      tft->setTextColor(barCol, sel ? C_CARD_SEL : C_CARD_BG);
+      tft->setCursor(156, ry + 19);
+      tft->print(values[idx]);
+    } else {
+      uint16_t valCol = (idx == 3) ? (aodClockStyle > 0 ? C_NEON_GREEN : C_NEON_PINK) : (sel ? C_NEON_GREEN : C_NEON_CYAN);
+      tft->setTextColor(valCol, sel ? C_CARD_SEL : C_CARD_BG);
+      tft->setCursor(16, ry + 19);
+      tft->printf("< %s >", values[idx].c_str());
+    }
+  }
+
+  static void drawSettingsAppScreen(bool fullRedraw = true) {
+    if (!tft) return;
+    int w = tft->width();
+    if (fullRedraw) {
+      tft->fillRect(0, 22, w, tft->height() - 44, C_DARK_BG);
+      drawSymbianChrome("CÀI ĐẶT HỆ THỐNG", "Đổi (OK)", "< Trái / Phải >", "Quay lại");
+      lastDrawnSettingsCursor = -1;
+      lastDrawnSettingsFirstRow = -1;
+    }
+
     int firstRow = 0;
     if (s40SettingsCursor >= 7) firstRow = s40SettingsCursor - 6;
+
+    // Tối ưu chống quét màn hình: Nếu không đổi tầng cuộn trang -> Chỉ vẽ lại 2 ô thay đổi (< 2ms)
+    if (!fullRedraw && firstRow == lastDrawnSettingsFirstRow && lastDrawnSettingsCursor >= 0 && lastDrawnSettingsCursor != s40SettingsCursor) {
+      int oldVis = lastDrawnSettingsCursor - firstRow;
+      int newVis = s40SettingsCursor - firstRow;
+      if (oldVis >= 0 && oldVis < 7) drawSingleSettingsRow(lastDrawnSettingsCursor, oldVis, false);
+      if (newVis >= 0 && newVis < 7) drawSingleSettingsRow(s40SettingsCursor, newVis, true);
+      lastDrawnSettingsCursor = s40SettingsCursor;
+      return;
+    }
+
+    // Nếu con trỏ không đổi (ví dụ bấm Trái/Phải đổi giá trị): Chỉ vẽ lại đúng 1 hàng đang chọn!
+    if (!fullRedraw && firstRow == lastDrawnSettingsFirstRow && lastDrawnSettingsCursor == s40SettingsCursor) {
+      int curVis = s40SettingsCursor - firstRow;
+      if (curVis >= 0 && curVis < 7) drawSingleSettingsRow(s40SettingsCursor, curVis, true);
+      return;
+    }
 
     for (int vis = 0; vis < 7; vis++) {
       int idx = firstRow + vis;
       if (idx >= 10) break;
-      int ry = 30 + vis * 37;
-      bool sel = (idx == s40SettingsCursor);
-
-      tft->fillRect(6, ry, w - 12, 34, C_DARK_BG);
-      drawThemedBox(6, ry, w - 12, 34, sel);
-
-      tft->setTextSize(1);
-      tft->setTextColor(sel ? C_YELLOW : C_WHITE, sel ? C_CARD_SEL : C_CARD_BG);
-      tft->setCursor(12, ry + 5);
-      tft->print(labels[idx]);
-
-      if (idx == 0) {
-        // Hiển thị tên Chủ đề + 4 ô màu mẫu (Swatch) bên góc phải
-        tft->setTextColor(C_NEON_CYAN, sel ? C_CARD_SEL : C_CARD_BG);
-        tft->setCursor(12, ry + 19);
-        tft->printf("< %s >", values[0].c_str());
-        int sx = w - 48;
-        tft->fillRect(sx,      ry + 6, 7, 7, C_DARK_BG);
-        tft->drawRect(sx,      ry + 6, 7, 7, C_WHITE);
-        tft->fillRect(sx + 9,  ry + 6, 7, 7, C_NEON_CYAN);
-        tft->fillRect(sx + 18, ry + 6, 7, 7, C_NEON_GREEN);
-        tft->fillRect(sx + 27, ry + 6, 7, 7, C_NEON_PINK);
-      } else if (idx == 1 || idx == 4) {
-        int pct = (idx == 1) ? screenBrightnessPct : spkVol;
-        uint16_t barCol = (idx == 1) ? C_NEON_AMBER : C_NEON_GREEN;
-        int bx = 12, by = ry + 19, bw = 136, bh = 10;
-        tft->drawRect(bx, by, bw, bh, barCol);
-        int fillW = ((bw - 4) * constrain(pct, 0, 100)) / 100;
-        if (fillW > 0) tft->fillRect(bx + 2, by + 2, fillW, bh - 4, barCol);
-        if (fillW < bw - 4) tft->fillRect(bx + 2 + fillW, by + 2, (bw - 4) - fillW, bh - 4, C_BLACK);
-
-        tft->setTextColor(barCol, sel ? C_CARD_SEL : C_CARD_BG);
-        tft->setCursor(156, ry + 19);
-        tft->print(values[idx]);
-      } else {
-        uint16_t valCol = (idx == 3) ? (aodClockStyle > 0 ? C_NEON_GREEN : C_NEON_PINK) : (sel ? C_NEON_GREEN : C_NEON_CYAN);
-        tft->setTextColor(valCol, sel ? C_CARD_SEL : C_CARD_BG);
-        tft->setCursor(16, ry + 19);
-        tft->printf("< %s >", values[idx].c_str());
-      }
+      drawSingleSettingsRow(idx, vis, idx == s40SettingsCursor);
     }
+    lastDrawnSettingsCursor = s40SettingsCursor;
+    lastDrawnSettingsFirstRow = firstRow;
   }
 
   // Callback giải mã JPEG vào Bộ Đệm Khung Hình RAM cho App Thư Viện
@@ -3239,6 +3290,34 @@ namespace TestDisplay {
   // ============================================================================
   // HÀM VẼ POPUP MENU TÙY CHỌN HỆ THỐNG (CHUẨN SYMBIAN S40 OPTIONS MENU)
   // ============================================================================
+  static void drawSingleAboutMenuItem(int idx, bool sel) {
+    if (!tft || idx < 0 || idx >= 4) return;
+    int w = tft->width();
+    int mw = 216;
+    int mx = (w - mw) / 2;
+    int my = 100;
+    int iy = my + 34 + idx * 26;
+
+    const char* items[4] = {
+      "1. Kiem tra cap nhat OTA",
+      "2. Ma QR Cai Dat Wi-Fi",
+      "3. Doi sang Trang ke tiep",
+      "4. Dong menu tuy chon"
+    };
+
+    if (sel) {
+      tft->fillRoundRect(mx + 6, iy, mw - 12, 22, 4, C_NEON_PURPLE);
+      tft->drawRoundRect(mx + 6, iy, mw - 12, 22, 4, C_YELLOW);
+      tft->setTextColor(C_WHITE, C_NEON_PURPLE);
+    } else {
+      tft->fillRoundRect(mx + 6, iy, mw - 12, 22, 4, 0x10A2);
+      tft->setTextColor(0xBDD7, 0x10A2);
+    }
+    tft->setTextSize(1);
+    tft->setCursor(mx + 14, iy + 6);
+    tft->print(items[idx]);
+  }
+
   static void drawAboutPopupMenu(int w, int h) {
     int mw = 216;
     int mh = 146;
@@ -3259,25 +3338,8 @@ namespace TestDisplay {
     tft->setCursor(mx + 14, my + 11);
     tft->print("TÙY CHỌN HỆ THỐNG");
 
-    const char* items[4] = {
-      "1. Kiem tra cap nhat OTA",
-      "2. Ma QR Cai Dat Wi-Fi",
-      "3. Doi sang Trang ke tiep",
-      "4. Dong menu tuy chon"
-    };
-
     for (int i = 0; i < 4; i++) {
-      int iy = my + 34 + i * 26;
-      bool sel = (i == s40AboutMenuCursor);
-      if (sel) {
-        tft->fillRoundRect(mx + 6, iy, mw - 12, 22, 4, C_NEON_PURPLE);
-        tft->drawRoundRect(mx + 6, iy, mw - 12, 22, 4, C_YELLOW);
-        tft->setTextColor(C_WHITE, C_NEON_PURPLE);
-      } else {
-        tft->setTextColor(0xBDD7, 0x10A2);
-      }
-      tft->setCursor(mx + 14, iy + 6);
-      tft->print(items[i]);
+      drawSingleAboutMenuItem(i, i == s40AboutMenuCursor);
     }
   }
 
@@ -3402,10 +3464,12 @@ namespace TestDisplay {
   }
 
   // CHẾ ĐỘ 8: THÔNG TIN THIẾT BỊ & KẾT NỐI MẠNG (CHÍNH THỨC - 3 TRANG)
-  static void drawAboutAppScreen() {
+  static void drawAboutAppScreen(bool fullRedraw = true) {
     if (!tft) return;
     int w = tft->width();
-    tft->fillScreen(C_DARK_BG);
+    if (fullRedraw) {
+      tft->fillRect(0, 22, w, tft->height() - 44, C_DARK_BG);
+    }
 
     const char* leftSoft = "Tùy chọn";
     const char* midTitle = (s40AboutPage == 0) ? "< Trang 1/3 >" : ((s40AboutPage == 1) ? "< Trang 2/3 >" : "< Trang 3/3 >");
@@ -3549,7 +3613,9 @@ namespace TestDisplay {
   static void drawQrCodeWifiScreen(bool fullRedraw = true) {
     if (!tft) return;
     int w = tft->width();
-    tft->fillScreen(C_DARK_BG);
+    if (fullRedraw) {
+      tft->fillRect(0, 22, w, tft->height() - 44, C_DARK_BG);
+    }
     drawSymbianChrome("MÃ QR CÀI ĐẶT WI-FI", "Đổi mã", s40QrModeTab == 0 ? "Wi-Fi" : "Web", "Quay lại");
     drawQrContentCard(w, true);
   }
@@ -6194,7 +6260,7 @@ namespace TestDisplay {
     return (dowSun0 + 6) % 7; // Chuyển sang 0 = T2 .. 6 = CN
   }
 
-  static void drawCalendarAppScreen() {
+  static void drawCalendarAppScreen(bool fullRedraw = true) {
     if (!tft) return;
     int W = tft->width();
 
@@ -6211,8 +6277,10 @@ namespace TestDisplay {
       s40CalInitialized = true;
     }
 
-    tft->fillRect(0, 22, W, tft->height() - 44, C_DARK_BG);
-    drawSymbianChrome("LỊCH VẠN NIÊN", "[OK:HômNay]", "<Tháng/Năm>", "[EXIT:Menu]");
+    if (fullRedraw) {
+      tft->fillRect(0, 22, W, tft->height() - 44, C_DARK_BG);
+      drawSymbianChrome("LỊCH VẠN NIÊN", "[OK:HômNay]", "<Tháng/Năm>", "[EXIT:Menu]");
+    }
 
     // 1. Thanh Tiêu đề Tháng / Năm (y = 26..54)
     tft->fillRoundRect(6, 26, W - 12, 28, 5, 0x1949);
@@ -6738,6 +6806,68 @@ namespace TestDisplay {
     }
   }
 
+  static int lastDrawnGameMenuCursor = -1;
+
+  static void drawSingleGameMenuCard(int i, bool sel) {
+    if (!tft || i < 0 || i >= 3) return;
+    int W = tft->width();
+    int ry = 56 + i * 78;
+    drawThemedBox(8, ry, W - 16, 72, sel);
+
+    // Vẽ biểu tượng đại diện từng Game ở góc trái thẻ
+    int icx = 30, icy = ry + 36;
+    if (i == 0) {
+      // Icon Rắn Săn Mồi
+      tft->fillRoundRect(icx - 14, icy - 14, 28, 28, 5, C_BLACK);
+      tft->drawRoundRect(icx - 14, icy - 14, 28, 28, 5, C_NEON_GREEN);
+      tft->fillRect(icx - 8, icy, 12, 5, C_NEON_GREEN);
+      tft->fillRect(icx, icy - 8, 5, 13, C_NEON_CYAN);
+      tft->fillRect(icx, icy - 8, 9, 5, C_YELLOW);
+      tft->fillCircle(icx - 6, icy - 6, 3, C_NEON_PINK);
+    } else if (i == 1) {
+      // Icon Flappy Bird
+      tft->fillRoundRect(icx - 14, icy - 14, 28, 28, 5, C_BLACK);
+      tft->drawRoundRect(icx - 14, icy - 14, 28, 28, 5, C_YELLOW);
+      tft->fillRoundRect(icx - 7, icy - 5, 14, 10, 4, C_YELLOW);
+      tft->fillCircle(icx + 3, icy - 2, 2, C_WHITE);
+      tft->fillRect(icx + 6, icy - 1, 4, 3, C_NEON_PINK);
+    } else {
+      // Icon Xếp Gạch Tetris
+      tft->fillRoundRect(icx - 14, icy - 14, 28, 28, 5, C_BLACK);
+      tft->drawRoundRect(icx - 14, icy - 14, 28, 28, 5, C_NEON_CYAN);
+      tft->fillRect(icx - 9, icy + 1, 6, 6, C_NEON_PINK);
+      tft->fillRect(icx - 3, icy + 1, 6, 6, C_NEON_PINK);
+      tft->fillRect(icx + 3, icy + 1, 6, 6, C_NEON_PINK);
+      tft->fillRect(icx - 3, icy - 5, 6, 6, C_YELLOW);
+    }
+
+    const char* gTitles[3] = {
+      "1. Rắn Săn Mồi (Snake Xenzia)",
+      "2. Chim Vỗ Cánh (Flappy Bird)",
+      "3. Xếp Gạch Cổ Điển (Tetris)"
+    };
+    const char* gSub[3] = {
+      "Điều khiển 4 hướng ăn mồi năng lượng",
+      "Bấm [OK / LÊN] vỗ cánh vượt ống nước",
+      "Xoay khối [OK/LÊN], dịch Trái/Phải/Xuống"
+    };
+    int bests[3] = { snakeBestScore, flappyBestScore, tetrisBestScore };
+
+    uint16_t bg = sel ? C_CARD_SEL : C_CARD_BG;
+    tft->setTextSize(1);
+    tft->setTextColor(sel ? C_YELLOW : C_WHITE, bg);
+    tft->setCursor(52, ry + 12);
+    tft->print(gTitles[i]);
+
+    tft->setTextColor(C_NEON_CYAN, bg);
+    tft->setCursor(52, ry + 30);
+    tft->print(gSub[i]);
+
+    tft->setTextColor(C_NEON_GREEN, bg);
+    tft->setCursor(52, ry + 48);
+    tft->printf("Kỷ lục cao nhất: %d điểm", bests[i]);
+  }
+
   static void drawGameCenterAppScreen(bool fullRedraw = true) {
     if (!tft) return;
     loadGameScoresPrefsIfNeeded();
@@ -6748,72 +6878,26 @@ namespace TestDisplay {
       if (fullRedraw) {
         tft->fillRect(0, 22, W, tft->height() - 44, C_DARK_BG);
         drawSymbianChrome("TRUNG TÂM TRÒ CHƠI", "[OK:Chơi]", "Lên/Xuống", "[EXIT:Menu]");
-      }
 
-      tft->fillRoundRect(6, 26, W - 12, 24, 5, 0x1949);
-      tft->drawRoundRect(6, 26, W - 12, 24, 5, C_NEON_PINK);
-      tft->setTextSize(1);
-      tft->setTextColor(C_YELLOW, 0x1949);
-      tft->setCursor(14, 34);
-      tft->print("CHỌN TRÒ CHƠI GIẢI TRÍ (3 GAME):");
-
-      const char* gTitles[3] = {
-        "1. Rắn Săn Mồi (Snake Xenzia)",
-        "2. Chim Vỗ Cánh (Flappy Bird)",
-        "3. Xếp Gạch Cổ Điển (Tetris)"
-      };
-      const char* gSub[3] = {
-        "Điều khiển 4 hướng ăn mồi năng lượng",
-        "Bấm [OK / LÊN] vỗ cánh vượt ống nước",
-        "Xoay khối [OK/LÊN], dịch Trái/Phải/Xuống"
-      };
-      int bests[3] = { snakeBestScore, flappyBestScore, tetrisBestScore };
-
-      for (int i = 0; i < 3; i++) {
-        int ry = 56 + i * 78;
-        bool sel = (i == s40GameMenuCursor);
-        drawThemedBox(8, ry, W - 16, 72, sel);
-
-        // Vẽ biểu tượng đại diện từng Game ở góc trái thẻ
-        int icx = 30, icy = ry + 36;
-        if (i == 0) {
-          // Icon Rắn Săn Mồi
-          tft->fillRoundRect(icx - 14, icy - 14, 28, 28, 5, C_BLACK);
-          tft->drawRoundRect(icx - 14, icy - 14, 28, 28, 5, C_NEON_GREEN);
-          tft->fillRect(icx - 8, icy, 12, 5, C_NEON_GREEN);
-          tft->fillRect(icx, icy - 8, 5, 13, C_NEON_CYAN);
-          tft->fillRect(icx, icy - 8, 9, 5, C_YELLOW);
-          tft->fillCircle(icx - 6, icy - 6, 3, C_NEON_PINK);
-        } else if (i == 1) {
-          // Icon Flappy Bird
-          tft->fillRoundRect(icx - 14, icy - 14, 28, 28, 5, C_BLACK);
-          tft->drawRoundRect(icx - 14, icy - 14, 28, 28, 5, C_YELLOW);
-          tft->fillRoundRect(icx - 7, icy - 5, 14, 10, 4, C_YELLOW);
-          tft->fillCircle(icx + 3, icy - 2, 2, C_WHITE);
-          tft->fillRect(icx + 6, icy - 1, 4, 3, C_NEON_PINK);
-        } else {
-          // Icon Xếp Gạch Tetris
-          tft->fillRoundRect(icx - 14, icy - 14, 28, 28, 5, C_BLACK);
-          tft->drawRoundRect(icx - 14, icy - 14, 28, 28, 5, C_NEON_CYAN);
-          tft->fillRect(icx - 9, icy + 1, 6, 6, C_NEON_PINK);
-          tft->fillRect(icx - 3, icy + 1, 6, 6, C_NEON_PINK);
-          tft->fillRect(icx + 3, icy + 1, 6, 6, C_NEON_PINK);
-          tft->fillRect(icx - 3, icy - 5, 6, 6, C_YELLOW);
-        }
-
-        uint16_t bg = sel ? C_CARD_SEL : C_CARD_BG;
+        tft->fillRoundRect(6, 26, W - 12, 24, 5, 0x1949);
+        tft->drawRoundRect(6, 26, W - 12, 24, 5, C_NEON_PINK);
         tft->setTextSize(1);
-        tft->setTextColor(sel ? C_YELLOW : C_WHITE, bg);
-        tft->setCursor(52, ry + 12);
-        tft->print(gTitles[i]);
+        tft->setTextColor(C_YELLOW, 0x1949);
+        tft->setCursor(14, 34);
+        tft->print("CHỌN TRÒ CHƠI GIẢI TRÍ (3 GAME):");
 
-        tft->setTextColor(C_NEON_CYAN, bg);
-        tft->setCursor(52, ry + 30);
-        tft->print(gSub[i]);
-
-        tft->setTextColor(C_NEON_GREEN, bg);
-        tft->setCursor(52, ry + 48);
-        tft->printf("Kỷ lục cao nhất: %d điểm", bests[i]);
+        for (int i = 0; i < 3; i++) {
+          drawSingleGameMenuCard(i, i == s40GameMenuCursor);
+        }
+        lastDrawnGameMenuCursor = s40GameMenuCursor;
+      } else {
+        if (lastDrawnGameMenuCursor != s40GameMenuCursor) {
+          if (lastDrawnGameMenuCursor >= 0 && lastDrawnGameMenuCursor < 3) {
+            drawSingleGameMenuCard(lastDrawnGameMenuCursor, false);
+          }
+          drawSingleGameMenuCard(s40GameMenuCursor, true);
+          lastDrawnGameMenuCursor = s40GameMenuCursor;
+        }
       }
       return;
     }
@@ -7319,11 +7403,16 @@ namespace TestDisplay {
     if (currentMode == 8 && keyIndex == 5) {
       if (s40OtaCheckState != 0) {
         s40OtaCheckState = 0;
-        drawAboutAppScreen();
+        drawAboutAppScreen(true);
       } else {
         s40AboutMenuOpen = !s40AboutMenuOpen;
         s40AboutMenuCursor = 0;
-        drawAboutAppScreen();
+        if (s40AboutMenuOpen) {
+          drawAboutPopupMenu(tft->width(), tft->height());
+          drawSymbianChrome("THÔNG TIN THIẾT BỊ", "Chọn", "< Chọn mục >", "Đóng");
+        } else {
+          drawAboutAppScreen(true);
+        }
       }
       return;
     }
@@ -7503,17 +7592,22 @@ namespace TestDisplay {
         }
       } else if (s40AboutMenuOpen) {
         if (keyIndex == 1) { // UP
+          int oldCur = s40AboutMenuCursor;
           s40AboutMenuCursor = (s40AboutMenuCursor + 3) % 4;
-          drawAboutAppScreen();
+          drawSingleAboutMenuItem(oldCur, false);
+          drawSingleAboutMenuItem(s40AboutMenuCursor, true);
         } else if (keyIndex == 2) { // DOWN
+          int oldCur = s40AboutMenuCursor;
           s40AboutMenuCursor = (s40AboutMenuCursor + 1) % 4;
-          drawAboutAppScreen();
+          drawSingleAboutMenuItem(oldCur, false);
+          drawSingleAboutMenuItem(s40AboutMenuCursor, true);
         } else if (keyIndex == 0) { // OK
           if (s40AboutMenuCursor == 0) {
             // Mục 0: Kiểm tra cập nhật OTA từ Cloud GitHub
             s40AboutMenuOpen = false;
             s40OtaCheckState = 1; // Đang kết nối...
-            drawAboutAppScreen();
+            drawAboutOtaModal(tft->width(), tft->height());
+            drawSymbianChrome("THÔNG TIN THIẾT BỊ", "Đóng", "", "");
 
             // Kiểm tra manifest từ xa
             bool checkOk = OtaManager::checkCloudUpdate(s40OtaUpdateInfo);
@@ -7524,25 +7618,26 @@ namespace TestDisplay {
             } else {
               s40OtaCheckState = 3; // Bản mới nhất
             }
-            drawAboutAppScreen();
+            drawAboutOtaModal(tft->width(), tft->height());
+            drawSymbianChrome("THÔNG TIN THIẾT BỊ", s40OtaCheckState == 2 ? "Nâng cấp" : "Đóng", "", s40OtaCheckState == 2 ? "Đóng" : "");
           } else if (s40AboutMenuCursor == 1) {
             // Mục 1: Mã QR Cài Đặt Wi-Fi
             s40AboutMenuOpen = false;
             s40AboutPage = 2;
-            drawAboutAppScreen();
+            drawAboutAppScreen(true);
           } else if (s40AboutMenuCursor == 2) {
             // Mục 2: Sang trang kế tiếp
             s40AboutMenuOpen = false;
             s40AboutPage = (s40AboutPage + 1) % 3;
-            drawAboutAppScreen();
+            drawAboutAppScreen(true);
           } else if (s40AboutMenuCursor == 3) {
             // Mục 3: Đóng menu
             s40AboutMenuOpen = false;
-            drawAboutAppScreen();
+            drawAboutAppScreen(true);
           }
         } else if (keyIndex == 6) { // EXIT
           s40AboutMenuOpen = false;
-          drawAboutAppScreen();
+          drawAboutAppScreen(true);
         }
       } else {
         // Duyệt trang bình thường
@@ -7550,26 +7645,27 @@ namespace TestDisplay {
           if (s40AboutPage == 2) {
             // Ở trang QR: Đổi giữa QR Wi-Fi và QR Web
             s40QrModeTab = (s40QrModeTab + 1) % 2;
-            drawAboutAppScreen();
+            drawAboutAppScreen(false);
           } else {
             // Ở trang 1 hoặc 2: Bấm OK mở Menu Tùy Chọn Popup
             s40AboutMenuOpen = true;
             s40AboutMenuCursor = 0;
-            drawAboutAppScreen();
+            drawAboutPopupMenu(tft->width(), tft->height());
+            drawSymbianChrome("THÔNG TIN THIẾT BỊ", "Chọn", "< Chọn mục >", "Đóng");
           }
         } else if (keyIndex == 3) { // LEFT
           s40AboutPage = (s40AboutPage + 2) % 3;
-          drawAboutAppScreen();
+          drawAboutAppScreen(true);
         } else if (keyIndex == 4) { // RIGHT
           s40AboutPage = (s40AboutPage + 1) % 3;
-          drawAboutAppScreen();
+          drawAboutAppScreen(true);
         } else if (keyIndex == 1 || keyIndex == 2) { // UP / DOWN
           if (s40AboutPage == 2) {
             s40QrModeTab = (s40QrModeTab + 1) % 2;
-            drawAboutAppScreen();
+            drawAboutAppScreen(false);
           } else {
             s40AboutPage = (s40AboutPage + 1) % 3;
-            drawAboutAppScreen();
+            drawAboutAppScreen(true);
           }
         } else if (keyIndex == 6) { // EXIT
           currentMode = 4;
@@ -8371,20 +8467,20 @@ namespace TestDisplay {
       if (keyIndex == 3) { // LEFT: Tháng trước
         s40CalMonth--;
         if (s40CalMonth < 1) { s40CalMonth = 12; s40CalYear--; }
-        drawCalendarAppScreen();
+        drawCalendarAppScreen(false);
       } else if (keyIndex == 4) { // RIGHT: Tháng sau
         s40CalMonth++;
         if (s40CalMonth > 12) { s40CalMonth = 1; s40CalYear++; }
-        drawCalendarAppScreen();
+        drawCalendarAppScreen(false);
       } else if (keyIndex == 1) { // UP: Năm tiếp theo
         s40CalYear++;
-        drawCalendarAppScreen();
+        drawCalendarAppScreen(false);
       } else if (keyIndex == 2) { // DOWN: Năm trước
         if (s40CalYear > 1970) s40CalYear--;
-        drawCalendarAppScreen();
+        drawCalendarAppScreen(false);
       } else if (keyIndex == 0) { // OK: Quay về Tháng/Năm hiện tại
         s40CalInitialized = false;
-        drawCalendarAppScreen();
+        drawCalendarAppScreen(false);
       } else if (keyIndex == 6) { // EXIT: Quay về Menu 4x3
         currentMode = 4;
         refreshActiveScreen();

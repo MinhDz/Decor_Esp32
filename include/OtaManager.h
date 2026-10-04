@@ -4,7 +4,7 @@
 
 #define SYSTEM_DEVICE_NAME    "Trạm Decor Vũ Trụ"
 #define SYSTEM_OS_NAME        "Space OS"
-#define FIRMWARE_VERSION      "v3.1.0"
+#define FIRMWARE_VERSION      "v3.1.1"
 #define FIRMWARE_BUILD_DATE   __DATE__ " " __TIME__
 
 struct OtaUpdateInfo {
