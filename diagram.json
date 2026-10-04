@@ -1,0 +1,39 @@
+{
+  "version": 1,
+  "author": "Lăng Minh",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": -9.78, "left": 90.97, "attrs": {} },
+    { "type": "wokwi-ili9341", "id": "lcd1", "top": -104.8, "left": -221.1, "attrs": {} },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 294.2,
+      "left": 105.6,
+      "attrs": { "color": "blue", "xray": "1" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn2",
+      "top": 294.2,
+      "left": -19.2,
+      "attrs": { "color": "red", "xray": "1" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "lcd1:VCC", "esp:5V", "red", [ "v76.8", "h249.6", "v-48" ] ],
+    [ "lcd1:GND", "esp:GND.1", "black", [ "v67.2", "h230.4", "v-28.8" ] ],
+    [ "lcd1:CS", "esp:10", "magenta", [ "v57.6", "h211.2", "v-76.8" ] ],
+    [ "lcd1:D/C", "esp:9", "blue", [ "v38.4", "h172.8", "v-115.2", "h57.65" ] ],
+    [ "lcd1:RST", "esp:14", "cyan", [ "v48", "h192", "v-28.8" ] ],
+    [ "lcd1:MOSI", "esp:11", "gold", [ "v28.8", "h143.99", "v-38.4" ] ],
+    [ "lcd1:SCK", "esp:12", "#8f4814", [ "v19.2", "h143.99", "v-19.2" ] ],
+    [ "btn1:1.l", "esp:5", "green", [ "v-28.8", "h-124.8", "v-220.8" ] ],
+    [ "btn2:1.l", "esp:4", "green", [ "h-19.2", "v-28.8", "v-230.4" ] ],
+    [ "btn1:2.r", "esp:GND.4", "black", [ "h57.8", "v-105.4", "h-9.6" ] ],
+    [ "btn2:2.r", "esp:GND.1", "black", [ "h19.4", "v-105.4" ] ]
+  ],
+  "dependencies": {}
+}

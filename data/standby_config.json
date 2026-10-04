@@ -1,0 +1,20 @@
+{
+  "theme": "cyberpunk",
+  "clock_style": "digital",
+  "clock_color": "#38bdf8",
+  "clock_format": "24h",
+  "show_seconds": true,
+  "clock_pos": "center",
+  "show_date": true,
+  "date_format": "vi",
+  "show_weather": true,
+  "temp": 28.5,
+  "humidity": 65,
+  "custom_text": "Trạm Decor Vũ Trụ ✨",
+  "text_color": "#94a3b8",
+  "bg_mode": "gradient",
+  "bg_color": "#0a0f1d",
+  "bg_image": "",
+  "dim_overlay": 30
+}
+

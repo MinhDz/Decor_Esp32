@@ -1,0 +1,7 @@
+psutil>=5.9.0
+requests>=2.28.0
+pywin32>=305
+nvidia-ml-py>=12.535.0
+GPUtil>=1.4.0
+rich>=13.0.0
+

@@ -1,0 +1,5 @@
+{
+  "endpoint": "wss://api.xiaozhi.me/mcp/",
+  "token": "eyJhbGciOiJFUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOjEwNzM5MDUsImFnZW50SWQiOjIzNDU1NTEsImVuZHBvaW50SWQiOiJhZ2VudF8yMzQ1NTUxIiwicHVycG9zZSI6Im1jcC1lbmRwb2ludCIsImlhdCI6MTc4OTIyMzk3MCwiZXhwIjoxODIwNzgxNTcwfQ.00Wa-3Z_4yrFKKLBI1wfwwGIx03S0aiW9GTMJ1xiJj0_HVGxM9jmw8okFEfgdfgRNlOKZWuz6BRtSH_hIKq6wA",
+  "mac": "E8:3D:C1:F1:88:24"
+}

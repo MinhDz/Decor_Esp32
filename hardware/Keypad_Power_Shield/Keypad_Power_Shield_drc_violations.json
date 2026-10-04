@@ -1,0 +1,188 @@
+{
+  "board": "C:\\Users\\admin\\Documents\\GitHub\\Decor_Esp32\\hardware\\Keypad_Power_Shield\\Keypad_Power_Shield.kicad_pcb",
+  "timestamp": "2026-10-03T17:58:26",
+  "total_violations": 17,
+  "violation_counts": {
+    "lib_footprint_issues": 4,
+    "lib_footprint_mismatch": 4,
+    "silk_overlap": 4,
+    "silk_over_copper": 5
+  },
+  "severity_counts": {
+    "error": 0,
+    "warning": 17,
+    "info": 0
+  },
+  "violations": [
+    {
+      "type": "lib_footprint_issues",
+      "severity": "warning",
+      "message": "Footprint 'MountingHole_3.2mm' not found in library 'MountingHole'",
+      "location": {
+        "x": 86.0,
+        "y": 4.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "lib_footprint_issues",
+      "severity": "warning",
+      "message": "Footprint 'MountingHole_3.2mm' not found in library 'MountingHole'",
+      "location": {
+        "x": 4.0,
+        "y": 4.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "lib_footprint_mismatch",
+      "severity": "warning",
+      "message": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+      "location": {
+        "x": 16.19,
+        "y": 47.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "lib_footprint_issues",
+      "severity": "warning",
+      "message": "Footprint 'MountingHole_3.2mm' not found in library 'MountingHole'",
+      "location": {
+        "x": 86.0,
+        "y": 56.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "lib_footprint_issues",
+      "severity": "warning",
+      "message": "Footprint 'MountingHole_3.2mm' not found in library 'MountingHole'",
+      "location": {
+        "x": 4.0,
+        "y": 56.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "lib_footprint_mismatch",
+      "severity": "warning",
+      "message": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+      "location": {
+        "x": 66.19,
+        "y": 22.5,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "lib_footprint_mismatch",
+      "severity": "warning",
+      "message": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+      "location": {
+        "x": 38.19,
+        "y": 22.5,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "lib_footprint_mismatch",
+      "severity": "warning",
+      "message": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+      "location": {
+        "x": 66.19,
+        "y": 44.5,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_overlap",
+      "severity": "warning",
+      "message": "Silkscreen clearance",
+      "location": {
+        "x": 70.0,
+        "y": 42.13,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_overlap",
+      "severity": "warning",
+      "message": "Silkscreen clearance",
+      "location": {
+        "x": 70.0,
+        "y": 20.13,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_overlap",
+      "severity": "warning",
+      "message": "Silkscreen clearance",
+      "location": {
+        "x": 42.0,
+        "y": 20.13,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_overlap",
+      "severity": "warning",
+      "message": "Silkscreen clearance",
+      "location": {
+        "x": 20.0,
+        "y": 44.63,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_over_copper",
+      "severity": "warning",
+      "message": "Silkscreen clipped by solder mask",
+      "location": {
+        "x": 86.0,
+        "y": 4.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_over_copper",
+      "severity": "warning",
+      "message": "Silkscreen clipped by solder mask",
+      "location": {
+        "x": 86.0,
+        "y": 56.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_over_copper",
+      "severity": "warning",
+      "message": "Silkscreen clipped by solder mask",
+      "location": {
+        "x": 24.0,
+        "y": 5.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_over_copper",
+      "severity": "warning",
+      "message": "Silkscreen clipped by solder mask",
+      "location": {
+        "x": 4.0,
+        "y": 4.0,
+        "unit": "mm"
+      }
+    },
+    {
+      "type": "silk_over_copper",
+      "severity": "warning",
+      "message": "Silkscreen clipped by solder mask",
+      "location": {
+        "x": 4.0,
+        "y": 56.0,
+        "unit": "mm"
+      }
+    }
+  ]
+}

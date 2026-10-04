@@ -1,0 +1,2335 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Trạm Decor Vũ Trụ - ESP32-S3 Control Center</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; }
+    body { background-color: #0b0f19; color: #f8fafc; padding: 16px; display: flex; justify-content: center; min-height: 100vh; }
+    .container { width: 100%; max-width: 680px; background: #161f30; border: 1px solid #1e293b; border-radius: 16px; padding: 20px; box-shadow: 0 20px 40px rgba(0,0,0,0.6); }
+    
+    /* Header */
+    .header { text-align: center; margin-bottom: 16px; }
+    .header h1 { font-size: 1.35rem; color: #38bdf8; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .header p { font-size: 0.8rem; color: #64748b; margin-top: 2px; }
+
+    /* System Status Bar */
+    .status-bar { background: #0f172a; border: 1px solid #334155; padding: 10px 14px; border-radius: 10px; font-size: 0.82rem; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .status-left { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+    .badge { padding: 3px 8px; border-radius: 6px; font-weight: 600; font-size: 0.74rem; }
+    .bg-online { background: #059669; color: #ecfdf5; }
+    .bg-offline { background: #d97706; color: #fffbeb; }
+
+    /* Nav Tabs */
+    .tabs { display: flex; gap: 6px; border-bottom: 2px solid #1e293b; margin-bottom: 18px; overflow-x: auto; scrollbar-width: none; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tab-btn { background: none; border: none; color: #94a3b8; padding: 10px 14px; cursor: pointer; font-size: 0.88rem; font-weight: 600; border-bottom: 3px solid transparent; white-space: nowrap; transition: 0.2s; border-radius: 6px 6px 0 0; }
+    .tab-btn:hover { color: #cbd5e1; background: rgba(255,255,255,0.03); }
+    .tab-btn.active { color: #38bdf8; border-bottom-color: #38bdf8; background: rgba(56,189,248,0.08); }
+
+    /* Sections */
+    .section { display: none; animation: fadeIn 0.25s ease; }
+    .section.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }
+
+    /* =================== MÀN HÌNH ĐỨNG DỌC (PORTRAIT 240x320 SIMULATOR) =================== */
+    .demo-wrapper { display: flex; flex-direction: column; align-items: center; margin-bottom: 20px; }
+    
+    /* Device Bezel Frame (Màn hình dọc) */
+    .device-bezel {
+      background: linear-gradient(145deg, #2b3544, #18202c);
+      padding: 14px 16px 18px 16px;
+      border-radius: 20px;
+      box-shadow: 0 15px 35px rgba(0,0,0,0.8), inset 0 1px 2px rgba(255,255,255,0.15), inset 0 -2px 4px rgba(0,0,0,0.5);
+      border: 2px solid #334155;
+      position: relative;
+      user-select: none;
+    }
+    .device-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.65rem; color: #64748b; font-weight: bold; letter-spacing: 1px; }
+    .led-indicator { width: 8px; height: 8px; border-radius: 50%; background: #10b981; box-shadow: 0 0 8px #10b981; transition: 0.3s; }
+    .led-indicator.ap-mode { background: #f59e0b; box-shadow: 0 0 8px #f59e0b; }
+
+    /* Screen Canvas: Đúng tỉ lệ Đứng Dọc 240x320 */
+    .screen-display {
+      width: 240px;
+      height: 320px;
+      background: #000;
+      border-radius: 8px;
+      position: relative;
+      overflow: hidden;
+      border: 1px solid #000;
+      box-shadow: inset 0 0 18px rgba(0,0,0,0.9);
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      color: #fff;
+    }
+    .screen-display::after {
+      content: "";
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 55%);
+      pointer-events: none;
+      z-index: 10;
+    }
+
+    /* Screen Mode: STANDBY DỌC */
+    .screen-standby {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 12px 10px;
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      transition: background 0.3s;
+    }
+    .standby-dim {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: rgba(0,0,0,0.35);
+      z-index: 1;
+      pointer-events: none;
+    }
+    .standby-content {
+      position: relative;
+      z-index: 2;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+    }
+    .screen-topbar { display: flex; justify-content: space-between; font-size: 0.62rem; color: #cbd5e1; text-transform: uppercase; font-weight: 600; text-shadow: 0 1px 2px #000; }
+    
+    /* Clock Area Dọc */
+    .clock-area { text-align: center; margin: auto 0; width: 100%; }
+    .clock-time { font-size: 2.6rem; font-weight: 800; line-height: 1; text-shadow: 0 0 15px currentColor; font-variant-numeric: tabular-nums; }
+    .clock-seconds { font-size: 1.1rem; opacity: 0.85; font-weight: normal; margin-left: 2px; }
+    .clock-date { font-size: 0.72rem; margin-top: 6px; color: #e2e8f0; font-weight: 600; text-shadow: 0 1px 3px rgba(0,0,0,0.8); }
+    
+    .screen-footer { display: flex; flex-direction: column; gap: 4px; align-items: center; width: 100%; font-size: 0.68rem; color: #cbd5e1; }
+    .weather-widget { background: rgba(0,0,0,0.5); padding: 3px 8px; border-radius: 10px; border: 1px solid rgba(255,255,255,0.15); font-size: 0.65rem; text-shadow: 0 1px 2px #000; }
+    .slogan-widget { max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-style: italic; font-size: 0.68rem; color: #f8fafc; text-shadow: 0 1px 3px #000; text-align: center; }
+
+    /* Screen Mode: EMOJI (XiaoZhi Style Dọc) */
+    .screen-emoji {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: #000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 3;
+    }
+    .emoji-eyes { display: flex; gap: 32px; align-items: center; justify-content: center; width: 100%; margin-top: -30px; }
+    .emoji-eye {
+      width: 58px;
+      height: 58px;
+      border-radius: 50%;
+      background: #00e5ff;
+      box-shadow: 0 0 20px #00e5ff;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+    }
+    .emoji-look-left .emoji-eye { transform: translateX(-16px); }
+    .emoji-look-right .emoji-eye { transform: translateX(16px); }
+    .emoji-blink .emoji-eye { height: 8px; border-radius: 4px; box-shadow: 0 0 10px #00e5ff; }
+    .emoji-angry .emoji-eye { background: #ef4444; box-shadow: 0 0 20px #ef4444; }
+    .emoji-angry .emoji-eye::before {
+      content: "";
+      position: absolute;
+      top: -12px; width: 70px; height: 30px;
+      background: #000;
+    }
+    .emoji-angry .emoji-eye.left::before { left: -8px; transform: rotate(20deg); }
+    .emoji-angry .emoji-eye.right::before { right: -8px; transform: rotate(-20deg); }
+    .emoji-confused .emoji-eye {
+      background: transparent; box-shadow: none; font-size: 48px; font-weight: 900;
+      color: #eab308; display: flex; align-items: center; justify-content: center;
+      text-shadow: 0 0 15px #eab308;
+    }
+
+    /* Screen Mode: PC HUD DỌC */
+    .screen-pchud {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: #050508;
+      display: none;
+      flex-direction: column;
+      justify-content: space-around;
+      padding: 16px 14px;
+      z-index: 3;
+    }
+    .hud-header { color: #f43f5e; font-size: 0.82rem; font-weight: bold; letter-spacing: 2px; text-shadow: 0 0 10px #f43f5e; border-bottom: 1px dashed #334155; padding-bottom: 4px; text-align: center; }
+    .hud-row { margin: 6px 0; }
+    .hud-label { display: flex; justify-content: space-between; font-size: 0.68rem; margin-bottom: 3px; font-weight: 600; }
+    .hud-bar-bg { width: 100%; height: 10px; background: #1e293b; border-radius: 3px; overflow: hidden; border: 1px solid #334155; }
+    .hud-bar-fill { height: 100%; transition: width 0.4s; }
+
+    /* Mode Switcher Buttons */
+    .preview-mode-bar { display: flex; gap: 6px; margin-top: 12px; justify-content: center; }
+    .mode-btn { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 6px 12px; border-radius: 20px; font-size: 0.78rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    .mode-btn:hover { background: #334155; color: white; }
+    .mode-btn.active { background: #0284c7; color: white; border-color: #38bdf8; box-shadow: 0 0 10px rgba(2,132,199,0.5); }
+
+    /* Emoji quick buttons */
+    .emoji-bar { display: flex; gap: 6px; margin-top: 8px; justify-content: center; flex-wrap: wrap; }
+    .emoji-pill { background: #0f172a; border: 1px solid #334155; color: #cbd5e1; padding: 4px 10px; border-radius: 14px; font-size: 0.74rem; cursor: pointer; }
+    .emoji-pill.active { background: #0284c7; color: white; border-color: #38bdf8; }
+
+    /* =================== DESIGNER CONTROL PANEL =================== */
+    .designer-panel { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-top: 10px; }
+    .designer-title { font-size: 0.95rem; color: #38bdf8; font-weight: bold; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid #1e293b; padding-bottom: 6px; }
+    .form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    @media (max-width: 520px) { .form-grid { grid-template-columns: 1fr; } }
+    .form-group { margin-bottom: 10px; }
+    label { display: block; margin-bottom: 4px; font-size: 0.8rem; color: #94a3b8; font-weight: 500; }
+    input[type="text"], input[type="password"], select { width: 100%; padding: 8px 10px; background: #161f30; border: 1px solid #334155; border-radius: 6px; color: white; font-size: 0.85rem; outline: none; transition: 0.2s; }
+    input[type="text"]:focus, input[type="password"]:focus, select:focus { border-color: #38bdf8; }
+    
+    /* Preset Color Swatches */
+    .color-row { display: flex; gap: 8px; align-items: center; margin-top: 4px; }
+    .color-swatch { width: 24px; height: 24px; border-radius: 50%; border: 2px solid #334155; cursor: pointer; transition: transform 0.15s; }
+    .color-swatch:hover { transform: scale(1.15); }
+    .color-swatch.selected { border-color: #fff; box-shadow: 0 0 6px currentColor; }
+    input[type="color"] { width: 32px; height: 32px; border: none; border-radius: 6px; background: none; cursor: pointer; }
+
+    /* Visual Wallpaper Thumbnail Picker */
+    .wallpaper-picker-box { margin-top: 8px; }
+    .wallpaper-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(75px, 1fr)); gap: 8px; margin-top: 6px; max-height: 160px; overflow-y: auto; padding: 4px; border: 1px solid #334155; border-radius: 8px; background: #161f30; }
+    .wall-thumb { aspect-ratio: 3/4; border-radius: 6px; border: 2px solid transparent; overflow: hidden; cursor: pointer; position: relative; background: #0b0f19; }
+    .wall-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .wall-thumb:hover { border-color: #38bdf8; }
+    .wall-thumb.active { border-color: #10b981; box-shadow: 0 0 8px #10b981; }
+    .wall-thumb.active::after { content: "✓"; position: absolute; top: 2px; right: 2px; background: #10b981; color: white; border-radius: 50%; width: 14px; height: 14px; font-size: 9px; display: flex; align-items: center; justify-content: center; font-weight: bold; }
+
+    .checkbox-label { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 0.83rem; color: #e2e8f0; margin-top: 6px; }
+    .checkbox-label input { width: 16px; height: 16px; accent-color: #0284c7; }
+
+    /* Action Buttons */
+    .btn-actions { display: flex; gap: 8px; margin-top: 14px; }
+    button.btn-primary { flex: 2; padding: 10px; background: #0284c7; border: none; border-radius: 8px; color: white; font-size: 0.9rem; font-weight: bold; cursor: pointer; transition: 0.2s; display: flex; align-items: center; justify-content: center; gap: 6px; }
+    button.btn-primary:hover { background: #0369a1; box-shadow: 0 0 15px rgba(2,132,199,0.4); }
+    button.btn-secondary { flex: 1; padding: 10px; background: #334155; border: none; border-radius: 8px; color: #cbd5e1; font-size: 0.85rem; font-weight: 600; cursor: pointer; transition: 0.2s; }
+    button.btn-secondary:hover { background: #475569; color: white; }
+
+    /* =================== TAB CHAT XIAOZHI =================== */
+    .chat-container { display: flex; flex-direction: column; height: 460px; background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; overflow: hidden; }
+    .chat-header { background: #161f30; padding: 10px 14px; border-bottom: 1px solid #1e293b; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; }
+    .chat-header-left { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .chat-status-tag { display: inline-flex; align-items: center; gap: 6px; font-size: 0.75rem; padding: 3px 8px; border-radius: 12px; background: #1e293b; color: #94a3b8; font-weight: 600; }
+    .chat-status-tag.online { color: #10b981; background: rgba(16,185,129,0.1); border: 1px solid #10b981; }
+    .chat-status-tag.sim { color: #38bdf8; background: rgba(56,189,248,0.1); border: 1px solid #38bdf8; }
+    .chat-status-tag.error { color: #ef4444; background: rgba(239,68,68,0.1); border: 1px solid #ef4444; }
+
+    /* Segmented Mode Control (Toggle Giữa Mô Phỏng & XiaoZhi Cloud) */
+    .ai-mode-toggle-group {
+      display: inline-flex;
+      background: #0b0f19;
+      padding: 3px;
+      border-radius: 20px;
+      border: 1px solid #334155;
+      gap: 3px;
+    }
+    .ai-mode-btn {
+      background: transparent;
+      border: none;
+      color: #94a3b8;
+      padding: 4px 11px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      border-radius: 14px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .ai-mode-btn:hover { color: #f1f5f9; }
+    .ai-mode-btn.active.sim {
+      background: linear-gradient(135deg, #0284c7, #0369a1);
+      color: #ffffff;
+      box-shadow: 0 0 10px rgba(2,132,199,0.5);
+    }
+    .ai-mode-btn.active.cloud {
+      background: linear-gradient(135deg, #059669, #047857);
+      color: #ffffff;
+      box-shadow: 0 0 10px rgba(5,150,105,0.5);
+    }
+    .ping-indicator {
+      font-size: 0.68rem;
+      color: #34d399;
+      font-weight: normal;
+      margin-left: 2px;
+    }
+
+    .chat-messages { flex: 1; padding: 14px; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; scroll-behavior: smooth; }
+    .chat-msg { display: flex; gap: 8px; max-width: 85%; animation: fadeIn 0.2s ease; }
+    .chat-msg.user { align-self: flex-end; flex-direction: row-reverse; }
+    .chat-msg.bot { align-self: flex-start; }
+
+    .chat-avatar { width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 16px; flex-shrink: 0; }
+    .chat-msg.user .chat-avatar { background: #0284c7; color: white; }
+    .chat-msg.bot .chat-avatar { background: #1e293b; border: 1px solid #38bdf8; color: #38bdf8; }
+
+    .chat-bubble { padding: 10px 14px; border-radius: 14px; font-size: 0.88rem; line-height: 1.45; word-break: break-word; position: relative; }
+    .chat-msg.user .chat-bubble { background: linear-gradient(135deg, #0284c7, #0369a1); color: white; border-bottom-right-radius: 2px; }
+    .chat-msg.bot .chat-bubble { background: #1e293b; color: #f1f5f9; border: 1px solid #334155; border-bottom-left-radius: 2px; }
+    .chat-time { font-size: 0.65rem; color: #64748b; margin-top: 4px; text-align: right; }
+    .chat-emotion-tag { display: inline-block; font-size: 0.7rem; background: rgba(56,189,248,0.15); color: #38bdf8; padding: 2px 6px; border-radius: 4px; margin-bottom: 4px; font-weight: 600; }
+
+    /* Typing animation */
+    .typing-dots { display: flex; gap: 4px; align-items: center; padding: 4px 8px; }
+    .typing-dot { width: 6px; height: 6px; border-radius: 50%; background: #38bdf8; animation: bounce 1.2s infinite ease-in-out; }
+    .typing-dot:nth-child(1) { animation-delay: 0s; }
+    .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+    .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes bounce { 0%, 80%, 100% { transform: translateY(0); opacity: 0.4; } 40% { transform: translateY(-5px); opacity: 1; } }
+
+    /* Quick prompts */
+    .quick-prompts { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; background: #161f30; border-top: 1px solid #1e293b; scrollbar-width: none; }
+    .quick-prompts::-webkit-scrollbar { display: none; }
+    .prompt-pill { background: #1e293b; border: 1px solid #334155; color: #94a3b8; padding: 4px 10px; border-radius: 12px; font-size: 0.74rem; cursor: pointer; white-space: nowrap; transition: 0.2s; }
+    .prompt-pill:hover { background: #334155; color: #38bdf8; border-color: #38bdf8; }
+
+    /* Chat input bar */
+    .chat-input-bar { display: flex; gap: 8px; padding: 10px 14px; background: #161f30; border-top: 1px solid #1e293b; }
+    .chat-input-bar input { flex: 1; padding: 10px 14px; background: #0f172a; border: 1px solid #334155; border-radius: 8px; color: white; font-size: 0.88rem; outline: none; }
+    .chat-input-bar input:focus { border-color: #38bdf8; }
+    .btn-send { padding: 10px 16px; background: #0284c7; border: none; border-radius: 8px; color: white; font-weight: bold; cursor: pointer; transition: 0.2s; display: flex; align-items: center; gap: 6px; font-size: 0.85rem; }
+    .btn-send:hover { background: #0369a1; }
+
+    /* =================== NÉN ẢNH CLIENT-SIDE & QUẢN LÝ ẢNH =================== */
+    .image-storage-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; font-size: 0.85rem; }
+    .storage-progress { width: 100%; height: 6px; background: #1e293b; border-radius: 3px; overflow: hidden; margin-bottom: 12px; }
+    .storage-bar { height: 100%; background: #0284c7; transition: width 0.3s; }
+    .storage-bar.full { background: #ef4444; }
+
+    .compress-preview-card {
+      background: #161f30; border: 1px solid #38bdf8; border-radius: 10px; padding: 12px;
+      margin-top: 12px; display: none; flex-direction: column; align-items: center; gap: 10px;
+    }
+    .compress-preview-img { width: 120px; height: 160px; object-fit: cover; border-radius: 6px; border: 1px solid #475569; }
+    .compress-info { font-size: 0.8rem; text-align: center; color: #cbd5e1; }
+    .compress-highlight { color: #10b981; font-weight: bold; }
+
+    /* Image Grid */
+    .image-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; margin-top: 15px; }
+    .img-card { background: #0f172a; border: 1px solid #334155; border-radius: 8px; overflow: hidden; position: relative; }
+    .img-card.active-img { border: 2px solid #10b981; }
+    .img-card img { width: 100%; height: 140px; object-fit: cover; display: block; }
+    .img-info { padding: 5px; font-size: 0.72rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: #94a3b8; }
+    .img-actions { display: flex; flex-direction: column; gap: 4px; padding: 5px; }
+    .btn-sm { padding: 5px; font-size: 0.72rem; border-radius: 4px; border: none; cursor: pointer; color: white; font-weight: 600; text-align: center; }
+    .btn-danger { background: #ef4444; }
+    .btn-danger:hover { background: #dc2626; }
+    .btn-success { background: #0284c7; }
+    .btn-success:hover { background: #0369a1; }
+    .btn-active-badge { background: #10b981; }
+
+    /* Toast Notification */
+    #toast { position: fixed; bottom: 20px; right: 20px; background: #10b981; color: white; padding: 12px 20px; border-radius: 8px; font-size: 0.85rem; font-weight: 600; box-shadow: 0 10px 25px rgba(0,0,0,0.5); opacity: 0; pointer-events: none; transition: 0.3s transform, 0.3s opacity; transform: translateY(10px); z-index: 100; }
+    #toast.show { opacity: 1; transform: translateY(0); pointer-events: auto; }
+    #toast.error { background: #ef4444; }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <div class="header">
+    <h1>🌌 TRẠM DECOR VŨ TRỤ</h1>
+    <p>ESP32-S3 Multi-Mode Smart Desk Display (Portrait 240x320)</p>
+  </div>
+
+  <!-- Status Bar -->
+  <div class="status-bar">
+    <div class="status-left">
+      <span>IP: <strong id="st-ip" style="color:#38bdf8">Đang kết nối...</strong></span>
+      <span>MAC: <strong id="st-mac" style="color:#a855f7; cursor:pointer;" onclick="copyMacAddress()" title="Bấm để sao chép MAC">Đang đọc...</strong></span>
+      <span>Trạng thái: <span id="st-badge" class="badge bg-offline">Checking</span></span>
+    </div>
+    <div style="font-size: 0.75rem; color: #94a3b8;">
+      Flash: <span id="st-fs">--</span>
+    </div>
+  </div>
+
+  <!-- Nav Tabs -->
+  <div class="tabs" id="nav-tabs">
+    <button class="tab-btn active" onclick="switchTab('screen')">🖥️ Màn Hình Demo & Thiết Kế</button>
+    <button class="tab-btn" onclick="switchTab('chat')">💬 Trò Chuyện XiaoZhi</button>
+    <button class="tab-btn" onclick="switchTab('images')">🖼️ Quản Lý Ảnh (<span id="tab-img-count">0/15</span>)</button>
+    <button class="tab-btn" onclick="switchTab('wifi')">📶 Cài Đặt Wi-Fi</button>
+  </div>
+
+  <!-- ==================== TAB 1: MÀN HÌNH DEMO & THIẾT KẾ ==================== -->
+  <div id="tab-screen" class="section active">
+    <div class="demo-wrapper">
+      <!-- Device Bezel Frame (Màn hình dọc 240x320) -->
+      <div class="device-bezel">
+        <div class="device-header">
+          <span>DECOR ESP32 // 240x320 PORTRAIT</span>
+          <div id="dev-led" class="led-indicator ap-mode" title="Trạng thái LED"></div>
+        </div>
+
+        <!-- Khung màn hình ảo đúng tỉ lệ 240x320 -->
+        <div class="screen-display" id="virtual-screen">
+          
+          <!-- Mode 1: STANDBY SCREEN (DỌC) -->
+          <div class="screen-standby" id="screen-standby">
+            <div class="standby-dim" id="standby-dim-overlay"></div>
+            <div class="standby-content">
+              <!-- Top Bar -->
+              <div class="screen-topbar">
+                <span id="screen-badge-wifi">📶 STA</span>
+                <span id="screen-badge-node">ESP32-S3</span>
+              </div>
+
+              <!-- Main Clock Dọc -->
+              <div class="clock-area" id="clock-container">
+                <div class="clock-time" id="demo-clock">12:00<span class="clock-seconds" id="demo-seconds">:00</span></div>
+                <div class="clock-date" id="demo-date">Thứ Bảy, 12/09/2026</div>
+              </div>
+
+              <!-- Footer Bar -->
+              <div class="screen-footer">
+                <div class="weather-widget" id="demo-weather">🌡️ 28.5°C | 💧 65%</div>
+                <div class="slogan-widget" id="demo-slogan">Trạm Decor Vũ Trụ ✨</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Mode 2: EMOJI SCREEN (XiaoZhi Style Dọc) -->
+          <div class="screen-emoji" id="screen-emoji">
+            <div class="emoji-eyes" id="emoji-box">
+              <div class="emoji-eye left"></div>
+              <div class="emoji-eye right"></div>
+            </div>
+          </div>
+
+          <!-- Mode 3: PC HUD TELEMETRY SCREEN (Dọc) -->
+          <div class="screen-pchud" id="screen-pchud">
+            <div class="hud-header">PC TELEMETRY HUD</div>
+            <div class="hud-row">
+              <div class="hud-label"><span style="color:#38bdf8">CPU USAGE</span><span id="hud-cpu-val" style="color:#38bdf8">68%</span></div>
+              <div class="hud-bar-bg"><div id="hud-cpu-bar" class="hud-bar-fill" style="width:68%; background:#0284c7;"></div></div>
+            </div>
+            <div class="hud-row">
+              <div class="hud-label"><span style="color:#10b981">GPU LOAD</span><span id="hud-gpu-val" style="color:#10b981">52% (60°C)</span></div>
+              <div class="hud-bar-bg"><div id="hud-gpu-bar" class="hud-bar-fill" style="width:52%; background:#10b981;"></div></div>
+            </div>
+            <div class="hud-row">
+              <div class="hud-label"><span style="color:#f59e0b">RAM USAGE</span><span id="hud-ram-val" style="color:#f59e0b">75%</span></div>
+              <div class="hud-bar-bg"><div id="hud-ram-bar" class="hud-bar-fill" style="width:75%; background:#f59e0b;"></div></div>
+            </div>
+            <div class="hud-row" style="margin-top:15px; font-size:0.65rem; color:#64748b; text-align:center;">
+              ESP32-S3 LINK ACTIVE // 240x320
+            </div>
+          </div>
+
+        </div>
+      </div>
+
+      <!-- Quick Mode Switcher -->
+      <div class="preview-mode-bar">
+        <button class="mode-btn active" onclick="setScreenMode('standby')">⏰ Màn Hình Chờ</button>
+        <button class="mode-btn" onclick="setScreenMode('emoji')">😊 Biểu Cảm Emoji</button>
+        <button class="mode-btn" onclick="setScreenMode('pchud')">📊 PC Status HUD</button>
+      </div>
+
+      <!-- Emoji Sub-selector -->
+      <div class="emoji-bar" id="emoji-subcontrols" style="display: none;">
+        <button class="emoji-pill active" onclick="setEmojiState('idle')">Bình Thường</button>
+        <button class="emoji-pill" onclick="setEmojiState('left')">Liếc Trái</button>
+        <button class="emoji-pill" onclick="setEmojiState('right')">Liếc Phải</button>
+        <button class="emoji-pill" onclick="setEmojiState('blink')">Nháy Mắt</button>
+        <button class="emoji-pill" onclick="setEmojiState('angry')">Giận</button>
+        <button class="emoji-pill" onclick="setEmojiState('confused')">Bối Rối (@@)</button>
+      </div>
+    </div>
+
+    <!-- Standby Designer Controls -->
+    <div class="designer-panel" id="designer-settings">
+      <div class="designer-title">
+        <span>🎨 Tùy Chỉnh Thiết Kế Màn Hình Chờ</span>
+        <span style="font-size:0.75rem; color:#94a3b8; font-weight:normal;">Khổ dọc 240x320</span>
+      </div>
+      
+      <!-- HÌNH NỀN MÀN HÌNH CHỜ -->
+      <div style="background: #161f30; padding: 12px; border-radius: 8px; border: 1px solid #1e293b; margin-bottom: 12px;">
+        <label style="font-weight: 600; color: #38bdf8; margin-bottom: 6px;">🖼️ Cài Đặt Hình Nền Màn Hình Chờ:</label>
+        <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+          <select id="cfg-bg-mode" onchange="onBgModeChange()">
+            <option value="gradient-cyber">Mặc định: Gradient Cyber Neon</option>
+            <option value="gradient-nebula">Mặc định: Gradient Vũ Trụ Nebula</option>
+            <option value="gradient-sunset">Mặc định: Gradient Sunset Chill</option>
+            <option value="solid-black">Mặc định: Nền Đen Cổ Điển (OLED/TFT)</option>
+            <option value="image">Sử Dụng Ảnh Nền Đã Tải Lên LittleFS</option>
+          </select>
+        </div>
+
+        <!-- Khung chọn thumbnail ảnh trực quan từ list đã tải lên -->
+        <div id="box-image-picker" class="wallpaper-picker-box" style="display: none;">
+          <label style="font-size: 0.75rem;">Bấm chọn ảnh nền từ danh sách LittleFS (Tối đa 15 ảnh):</label>
+          <div class="wallpaper-grid" id="wallpaper-thumbnails">
+            <!-- Rendered by JS -->
+          </div>
+        </div>
+
+        <!-- Độ tối nền -->
+        <div style="margin-top: 8px;">
+          <label style="font-size:0.75rem;">Độ mờ tối nền (Giúp chữ số nổi bật rõ): <strong id="dim-val" style="color:#38bdf8">35%</strong></label>
+          <input type="range" id="cfg-dim" min="0" max="80" value="35" oninput="updateLivePreview()" style="width:100%; accent-color:#0284c7;">
+        </div>
+      </div>
+
+      <div class="form-grid">
+        <!-- Vị trí đồng hồ -->
+        <div class="form-group">
+          <label>Vị trí hiển thị đồng hồ:</label>
+          <select id="cfg-clock-pos" onchange="updateLivePreview()">
+            <option value="center">Ở Giữa Màn Hình (Mặc định)</option>
+            <option value="top">Lên Phía Trên</option>
+            <option value="bottom">Xuống Phía Dưới</option>
+          </select>
+        </div>
+
+        <!-- Phông chữ đồng hồ -->
+        <div class="form-group">
+          <label>Kiểu số hiển thị:</label>
+          <select id="cfg-clock-style" onchange="updateLivePreview()">
+            <option value="digital">Digital LED (Neon điện tử)</option>
+            <option value="modern">Hiện Đại (Modern Sans)</option>
+            <option value="monospace">Retro Tech Monospace</option>
+          </select>
+        </div>
+
+        <!-- Định dạng giờ -->
+        <div class="form-group">
+          <label>Định dạng giờ:</label>
+          <select id="cfg-clock-fmt" onchange="updateLivePreview()">
+            <option value="24h">24 Giờ (14:30)</option>
+            <option value="12h">12 Giờ (02:30 PM)</option>
+          </select>
+        </div>
+
+        <!-- Màu sắc số đồng hồ -->
+        <div class="form-group">
+          <label>Màu sắc số đồng hồ:</label>
+          <div class="color-row">
+            <div class="color-swatch selected" style="background:#00f0ff" onclick="pickColor('#00f0ff')"></div>
+            <div class="color-swatch" style="background:#10b981" onclick="pickColor('#10b981')"></div>
+            <div class="color-swatch" style="background:#f59e0b" onclick="pickColor('#f59e0b')"></div>
+            <div class="color-swatch" style="background:#ef4444" onclick="pickColor('#ef4444')"></div>
+            <div class="color-swatch" style="background:#a855f7" onclick="pickColor('#a855f7')"></div>
+            <div class="color-swatch" style="background:#ffffff" onclick="pickColor('#ffffff')"></div>
+            <input type="color" id="cfg-clock-color" value="#00f0ff" oninput="updateLivePreview()">
+          </div>
+        </div>
+
+        <!-- Slogan / Thông điệp -->
+        <div class="form-group" style="grid-column: 1 / -1;">
+          <label>Thông điệp / Slogan decor:</label>
+          <input type="text" id="cfg-slogan" value="Trạm Decor Vũ Trụ ✨" maxlength="35" oninput="updateLivePreview()">
+        </div>
+      </div>
+
+      <!-- Tùy chọn Checkbox -->
+      <div style="display:flex; gap:16px; flex-wrap:wrap; margin:10px 0;">
+        <label class="checkbox-label">
+          <input type="checkbox" id="cfg-show-sec" checked onchange="updateLivePreview()">
+          Hiện giây (:00)
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="cfg-show-date" checked onchange="updateLivePreview()">
+          Hiện thứ & ngày
+        </label>
+        <label class="checkbox-label">
+          <input type="checkbox" id="cfg-show-weather" checked onchange="updateLivePreview()">
+          Hiện Widget Nhiệt/Ẩm
+        </label>
+      </div>
+
+      <!-- Nút Lưu & Áp Dụng -->
+      <div class="btn-actions">
+        <button class="btn-primary" onclick="saveStandbyConfig()">💾 Lưu & Áp Dụng Lên ESP32</button>
+        <button class="btn-secondary" onclick="loadStandbyConfig()">🔄 Tải Lại</button>
+        <button class="btn-secondary" onclick="resetDefaultConfig()">✨ Mặc Định</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 2: TRÒ CHUYỆN XIAOZHI AI ==================== -->
+  <div id="tab-chat" class="section">
+    <!-- Card Mã Xác Thực Thiết Bị XiaoZhi (Auth / Binding Code) -->
+    <div id="card-xiaozhi-auth" class="designer-panel" style="background: linear-gradient(145deg, #1e1b4b, #0f172a); border: 2px solid #818cf8; margin-bottom: 14px; box-shadow: 0 0 25px rgba(129,140,248,0.25);">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+        <span style="font-weight: 700; color: #a5b4fc; font-size: 0.95rem; display: flex; align-items: center; gap: 6px;">
+          🔑 MÃ XÁC THỰC THÊM THIẾT BỊ (XIAOZHI AUTH CODE)
+        </span>
+        <span id="auth-code-status" class="badge" style="background:#4338ca; color:#e0e7ff;">Chờ kết nối</span>
+      </div>
+      <p style="font-size: 0.78rem; color: #cbd5e1; margin-bottom: 10px; line-height: 1.45;">
+        Dùng <strong>Mã Xác Thực</strong> này và <strong>Địa chỉ MAC</strong> của bạn để thêm thiết bị trên trang chủ <a href="https://xiaozhi.me" target="_blank" style="color:#38bdf8; font-weight:bold; text-decoration:underline;">xiaozhi.me</a>.
+      </p>
+
+      <!-- Khung hiển thị Mã Auth lớn dạng Digital OTP -->
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; margin: 10px 0;">
+        <div id="auth-code-display" style="font-family: 'Courier New', monospace; font-size: 2.2rem; font-weight: 900; letter-spacing: 6px; color: #38bdf8; background: #0b0f19; padding: 10px 24px; border-radius: 10px; border: 2px dashed #818cf8; text-shadow: 0 0 15px #38bdf8; min-width: 200px; text-align: center;">
+          ------
+        </div>
+        <span id="auth-code-hint" style="font-size:0.72rem; color:#94a3b8;">Bấm nút "Lấy Mã Từ XiaoZhi" bên dưới để nhận mã từ server</span>
+      </div>
+
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button class="btn-primary" style="flex: 1.2; padding: 9px 12px; font-size: 0.82rem; background: #4f46e5;" onclick="fetchXiaoZhiAuthCode()">
+          ⚡ Lấy Mã Từ XiaoZhi
+        </button>
+        <button class="btn-secondary" style="flex: 1; padding: 9px 12px; font-size: 0.82rem;" onclick="copyAuthCode()">
+          📋 Sao Chép Mã
+        </button>
+        <button class="btn-secondary" style="flex: 1; padding: 9px 12px; font-size: 0.82rem;" onclick="copyMacAddress()">
+          📋 Sao Chép MAC
+        </button>
+        <button class="btn-secondary" style="padding: 9px 12px; font-size: 0.82rem;" onclick="simulateAuthCodeForDemo()" title="Tạo mã 6 số ngẫu nhiên để thử nghiệm ngay">
+          🎲 Mã Thử Nghiệm
+        </button>
+        <a href="https://xiaozhi.me" target="_blank" class="btn-secondary" style="flex: 1; padding: 9px 12px; font-size: 0.82rem; text-decoration:none; text-align:center; display:flex; align-items:center; justify-content:center; background:#0284c7; color:white;">
+          🌐 xiaozhi.me ↗
+        </a>
+      </div>
+
+      <!-- Nhật ký nhận từ XiaoZhi (WebSocket Logs) -->
+      <div style="margin-top: 10px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.72rem; color:#94a3b8; cursor:pointer;" onclick="toggleWsLogs()">
+          <span>📜 Nhật ký phản hồi từ XiaoZhi Server (WebSocket) <span id="ws-log-arrow">▼</span></span>
+          <span id="ws-last-event" style="color:#64748b;">Chưa có dữ liệu</span>
+        </div>
+        <pre id="ws-raw-logs" style="display:none; background:#050811; color:#10b981; padding:8px; border-radius:6px; font-size:0.7rem; max-height:110px; overflow-y:auto; margin-top:6px; border:1px solid #1e293b; white-space:pre-wrap;"></pre>
+      </div>
+    </div>
+
+    <!-- Panel Cấu Hình XiaoZhi (Có thể ẩn/hiện) -->
+    <div id="panel-ai-config" class="designer-panel" style="display: none; margin-bottom: 14px;">
+      <div class="designer-title">
+        <span>⚙️ Thiết Lập Kết Nối XiaoZhi Cloud</span>
+        <button class="btn-secondary" style="padding:4px 10px; font-size:0.75rem;" onclick="toggleAIConfigPanel()">Đóng</button>
+      </div>
+      <div class="form-grid">
+        <div class="form-group" style="grid-column: 1 / -1;">
+          <label>WebSocket Endpoint:</label>
+          <input type="text" id="ai-cfg-endpoint" value="wss://api.xiaozhi.me/mcp/" placeholder="wss://api.xiaozhi.me/mcp/ hoặc wss://api.tenclass.net/xiaozhi/v1/">
+          <span style="font-size:0.71rem; color:#94a3b8; display:block; margin-top:3px;">💡 Mẹo: Với Token từ xiaozhi.me (bắt đầu bằng <code>eyJ...</code>), dùng endpoint: <strong>wss://api.xiaozhi.me/mcp/</strong></span>
+        </div>
+        <div class="form-group">
+          <label>Token Xác Thực (Authorization Token):</label>
+          <input type="password" id="ai-cfg-token" placeholder="Dán mã Token XiaoZhi (eyJ...) của bạn">
+        </div>
+        <div class="form-group">
+          <label>Device MAC / ID (Dùng đăng ký trên XiaoZhi):</label>
+          <div style="display: flex; gap: 6px;">
+            <input type="text" id="ai-cfg-mac" placeholder="Đang đọc MAC từ ESP32..." readonly style="background:#0f172a; color:#38bdf8; font-weight:bold; letter-spacing:0.5px;">
+            <button class="btn-secondary" style="padding:8px 12px; font-size:0.75rem; white-space:nowrap;" onclick="copyMacAddress()">📋 Sao Chép</button>
+          </div>
+        </div>
+      </div>
+      <div style="display: flex; gap: 8px; margin-top: 10px;">
+        <button class="btn-primary" style="flex:2;" onclick="saveAIConfig()">💾 Lưu Cấu Hình Lên ESP32</button>
+        <button class="btn-secondary" style="flex:1;" onclick="connectXiaoZhiWebSocket()">⚡ Kết Nối Ngay</button>
+      </div>
+    </div>
+
+    <!-- Khung Cửa Sổ Trò Chuyện (Chat Container) -->
+    <div class="chat-container">
+      <!-- Chat Header -->
+      <div class="chat-header">
+        <div class="chat-header-left">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-weight: 700; color: #38bdf8; font-size: 0.9rem;">🤖 XiaoZhi Assistant</span>
+            <span id="chat-status-badge" class="chat-status-tag sim">⚡ Chế Độ Mô Phỏng</span>
+          </div>
+
+          <!-- Chuyển đổi chế độ: Mô Phỏng Thông Minh <---> XiaoZhi Cloud AI -->
+          <div class="ai-mode-toggle-group">
+            <button id="btn-mode-sim" class="ai-mode-btn active sim" onclick="setAIMode('sim')" title="Chế độ Giả lập Offline với kịch bản phản hồi nhanh">
+              ⚡ Mô Phỏng
+            </button>
+            <button id="btn-mode-cloud" class="ai-mode-btn" onclick="setAIMode('cloud')" title="Kết nối trực tiếp tới XiaoZhi Cloud AI qua WebSocket">
+              🌐 XiaoZhi Cloud
+            </button>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 6px; align-items: center;">
+          <button class="btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="toggleAIConfigPanel()">⚙️ Cấu Hình</button>
+          <button class="btn-secondary" style="padding: 4px 10px; font-size: 0.75rem;" onclick="clearChatMessages()">🗑️ Xóa Chat</button>
+        </div>
+      </div>
+
+      <!-- Messages Area -->
+      <div class="chat-messages" id="chat-messages-box">
+        <!-- Message Bot Mặc Định -->
+        <div class="chat-msg bot">
+          <div class="chat-avatar">🤖</div>
+          <div class="chat-bubble">
+            <div class="chat-emotion-tag">✨ Sẵn sàng</div>
+            <div>Xin chào! Mình là trợ lý AI XiaoZhi của Trạm Decor Vũ Trụ 🌌. Bạn có câu hỏi nào hoặc muốn mình đổi giao diện không?</div>
+            <div class="chat-time" id="chat-init-time">Vừa xong</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Quick Suggestion Prompts -->
+      <div class="quick-prompts">
+        <div class="prompt-pill" onclick="sendQuickPrompt('Thời tiết hôm nay thế nào?')">🌤️ Thời tiết hôm nay?</div>
+        <div class="prompt-pill" onclick="sendQuickPrompt('Kể một câu chuyện vui ngắn')">😄 Kể chuyện cười</div>
+        <div class="prompt-pill" onclick="sendQuickPrompt('Đổi biểu cảm sang Bối Rối @@')">🎭 Đổi biểu cảm @@</div>
+        <div class="prompt-pill" onclick="sendQuickPrompt('Đổi biểu cảm sang Giận Dữ')">😡 Đổi biểu cảm Giận</div>
+        <div class="prompt-pill" onclick="sendQuickPrompt('Giới thiệu về Trạm Decor ESP32')">🛸 Giới thiệu Trạm Decor</div>
+        <div class="prompt-pill" onclick="sendQuickPrompt('Bây giờ là mấy giờ rồi?')">⏰ Mấy giờ rồi?</div>
+      </div>
+
+      <!-- Input Bar -->
+      <div class="chat-input-bar">
+        <input type="text" id="chat-input-text" placeholder="Nhập câu hỏi cho XiaoZhi... (Nhấn Enter để gửi)" onkeydown="if(event.key==='Enter') sendChatMessage()">
+        <button class="btn-send" onclick="sendChatMessage()">
+          <span>Gửi</span> ➤
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 3: QUẢN LÝ ẢNH & NÉN TỰ ĐỘNG ==================== -->
+  <div id="tab-images" class="section">
+    <div class="designer-panel">
+      <div class="designer-title">
+        <span>📤 Tải & Nén Ảnh Mới Làm Hình Nền</span>
+        <span id="storage-badge" style="font-size:0.75rem; color:#38bdf8;">0/15 Ảnh</span>
+      </div>
+
+      <!-- Storage limit progress bar -->
+      <div class="image-storage-header">
+        <span style="font-size:0.75rem; color:#94a3b8;">Giới hạn lưu trữ trên ESP32: Tối đa 15 ảnh (tiết kiệm bộ nhớ)</span>
+        <strong id="storage-percent" style="font-size:0.75rem; color:#38bdf8;">0%</strong>
+      </div>
+      <div class="storage-progress">
+        <div id="storage-bar-fill" class="storage-bar" style="width: 0%;"></div>
+      </div>
+
+      <!-- Warning if reached 15 images -->
+      <div id="upload-limit-warning" style="display:none; background:#7f1d1d; border:1px solid #ef4444; color:#fecaca; padding:10px; border-radius:6px; font-size:0.8rem; margin-bottom:12px;">
+        ⚠️ Đã đạt giới hạn tối đa 15 ảnh! Vui lòng xóa bớt ảnh cũ bên dưới để giải phóng bộ nhớ trước khi tải thêm.
+      </div>
+
+      <div id="upload-controls-box">
+        <p style="font-size:0.75rem; color:#94a3b8; margin-bottom:8px;">
+          ⚡ <strong>Tự động nén ảnh client-side:</strong> Hệ thống tự động cắt và nén ảnh về khổ dọc chuẩn (dưới ~256KB), đảm bảo hiển thị sắc nét trên màn 240x320 mà upload siêu nhanh qua Wi-Fi.
+        </p>
+        <input type="file" id="file-input" accept="image/*" onchange="handleImageSelection(event)" style="width:100%; padding:8px; background:#161f30; border:1px solid #334155; border-radius:6px; color:#cbd5e1;">
+      </div>
+
+      <!-- Preview card sau khi nén ảnh trong browser -->
+      <div id="compress-preview-card" class="compress-preview-card">
+        <img id="compress-thumb" class="compress-preview-img" alt="Compressed Preview">
+        <div class="compress-info">
+          <div>Dung lượng gốc: <span id="info-orig-size">--</span></div>
+          <div>Dung lượng sau nén: <span id="info-comp-size" class="compress-highlight">--</span></div>
+          <div style="font-size:0.72rem; color:#94a3b8; margin-top:2px;">(Đã tối ưu tỉ lệ dọc 240x320 chuẩn màn hình)</div>
+        </div>
+        <div style="display:flex; gap:8px; width:100%;">
+          <button class="btn-primary" style="flex:2;" onclick="confirmAndUploadCompressed()">🚀 Xác Nhận Tải Lên ESP32</button>
+          <button class="btn-secondary" style="flex:1;" onclick="cancelCompression()">Hủy</button>
+        </div>
+      </div>
+    </div>
+
+    <h3 style="font-size:0.95rem; color:#38bdf8; margin-top:20px;">🖼️ Danh Sách Ảnh Đã Lưu Trên LittleFS (<span id="list-count-label">0</span>/15)</h3>
+    <div id="image-list" class="image-grid">
+      <!-- Loaded dynamically via JS -->
+    </div>
+  </div>
+
+  <!-- ==================== TAB 4: QUẢN LÝ WI-FI ==================== -->
+  <div id="tab-wifi" class="section">
+    <div class="designer-panel">
+      <div class="designer-title">
+        <span>📶 Kết Nối Wi-Fi Cho ESP32</span>
+        <span style="font-size:0.75rem; color:#94a3b8; font-weight:normal;">Băng tần 2.4 GHz</span>
+      </div>
+
+      <!-- Hướng dẫn phát hotspot điện thoại -->
+      <div style="background: rgba(56,189,248,0.06); border: 1px solid rgba(56,189,248,0.2); border-radius: 8px; padding: 10px 12px; margin-bottom: 12px; font-size: 0.78rem; color: #cbd5e1; line-height: 1.45;">
+        💡 <strong>Nếu dùng Điểm Phát Sóng (Hotspot) điện thoại:</strong><br>
+        • ESP32 chỉ bắt được sóng <strong>2.4 GHz</strong> (không nhận được 5 GHz).<br>
+        • <strong>iPhone:</strong> Bật mục <em>"Tối đa hoá tính tương thích" (Maximize Compatibility)</em> trong Cài đặt Điểm phát sóng cá nhân.<br>
+        • <strong>Android:</strong> Đổi Băng tần AP sang <em>2.4 GHz</em>.<br>
+        • Nếu quét không thấy, bạn có thể <strong>tự gõ tên Wi-Fi</strong> vào ô bên dưới!
+      </div>
+
+      <div class="form-group">
+        <button id="btn-scan-wifi" class="btn-secondary" style="width:100%; margin-bottom:12px; display:flex; align-items:center; justify-content:center; gap:6px;" onclick="scanWifi()">
+          <span>🔍 Quét Danh Sách Mạng Wi-Fi Khả Dụng</span>
+        </button>
+      </div>
+      <div class="form-group">
+        <label>Chọn từ danh sách đã quét:</label>
+        <select id="wifi-select" onchange="onWifiSelectChange()"><option value="">Bấm nút quét ở trên để tìm mạng...</option></select>
+      </div>
+      <div class="form-group">
+        <label>Hoặc tự nhập tên Wi-Fi / Hotspot (Nếu không quét được):</label>
+        <input type="text" id="wifi-ssid-manual" placeholder="Nhập chính xác tên mạng Wi-Fi của bạn">
+      </div>
+      <div class="form-group">
+        <label>Mật khẩu Wi-Fi:</label>
+        <input type="password" id="wifi-pass" placeholder="Nhập mật khẩu Wi-Fi (để trống nếu không có mật khẩu)">
+      </div>
+      <button class="btn-primary" style="width:100%; margin-top:10px;" onclick="connectWifi()">⚡ Lưu & Kết Nối (ESP32 Khởi Động Lại)</button>
+    </div>
+  </div>
+</div>
+
+<!-- Toast Notification -->
+<div id="toast">Thông báo</div>
+
+<!-- Hidden Canvas for Client-side Compression -->
+<canvas id="compress-canvas" style="display: none;"></canvas>
+
+<script>
+  let isConnected = false;
+  let activeImageName = "";
+  let currentScreenMode = 'standby';
+  let currentEmoji = 'idle';
+  let uploadedImages = [];
+  let compressedBlobToUpload = null;
+  const MAX_IMAGES = 15;
+
+  // XiaoZhi AI WebSocket state & Mode
+  let xiaoZhiSocket = null;
+  let isXiaoZhiConnected = false;
+  let currentAIMode = 'sim'; // 'sim' (Mô phỏng) hoặc 'cloud' (XiaoZhi Cloud AI trực tiếp)
+  let xiaoZhiPingTimer = null;
+  let lastPingTime = 0;
+  let xiaoZhiReconnectTimer = null;
+  let aiConfig = { endpoint: "wss://api.tenclass.net/xiaozhi/v1/", token: "test-token", mac: "" };
+  let currentAuthCode = "";
+
+  // ================= 1. TRẠNG THÁI HỆ THỐNG & ĐỒNG HỒ =================
+  async function checkStatus() {
+    try {
+      const res = await fetch('/api/system/status');
+      const data = await res.json();
+      
+      document.getElementById('st-ip').innerText = data.ip || '192.168.4.1';
+      const badge = document.getElementById('st-badge');
+      const led = document.getElementById('dev-led');
+      const wifiBadge = document.getElementById('screen-badge-wifi');
+      isConnected = data.connected;
+      activeImageName = data.active_img || "";
+
+      if (data.mac) {
+        document.getElementById('st-mac').innerText = data.mac;
+        document.getElementById('ai-cfg-mac').value = data.mac;
+      }
+
+      if (data.fs_used_mb !== undefined && data.fs_total_mb !== undefined) {
+        document.getElementById('st-fs').innerText = `${data.fs_used_mb.toFixed(1)} / ${data.fs_total_mb.toFixed(1)} MB`;
+      }
+
+      if (isConnected) {
+        badge.innerText = "Đã Nối Mạng (STA)";
+        badge.className = "badge bg-online";
+        led.className = "led-indicator";
+        wifiBadge.innerText = "📶 STA";
+      } else {
+        badge.innerText = "Điểm Phát (AP Mode)";
+        badge.className = "badge bg-offline";
+        led.className = "led-indicator ap-mode";
+        wifiBadge.innerText = "📡 AP";
+      }
+    } catch (e) {
+      console.warn("Chế độ Demo / Offline:", e);
+      document.getElementById('st-ip').innerText = '192.168.4.1 (Simulated)';
+      document.getElementById('st-badge').innerText = 'AP Mode (Demo)';
+    }
+  }
+
+  // Tự động chạy đồng hồ thời gian thực
+  function startLiveClock() {
+    function updateClock() {
+      const now = new Date();
+      const fmt = document.getElementById('cfg-clock-fmt').value;
+      const showSec = document.getElementById('cfg-show-sec').checked;
+      
+      let hours = now.getHours();
+      let minutes = String(now.getMinutes()).padStart(2, '0');
+      let seconds = String(now.getSeconds()).padStart(2, '0');
+      let ampm = "";
+
+      if (fmt === '12h') {
+        ampm = hours >= 12 ? ' PM' : ' AM';
+        hours = hours % 12 || 12;
+      }
+      hours = String(hours).padStart(2, '0');
+
+      document.getElementById('demo-clock').innerHTML = `${hours}:${minutes}${ampm}<span class="clock-seconds" id="demo-seconds">${showSec ? ':' + seconds : ''}</span>`;
+
+      // Cập nhật ngày tháng Tiếng Việt
+      const daysVi = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+      const dayName = daysVi[now.getDay()];
+      const day = String(now.getDate()).padStart(2, '0');
+      const month = String(now.getMonth() + 1).padStart(2, '0');
+      const year = now.getFullYear();
+      document.getElementById('demo-date').innerText = `${dayName}, ${day}/${month}/${year}`;
+    }
+    updateClock();
+    setInterval(updateClock, 1000);
+  }
+
+  // ================= 2. QUẢN LÝ CHẾ ĐỘ MÀN HÌNH (MODE SWITCHER DỌC) =================
+  function setScreenMode(mode) {
+    currentScreenMode = mode;
+    document.querySelectorAll('.mode-btn').forEach(btn => btn.classList.remove('active'));
+    
+    document.getElementById('screen-standby').style.display = 'none';
+    document.getElementById('screen-emoji').style.display = 'none';
+    document.getElementById('screen-pchud').style.display = 'none';
+    document.getElementById('emoji-subcontrols').style.display = 'none';
+    document.getElementById('designer-settings').style.display = (mode === 'standby') ? 'block' : 'none';
+
+    if (mode === 'standby') {
+      document.querySelectorAll('.mode-btn')[0].classList.add('active');
+      document.getElementById('screen-standby').style.display = 'flex';
+    } else if (mode === 'emoji') {
+      document.querySelectorAll('.mode-btn')[1].classList.add('active');
+      document.getElementById('screen-emoji').style.display = 'flex';
+      document.getElementById('emoji-subcontrols').style.display = 'flex';
+      setEmojiState(currentEmoji);
+    } else if (mode === 'pchud') {
+      document.querySelectorAll('.mode-btn')[2].classList.add('active');
+      document.getElementById('screen-pchud').style.display = 'flex';
+      startHudSim();
+    }
+  }
+
+  // ================= 3. QUẢN LÝ BIỂU CẢM EMOJI DỌC (XIAOZHI) =================
+  function setEmojiState(state) {
+    currentEmoji = state;
+    const box = document.getElementById('emoji-box');
+    const pills = document.querySelectorAll('.emoji-pill');
+    
+    pills.forEach(p => p.classList.remove('active'));
+    const stateMap = { 'idle': 0, 'left': 1, 'right': 2, 'blink': 3, 'angry': 4, 'confused': 5 };
+    if (stateMap[state] !== undefined) pills[stateMap[state]].classList.add('active');
+
+    box.className = 'emoji-eyes';
+    const leftEye = box.children[0];
+    const rightEye = box.children[1];
+    leftEye.innerHTML = '';
+    rightEye.innerHTML = '';
+
+    if (state === 'idle') {
+      // Mặc định
+    } else if (state === 'left') {
+      box.classList.add('emoji-look-left');
+    } else if (state === 'right') {
+      box.classList.add('emoji-look-right');
+    } else if (state === 'blink') {
+      box.classList.add('emoji-blink');
+    } else if (state === 'angry') {
+      box.classList.add('emoji-angry');
+    } else if (state === 'confused') {
+      box.classList.add('emoji-confused');
+      leftEye.innerText = '@';
+      rightEye.innerText = '@';
+    }
+  }
+
+  // ================= 4. GIẢ LẬP PC HUD TELEMETRY DỌC =================
+  let hudInterval = null;
+  function startHudSim() {
+    if (hudInterval) clearInterval(hudInterval);
+    hudInterval = setInterval(() => {
+      if (currentScreenMode !== 'pchud') {
+        clearInterval(hudInterval);
+        return;
+      }
+      const cpu = Math.floor(45 + Math.random() * 45);
+      const gpu = Math.floor(40 + Math.random() * 40);
+      const ram = Math.floor(65 + Math.random() * 20);
+
+      document.getElementById('hud-cpu-val').innerText = `${cpu}%`;
+      document.getElementById('hud-cpu-bar').style.width = `${cpu}%`;
+
+      document.getElementById('hud-gpu-val').innerText = `${gpu}% (${50 + Math.floor(gpu*0.25)}°C)`;
+      document.getElementById('hud-gpu-bar').style.width = `${gpu}%`;
+
+      document.getElementById('hud-ram-val').innerText = `${ram}% (${((ram/100)*16).toFixed(1)}/16G)`;
+      document.getElementById('hud-ram-bar').style.width = `${ram}%`;
+    }, 1500);
+  }
+
+  // ================= 5. TÙY CHỈNH THIẾT KẾ MÀN HÌNH CHỜ DỌC =================
+  function pickColor(hex) {
+    document.getElementById('cfg-clock-color').value = hex;
+    document.querySelectorAll('.color-swatch').forEach(sw => {
+      sw.classList.toggle('selected', sw.style.backgroundColor === hex || rgbToHex(sw.style.backgroundColor) === hex);
+    });
+    updateLivePreview();
+  }
+
+  function rgbToHex(rgb) {
+    if (!rgb || !rgb.startsWith('rgb')) return rgb;
+    const parts = rgb.match(/\d+/g);
+    return '#' + parts.slice(0, 3).map(x => parseInt(x).toString(16).padStart(2, '0')).join('');
+  }
+
+  function onBgModeChange() {
+    const mode = document.getElementById('cfg-bg-mode').value;
+    document.getElementById('box-image-picker').style.display = (mode === 'image') ? 'block' : 'none';
+    updateLivePreview();
+  }
+
+  function selectStandbyWallpaper(imageName) {
+    activeImageName = imageName;
+    document.getElementById('cfg-bg-mode').value = 'image';
+    onBgModeChange();
+    renderWallpaperThumbnails();
+    updateLivePreview();
+    showToast("Đã chọn ảnh làm nền màn hình chờ!");
+  }
+
+  function renderWallpaperThumbnails() {
+    const box = document.getElementById('wallpaper-thumbnails');
+    box.innerHTML = '';
+    if (uploadedImages.length === 0) {
+      box.innerHTML = '<p style="font-size:0.75rem; color:#94a3b8; grid-column:1/-1; padding:8px;">Chưa có ảnh nào trên LittleFS. Hãy vào tab "Quản Lý Ảnh" để tải ảnh lên!</p>';
+      return;
+    }
+
+    uploadedImages.forEach(img => {
+      const isSelected = (img.name === activeImageName);
+      box.innerHTML += `
+        <div class="wall-thumb ${isSelected ? 'active' : ''}" onclick="selectStandbyWallpaper('${img.name}')" title="${img.name.replace('/','')}">
+          <img src="${img.name}" alt="wallpaper" loading="lazy">
+        </div>
+      `;
+    });
+  }
+
+  function updateLivePreview() {
+    const clockColor = document.getElementById('cfg-clock-color').value;
+    const clockPos = document.getElementById('cfg-clock-pos').value;
+    const clockStyle = document.getElementById('cfg-clock-style').value;
+    const showDate = document.getElementById('cfg-show-date').checked;
+    const showWeather = document.getElementById('cfg-show-weather').checked;
+    const sloganText = document.getElementById('cfg-slogan').value;
+    const bgMode = document.getElementById('cfg-bg-mode').value;
+    const dimVal = document.getElementById('cfg-dim').value;
+
+    // 1. Áp dụng màu chữ & phông chữ
+    const clockElem = document.getElementById('demo-clock');
+    clockElem.style.color = clockColor;
+    clockElem.style.textShadow = `0 0 15px ${clockColor}`;
+
+    if (clockStyle === 'digital') {
+      clockElem.style.fontFamily = "'Courier New', Courier, monospace";
+      clockElem.style.letterSpacing = "2px";
+    } else if (clockStyle === 'modern') {
+      clockElem.style.fontFamily = "'Segoe UI', system-ui, sans-serif";
+      clockElem.style.letterSpacing = "0px";
+    } else {
+      clockElem.style.fontFamily = "monospace";
+      clockElem.style.letterSpacing = "3px";
+    }
+
+    // 2. Vị trí đồng hồ
+    const clockContainer = document.getElementById('clock-container');
+    if (clockPos === 'top') {
+      clockContainer.style.margin = "15px 0 auto 0";
+    } else if (clockPos === 'bottom') {
+      clockContainer.style.margin = "auto 0 15px 0";
+    } else {
+      clockContainer.style.margin = "auto 0";
+    }
+
+    // 3. Hiển thị ngày tháng & weather
+    document.getElementById('demo-date').style.display = showDate ? 'block' : 'none';
+    document.getElementById('demo-weather').style.display = showWeather ? 'block' : 'none';
+    document.getElementById('demo-slogan').innerText = sloganText || '';
+
+    // 4. Lớp phủ làm tối
+    document.getElementById('dim-val').innerText = `${dimVal}%`;
+    document.getElementById('standby-dim-overlay').style.background = `rgba(0,0,0,${dimVal / 100})`;
+
+    // 5. Nền màn hình chờ
+    const screenStandby = document.getElementById('screen-standby');
+    if (bgMode === 'gradient-cyber') {
+      screenStandby.style.backgroundImage = 'linear-gradient(180deg, #0b132b 0%, #1c2541 50%, #3a0ca3 100%)';
+    } else if (bgMode === 'gradient-nebula') {
+      screenStandby.style.backgroundImage = 'linear-gradient(180deg, #2b0938 0%, #0f172a 60%, #1e1b4b 100%)';
+    } else if (bgMode === 'gradient-sunset') {
+      screenStandby.style.backgroundImage = 'linear-gradient(180deg, #3d1308 0%, #1e1b4b 70%, #0f172a 100%)';
+    } else if (bgMode === 'solid-black') {
+      screenStandby.style.backgroundImage = 'none';
+      screenStandby.style.backgroundColor = '#000000';
+    } else if (bgMode === 'image') {
+      if (activeImageName) {
+        screenStandby.style.backgroundImage = `url('${activeImageName}')`;
+      } else {
+        screenStandby.style.backgroundImage = 'linear-gradient(180deg, #0f172a, #1e293b)';
+      }
+    }
+  }
+
+  // ================= 6. LƯU & TẢI CẤU HÌNH VỀ ESP32 =================
+  async function saveStandbyConfig() {
+    const config = {
+      clock_pos: document.getElementById('cfg-clock-pos').value,
+      clock_style: document.getElementById('cfg-clock-style').value,
+      clock_format: document.getElementById('cfg-clock-fmt').value,
+      clock_color: document.getElementById('cfg-clock-color').value,
+      bg_mode: document.getElementById('cfg-bg-mode').value,
+      bg_image: activeImageName,
+      dim_overlay: parseInt(document.getElementById('cfg-dim').value),
+      custom_text: document.getElementById('cfg-slogan').value,
+      show_seconds: document.getElementById('cfg-show-sec').checked,
+      show_date: document.getElementById('cfg-show-date').checked,
+      show_weather: document.getElementById('cfg-show-weather').checked,
+      temp: 28.5,
+      humidity: 65
+    };
+
+    try {
+      showToast("Đang lưu cấu hình lên ESP32...", false);
+      const res = await fetch('/api/screen/standby', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(config)
+      });
+      const data = await res.json();
+      showToast(data.message || "✅ Đã lưu cấu hình lên ESP32 thành công!", false);
+    } catch (e) {
+      console.error(e);
+      showToast("Lưu offline thành công (Demo mode)", false);
+    }
+  }
+
+  async function loadStandbyConfig() {
+    try {
+      const res = await fetch('/api/screen/standby');
+      if (!res.ok) throw new Error("HTTP error");
+      const cfg = await res.json();
+      
+      if (cfg.clock_pos) document.getElementById('cfg-clock-pos').value = cfg.clock_pos;
+      if (cfg.clock_style) document.getElementById('cfg-clock-style').value = cfg.clock_style;
+      if (cfg.clock_format) document.getElementById('cfg-clock-fmt').value = cfg.clock_format;
+      if (cfg.clock_color) pickColor(cfg.clock_color);
+      if (cfg.bg_mode) document.getElementById('cfg-bg-mode').value = cfg.bg_mode;
+      if (cfg.dim_overlay !== undefined) document.getElementById('cfg-dim').value = cfg.dim_overlay;
+      if (cfg.custom_text !== undefined) document.getElementById('cfg-slogan').value = cfg.custom_text;
+      if (cfg.show_seconds !== undefined) document.getElementById('cfg-show-sec').checked = cfg.show_seconds;
+      if (cfg.show_date !== undefined) document.getElementById('cfg-show-date').checked = cfg.show_date;
+      if (cfg.show_weather !== undefined) document.getElementById('cfg-show-weather').checked = cfg.show_weather;
+      if (cfg.bg_image) activeImageName = cfg.bg_image;
+
+      onBgModeChange();
+      renderWallpaperThumbnails();
+      updateLivePreview();
+    } catch (e) {
+      console.warn("Dùng cấu hình mặc định.");
+    }
+  }
+
+  function resetDefaultConfig() {
+    document.getElementById('cfg-clock-pos').value = 'center';
+    document.getElementById('cfg-clock-style').value = 'digital';
+    document.getElementById('cfg-clock-fmt').value = '24h';
+    pickColor('#00f0ff');
+    document.getElementById('cfg-bg-mode').value = 'gradient-cyber';
+    document.getElementById('cfg-dim').value = 35;
+    document.getElementById('cfg-slogan').value = 'Trạm Decor Vũ Trụ ✨';
+    document.getElementById('cfg-show-sec').checked = true;
+    document.getElementById('cfg-show-date').checked = true;
+    document.getElementById('cfg-show-weather').checked = true;
+    onBgModeChange();
+    updateLivePreview();
+    showToast("Đã khôi phục thiết kế mặc định!");
+  }
+
+  // ================= 7. QUẢN LÝ TAB & TOAST =================
+  function switchTab(tabName) {
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+    
+    if (tabName === 'screen') {
+      document.querySelectorAll('.tab-btn')[0].classList.add('active');
+      document.getElementById('tab-screen').classList.add('active');
+      renderWallpaperThumbnails();
+    } else if (tabName === 'chat') {
+      document.querySelectorAll('.tab-btn')[1].classList.add('active');
+      document.getElementById('tab-chat').classList.add('active');
+      scrollChatToBottom();
+    } else if (tabName === 'images') {
+      document.querySelectorAll('.tab-btn')[2].classList.add('active');
+      document.getElementById('tab-images').classList.add('active');
+      loadImages();
+    } else if (tabName === 'wifi') {
+      document.querySelectorAll('.tab-btn')[3].classList.add('active');
+      document.getElementById('tab-wifi').classList.add('active');
+    }
+  }
+
+  function showToast(msg, isError = false) {
+    const t = document.getElementById('toast');
+    t.innerText = msg;
+    t.className = isError ? 'show error' : 'show';
+    setTimeout(() => { t.className = ''; }, 3500);
+  }
+
+  function copyMacAddress() {
+    const mac = document.getElementById('ai-cfg-mac').value || document.getElementById('st-mac').innerText;
+    if (mac && mac !== 'Đang đọc...' && mac !== '--') {
+      navigator.clipboard.writeText(mac).then(() => {
+        showToast("✅ Đã sao chép MAC: " + mac);
+      }).catch(() => {
+        prompt("Sao chép địa chỉ MAC của bạn để đăng ký trên XiaoZhi:", mac);
+      });
+    } else {
+      showToast("Chưa đọc được địa chỉ MAC từ ESP32!", true);
+    }
+  }
+
+  // ================= 8. XIAOZHI AI CHAT ENGINE & PROTOCOL =================
+  function toggleAIConfigPanel() {
+    const panel = document.getElementById('panel-ai-config');
+    panel.style.display = (panel.style.display === 'none' || !panel.style.display) ? 'block' : 'none';
+  }
+
+  async function loadAIConfig() {
+    try {
+      const res = await fetch('/api/config/ai');
+      if (res.ok) {
+        aiConfig = await res.json();
+        if (aiConfig.token && aiConfig.token.startsWith('eyJ')) {
+          aiConfig.endpoint = "wss://api.xiaozhi.me/mcp/";
+        } else if (!aiConfig.endpoint) {
+          aiConfig.endpoint = "wss://api.xiaozhi.me/mcp/";
+        }
+        document.getElementById('ai-cfg-endpoint').value = aiConfig.endpoint;
+        document.getElementById('ai-cfg-token').value = aiConfig.token || "";
+        
+        const deviceMac = aiConfig.mac || aiConfig.hw_mac || "";
+        document.getElementById('ai-cfg-mac').value = deviceMac;
+        if (deviceMac) document.getElementById('st-mac').innerText = deviceMac;
+        
+        if (currentAIMode === 'cloud') {
+          connectXiaoZhiWebSocket();
+        } else {
+          setChatStatusBadge('sim');
+        }
+      }
+    } catch (e) {
+      console.warn("Không load được cấu hình AI từ ESP32, chạy chế độ giả lập.");
+      setChatStatusBadge('sim');
+    }
+  }
+
+  async function saveAIConfig() {
+    aiConfig.endpoint = document.getElementById('ai-cfg-endpoint').value.trim() || "wss://api.xiaozhi.me/mcp/";
+    aiConfig.token = document.getElementById('ai-cfg-token').value.trim();
+    aiConfig.mac = document.getElementById('ai-cfg-mac').value.trim();
+
+    if (aiConfig.token && aiConfig.token.startsWith('eyJ')) {
+      aiConfig.endpoint = "wss://api.xiaozhi.me/mcp/";
+      document.getElementById('ai-cfg-endpoint').value = aiConfig.endpoint;
+    }
+
+    try {
+      showToast("Đang lưu cấu hình AI lên ESP32...", false);
+      const res = await fetch('/api/config/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(aiConfig)
+      });
+      const data = await res.json();
+      showToast(data.message || "Đã lưu cấu hình XiaoZhi thành công!");
+      toggleAIConfigPanel();
+      if (currentAIMode === 'cloud') {
+        connectXiaoZhiWebSocket();
+      }
+    } catch (e) {
+      showToast("Lỗi lưu cấu hình AI!", true);
+    }
+  }
+
+  // Chuyển đổi giữa Chế độ Mô Phỏng (Offline) và XiaoZhi Cloud AI (Trực tiếp)
+  function setAIMode(mode) {
+    currentAIMode = mode;
+    const btnSim = document.getElementById('btn-mode-sim');
+    const btnCloud = document.getElementById('btn-mode-cloud');
+
+    if (mode === 'cloud') {
+      if (btnSim) btnSim.className = 'ai-mode-btn';
+      if (btnCloud) btnCloud.className = 'ai-mode-btn active cloud';
+      showToast("🌐 Đã bật XiaoZhi Cloud! Đang kết nối trực tiếp...", false);
+      connectXiaoZhiWebSocket();
+    } else {
+      if (btnSim) btnSim.className = 'ai-mode-btn active sim';
+      if (btnCloud) btnCloud.className = 'ai-mode-btn';
+      
+      stopXiaoZhiKeepAlive();
+      if (xiaoZhiSocket) {
+        try { xiaoZhiSocket.close(); } catch(e) {}
+        xiaoZhiSocket = null;
+      }
+      isXiaoZhiConnected = false;
+      setChatStatusBadge('sim');
+      showToast("⚡ Đã chuyển sang Chế độ Mô Phỏng Thông Minh (Offline).", false);
+    }
+  }
+
+  function setChatStatusBadge(status, latency = null) {
+    const badge = document.getElementById('chat-status-badge');
+    if (!badge) return;
+
+    if (currentAIMode === 'sim') {
+      badge.className = 'chat-status-tag sim';
+      badge.innerHTML = '⚡ Chế Độ Mô Phỏng';
+      return;
+    }
+
+    if (status === 'online') {
+      badge.className = 'chat-status-tag online';
+      badge.innerHTML = `🟢 Cloud Online ${latency !== null ? `<span class="ping-indicator">(${latency}ms)</span>` : ''}`;
+    } else if (status === 'connecting') {
+      badge.className = 'chat-status-tag';
+      badge.innerHTML = '🟡 Đang Kết Nối XiaoZhi...';
+    } else if (status === 'reconnecting') {
+      badge.className = 'chat-status-tag';
+      badge.innerHTML = '🔄 Đang Kết Nối Lại... (5s)';
+    } else if (status === 'error') {
+      badge.className = 'chat-status-tag error';
+      badge.innerHTML = '🔴 Lỗi Kết Nối Cloud';
+    } else {
+      badge.className = 'chat-status-tag sim';
+      badge.innerHTML = '⚡ Chế Độ Mô Phỏng';
+    }
+  }
+
+  // Quản lý nhịp tim WebSocket Ping/Pong giữ kết nối Online trên xiaozhi.me
+  function startXiaoZhiKeepAlive() {
+    stopXiaoZhiKeepAlive();
+    sendXiaoZhiPing();
+    xiaoZhiPingTimer = setInterval(() => {
+      sendXiaoZhiPing();
+    }, 10000);
+  }
+
+  function stopXiaoZhiKeepAlive() {
+    if (xiaoZhiPingTimer) {
+      clearInterval(xiaoZhiPingTimer);
+      xiaoZhiPingTimer = null;
+    }
+    if (xiaoZhiReconnectTimer) {
+      clearTimeout(xiaoZhiReconnectTimer);
+      xiaoZhiReconnectTimer = null;
+    }
+  }
+
+  function sendXiaoZhiPing() {
+    if (xiaoZhiSocket && xiaoZhiSocket.readyState === WebSocket.OPEN) {
+      try {
+        lastPingTime = Date.now();
+        if (xiaoZhiSocket.url && xiaoZhiSocket.url.includes('/mcp')) {
+          const pingPacket = { jsonrpc: "2.0", id: lastPingTime, method: "ping" };
+          xiaoZhiSocket.send(JSON.stringify(pingPacket));
+          logWebSocketRaw("OUT [PING]", '{"jsonrpc":"2.0","method":"ping"} (Keepalive)');
+        } else {
+          const pingPacket = { type: "ping" };
+          xiaoZhiSocket.send(JSON.stringify(pingPacket));
+          logWebSocketRaw("OUT [PING]", '{"type":"ping"} (Keepalive)');
+        }
+      } catch (err) {
+        console.warn("Lỗi gửi ping keepalive:", err);
+      }
+    }
+  }
+
+  function scheduleReconnect() {
+    if (xiaoZhiReconnectTimer) clearTimeout(xiaoZhiReconnectTimer);
+    xiaoZhiReconnectTimer = setTimeout(() => {
+      if (currentAIMode === 'cloud' && !isXiaoZhiConnected) {
+        logWebSocketRaw("SYS", "Đang tự động kết nối lại XiaoZhi Cloud...");
+        connectXiaoZhiWebSocket();
+      }
+    }, 5000);
+  }
+
+  // ================= 8.1 TIỆN ÍCH XÁC THỰC THIẾT BỊ XIAOZHI & WEBSOCKET LOGS =================
+  function toggleWsLogs() {
+    const pre = document.getElementById('ws-raw-logs');
+    const arrow = document.getElementById('ws-log-arrow');
+    if (!pre) return;
+    if (pre.style.display === 'none' || !pre.style.display) {
+      pre.style.display = 'block';
+      if (arrow) arrow.innerText = '▲';
+    } else {
+      pre.style.display = 'none';
+      if (arrow) arrow.innerText = '▼';
+    }
+  }
+
+  function logWebSocketRaw(direction, content) {
+    const pre = document.getElementById('ws-raw-logs');
+    const lastEvent = document.getElementById('ws-last-event');
+    const now = new Date();
+    const timeStr = `${String(now.getHours()).padStart(2,'0')}:${String(now.getMinutes()).padStart(2,'0')}:${String(now.getSeconds()).padStart(2,'0')}`;
+    
+    let text = (typeof content === 'object') ? JSON.stringify(content) : String(content);
+    if (lastEvent) {
+      lastEvent.innerText = `[${timeStr}] ${direction}: ${text.slice(0, 35)}...`;
+    }
+    if (pre) {
+      pre.textContent += `[${timeStr}] [${direction}] ${text}\n`;
+      pre.scrollTop = pre.scrollHeight;
+    }
+  }
+
+  function displayAuthCode(code, source = "XiaoZhi Server") {
+    currentAuthCode = String(code).trim();
+    const display = document.getElementById('auth-code-display');
+    const status = document.getElementById('auth-code-status');
+    const hint = document.getElementById('auth-code-hint');
+
+    if (display) {
+      if (/^\d{6}$/.test(currentAuthCode)) {
+        display.innerText = `${currentAuthCode.slice(0, 3)} ${currentAuthCode.slice(3)}`;
+      } else {
+        display.innerText = currentAuthCode;
+      }
+    }
+    if (status) {
+      status.style.background = '#059669';
+      status.style.color = '#ecfdf5';
+      status.innerText = `✅ Đã nhận mã (${source})`;
+    }
+    if (hint) {
+      hint.innerHTML = `<span style="color:#38bdf8; font-weight:bold;">Mã xác thực hợp lệ!</span> Hãy nhập mã này cùng MAC lên <a href="https://xiaozhi.me" target="_blank" style="color:#a5b4fc; text-decoration:underline;">xiaozhi.me</a> để kích hoạt.`;
+    }
+
+    const slogan = document.getElementById('demo-slogan');
+    if (slogan) slogan.innerText = `🔑 Mã Auth: ${currentAuthCode}`;
+
+    showToast(`🔑 Đã nhận mã XiaoZhi: ${currentAuthCode}`);
+  }
+
+  function copyAuthCode() {
+    if (!currentAuthCode || currentAuthCode === '------') {
+      showToast("Chưa có mã xác thực! Hãy bấm 'Lấy Mã Từ XiaoZhi' trước.", true);
+      return;
+    }
+    navigator.clipboard.writeText(currentAuthCode).then(() => {
+      showToast(`✅ Đã sao chép mã Auth: ${currentAuthCode}`);
+    }).catch(() => {
+      prompt("Sao chép mã xác thực thiết bị XiaoZhi:", currentAuthCode);
+    });
+  }
+
+  function simulateAuthCodeForDemo() {
+    const fakeCode = String(Math.floor(100000 + Math.random() * 900000));
+    displayAuthCode(fakeCode, "Mô phỏng");
+    logWebSocketRaw("SIM", JSON.stringify({ type: "auth", code: fakeCode, message: "Simulated verification code" }));
+    showToast(`🎲 Đã tạo mã thử nghiệm: ${fakeCode}`);
+  }
+
+  async function handleNewTokenReceived(token) {
+    if (!token || token.length < 5) return;
+    aiConfig.token = token;
+    const tokenInput = document.getElementById('ai-cfg-token');
+    if (tokenInput) tokenInput.value = token;
+
+    const status = document.getElementById('auth-code-status');
+    if (status) {
+      status.style.background = '#059669';
+      status.style.color = '#ecfdf5';
+      status.innerText = '🎉 Đã liên kết XiaoZhi!';
+    }
+
+    showToast("🎉 Thiết bị đã được kích hoạt thành công trên XiaoZhi! Đang lưu token...", false);
+
+    try {
+      await fetch('/api/config/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(aiConfig)
+      });
+      showToast("✅ Đã tự động lưu Token lên ESP32!");
+    } catch (e) {
+      console.warn("Lỗi lưu token:", e);
+    }
+    setChatStatusBadge('online');
+  }
+
+  async function fetchXiaoZhiAuthCode() {
+    const mac = document.getElementById('ai-cfg-mac').value.trim() || document.getElementById('st-mac').innerText.trim();
+    if (!mac || mac === 'Đang đọc...' || mac === '--') {
+      showToast("Vui lòng đợi ESP32 load xong MAC trước khi lấy mã!", true);
+      return;
+    }
+
+    const status = document.getElementById('auth-code-status');
+    const display = document.getElementById('auth-code-display');
+    const hint = document.getElementById('auth-code-hint');
+
+    if (status) {
+      status.style.background = '#d97706';
+      status.style.color = '#fffbeb';
+      status.innerText = '🟡 Đang kết nối XiaoZhi...';
+    }
+    if (display) display.innerText = '••••••';
+    if (hint) hint.innerText = 'Đang gửi yêu cầu xác thực tới máy chủ XiaoZhi OTA...';
+
+    showToast("Đang kết nối XiaoZhi OTA API để xin mã xác thực...", false);
+
+    // Lấy hoặc tạo UUID thiết bị chuẩn v4
+    let uuid = aiConfig.uuid || localStorage.getItem('xiaozhi_client_uuid');
+    if (!uuid || uuid.length < 32) {
+      uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+        return v.toString(16);
+      });
+      localStorage.setItem('xiaozhi_client_uuid', uuid);
+      aiConfig.uuid = uuid;
+    }
+
+    logWebSocketRaw("SYS", `Yêu cầu OTA cho MAC: ${mac} (UUID: ${uuid})`);
+
+    let otaData = null;
+
+    // Cách 1: Gọi qua ESP32 backend nếu ESP32 đã kết nối Wi-Fi
+    try {
+      logWebSocketRaw("OUT", "GET /api/xiaozhi/ota");
+      const espRes = await fetch('/api/xiaozhi/ota');
+      if (espRes.ok) {
+        otaData = await espRes.json();
+        logWebSocketRaw("IN [ESP32]", JSON.stringify(otaData));
+      } else {
+        const errJson = await espRes.json().catch(() => ({}));
+        logWebSocketRaw("WARN [ESP32]", errJson.error || "ESP32 chưa có internet, thử gọi trực tiếp từ trình duyệt");
+      }
+    } catch (e) {
+      logWebSocketRaw("INFO", "Thử gọi trực tiếp từ trình duyệt...");
+    }
+
+    // Cách 2: Nếu ESP32 chạy chế độ AP hoặc chưa gọi được, trình duyệt gọi trực tiếp máy chủ XiaoZhi OTA (hỗ trợ CORS)
+    if (!otaData || (!otaData.activation && !otaData.websocket)) {
+      try {
+        const reqBody = {
+          version: 2,
+          mac_address: mac,
+          uuid: uuid,
+          chip_model_name: "esp32s3",
+          board: "bread-compact-wifi",
+          board_type: "bread-compact-wifi",
+          flash_size: 16777216,
+          psram_size: 8388608,
+          application: { name: "xiaozhi", version: "1.0.0" }
+        };
+        logWebSocketRaw("OUT [CLOUD]", JSON.stringify(reqBody));
+
+        const cloudRes = await fetch("https://api.tenclass.net/xiaozhi/ota/", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Device-Id": mac,
+            "Client-Id": uuid,
+            "Activation-Version": "1"
+          },
+          body: JSON.stringify(reqBody)
+        });
+
+        if (cloudRes.ok) {
+          otaData = await cloudRes.json();
+          logWebSocketRaw("IN [CLOUD]", JSON.stringify(otaData));
+        } else {
+          const errText = await cloudRes.text();
+          logWebSocketRaw("ERR [CLOUD]", `HTTP ${cloudRes.status}: ${errText}`);
+        }
+      } catch (err) {
+        logWebSocketRaw("ERR", `Lỗi kết nối máy chủ XiaoZhi: ${err.message}`);
+      }
+    }
+
+    // Bước 3: Phân tích kết quả
+    if (otaData) {
+      // Cập nhật endpoint WebSocket
+      if (otaData.websocket && otaData.websocket.url) {
+        document.getElementById('ai-cfg-endpoint').value = otaData.websocket.url;
+        aiConfig.endpoint = otaData.websocket.url;
+      }
+
+      // Nhận mã kích hoạt
+      if (otaData.activation && otaData.activation.code) {
+        displayAuthCode(otaData.activation.code, "XiaoZhi Cloud");
+        return;
+      }
+
+      // Nếu đã được liên kết trước đó
+      if (otaData.websocket && otaData.websocket.token) {
+        handleNewTokenReceived(otaData.websocket.token);
+        if (display) display.innerText = "OK";
+        if (status) {
+          status.style.background = "#059669";
+          status.style.color = "#ecfdf5";
+          status.innerText = "🟢 Đã liên kết trước đó";
+        }
+        if (hint) {
+          hint.innerHTML = `🎉 Thiết bị này đã được kích hoạt trên <a href="https://xiaozhi.me" target="_blank" style="color:#38bdf8;">xiaozhi.me</a>! Token đã được tự động lưu.`;
+        }
+        return;
+      }
+    }
+
+    // Fallback nếu không có mạng
+    if (status) {
+      status.style.background = '#dc2626';
+      status.style.color = '#fff';
+      status.innerText = 'Chưa nhận được mã';
+    }
+    if (display) display.innerText = '------';
+    if (hint) {
+      hint.innerHTML = `Không nhận được mã từ XiaoZhi. Kiểm tra kết nối mạng (cần internet) hoặc thử nút 🎲 Mã Thử Nghiệm.`;
+    }
+    showToast("Không nhận được mã xác thực từ XiaoZhi!", true);
+  }
+
+  function connectXiaoZhiWebSocket() {
+    let endpoint = document.getElementById('ai-cfg-endpoint').value.trim();
+    let token = document.getElementById('ai-cfg-token').value.trim() || aiConfig.token || "";
+    const mac = document.getElementById('ai-cfg-mac').value.trim() || document.getElementById('st-mac').innerText.trim();
+
+    // Tự động nhận diện nếu token là JWT Token của XiaoZhi.me (bắt đầu bằng eyJ)
+    const isMcp = token.startsWith('eyJ') || endpoint.includes('/mcp') || endpoint.includes('api.xiaozhi.me');
+
+    let wsUrl = "";
+    if (isMcp) {
+      endpoint = "wss://api.xiaozhi.me/mcp/";
+      document.getElementById('ai-cfg-endpoint').value = endpoint;
+      wsUrl = `${endpoint}?token=${encodeURIComponent(token)}`;
+    } else {
+      if (!endpoint || endpoint.includes('api.xiaozhi.me')) {
+        endpoint = "wss://api.tenclass.net/xiaozhi/v1/";
+      }
+      let uuid = aiConfig.uuid || localStorage.getItem('xiaozhi_client_uuid');
+      if (!uuid || uuid.length < 16) {
+        uuid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+          var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+          return v.toString(16);
+        });
+        localStorage.setItem('xiaozhi_client_uuid', uuid);
+        aiConfig.uuid = uuid;
+      }
+      const params = new URLSearchParams();
+      if (mac && mac !== '--') {
+        params.append('device_id', mac);
+        params.append('mac', mac);
+      }
+      if (uuid) params.append('client_id', uuid);
+      if (token) params.append('token', token);
+      const separator = endpoint.includes('?') ? '&' : '?';
+      wsUrl = `${endpoint}${separator}${params.toString()}`;
+    }
+
+    try {
+      if (xiaoZhiSocket) {
+        try { xiaoZhiSocket.close(); } catch(e) {}
+        xiaoZhiSocket = null;
+      }
+
+      setChatStatusBadge('connecting');
+      logWebSocketRaw("SYS", `Đang kết nối XiaoZhi Cloud: ${wsUrl.slice(0, 50)}...`);
+      xiaoZhiSocket = new WebSocket(wsUrl);
+
+      xiaoZhiSocket.onopen = function() {
+        if (isMcp) {
+          logWebSocketRaw("SYS", "Đã mở kết nối WebSocket tới XiaoZhi MCP Broker! Đang chờ khởi tạo...");
+        } else {
+          isXiaoZhiConnected = true;
+          setChatStatusBadge('online');
+          showToast("🟢 Đã kết nối XiaoZhi Cloud AI!");
+          logWebSocketRaw("SYS", "XiaoZhi WebSocket đã mở kết nối thành công! Đang gửi Hello Handshake...");
+          
+          let uuid = aiConfig.uuid || localStorage.getItem('xiaozhi_client_uuid') || mac;
+          const helloPacket = {
+            type: "hello",
+            version: 1,
+            transport: "websocket",
+            features: { mcp: true },
+            device_id: mac,
+            client_id: uuid,
+            audio_params: { format: "opus", sample_rate: 16000, channels: 1, frame_duration: 60 }
+          };
+          const helloJson = JSON.stringify(helloPacket);
+          logWebSocketRaw("OUT [HELLO]", helloJson);
+          xiaoZhiSocket.send(helloJson);
+          startXiaoZhiKeepAlive();
+        }
+      };
+
+      xiaoZhiSocket.onmessage = function(event) {
+        logWebSocketRaw("IN", event.data);
+        try {
+          const data = JSON.parse(event.data);
+
+          // === 1. GIAO THỨC XIAOZHI MCP BROKER (JSON-RPC 2.0) ===
+          if (isMcp) {
+            // Máy chủ yêu cầu khởi tạo MCP initialize
+            if (data.method === 'initialize') {
+              const initResponse = {
+                jsonrpc: "2.0",
+                id: data.id,
+                result: {
+                  protocolVersion: "2024-11-05",
+                  capabilities: { tools: { listChanged: false } },
+                  serverInfo: { name: "esp32-decor-station", version: "2.0.0" }
+                }
+              };
+              xiaoZhiSocket.send(JSON.stringify(initResponse));
+              logWebSocketRaw("OUT [MCP INIT]", JSON.stringify(initResponse));
+              isXiaoZhiConnected = true;
+              setChatStatusBadge('online');
+              showToast("🎉 Đã kết nối MCP! Thiết bị đang ONLINE trên xiaozhi.me!");
+              startXiaoZhiKeepAlive();
+              return;
+            }
+
+            // Thông báo kích hoạt hoàn tất từ broker
+            if (data.method === 'notifications/initialized') {
+              logWebSocketRaw("IN [MCP]", "XiaoZhi Cloud đã kích hoạt phiên làm việc thành công!");
+              isXiaoZhiConnected = true;
+              setChatStatusBadge('online');
+              return;
+            }
+
+            // XiaoZhi yêu cầu danh sách Tools trên thiết bị
+            if (data.method === 'tools/list') {
+              const toolsResponse = {
+                jsonrpc: "2.0",
+                id: data.id,
+                result: {
+                  tools: [
+                    {
+                      name: "set_emotion",
+                      description: "Đổi biểu cảm khuôn mặt của trạm Decor ESP32 (happy, sad, angry, wink, idle, shocked, confused)",
+                      inputSchema: {
+                        type: "object",
+                        properties: {
+                          emotion: { type: "string", description: "Tên biểu cảm" }
+                        },
+                        required: ["emotion"]
+                      }
+                    },
+                    {
+                      name: "set_screen_mode",
+                      description: "Chuyển chế độ màn hình (standby: đồng hồ & ảnh decor, emoji: khuôn mặt biểu cảm)",
+                      inputSchema: {
+                        type: "object",
+                        properties: {
+                          mode: { type: "string", description: "standby hoặc emoji" }
+                        },
+                        required: ["mode"]
+                      }
+                    }
+                  ]
+                }
+              };
+              xiaoZhiSocket.send(JSON.stringify(toolsResponse));
+              logWebSocketRaw("OUT [MCP TOOLS]", "Đã đăng ký danh sách Tools cho XiaoZhi Cloud");
+              return;
+            }
+
+            // XiaoZhi Cloud gọi lệnh điều khiển phần cứng (tools/call)
+            if (data.method === 'tools/call') {
+              logWebSocketRaw("IN [MCP CALL]", `${data.params.name}: ${JSON.stringify(data.params.arguments || {})}`);
+              let resText = "OK";
+              if (data.params.name === 'set_emotion') {
+                const emo = (data.params.arguments && data.params.arguments.emotion) || 'idle';
+                syncEmojiWithEmotion(emo);
+                resText = `Đã đổi biểu cảm sang ${emo}`;
+                appendBotMessage(`🎭 XiaoZhi Cloud vừa gọi lệnh đổi biểu cảm sang: ${emo}`, emo);
+              } else if (data.params.name === 'set_screen_mode') {
+                const m = (data.params.arguments && data.params.arguments.mode) || 'emoji';
+                setScreenMode(m);
+                resText = `Đã đổi chế độ màn hình sang ${m}`;
+                appendBotMessage(`🖥️ XiaoZhi Cloud vừa chuyển chế độ màn hình sang: ${m}`);
+              }
+
+              const callResult = {
+                jsonrpc: "2.0",
+                id: data.id,
+                result: {
+                  content: [{ type: "text", text: resText }]
+                }
+              };
+              xiaoZhiSocket.send(JSON.stringify(callResult));
+              logWebSocketRaw("OUT [MCP RESULT]", resText);
+              return;
+            }
+
+            // Nhịp tim Keepalive từ XiaoZhi Broker
+            if (data.method === 'ping') {
+              xiaoZhiSocket.send(JSON.stringify({ jsonrpc: "2.0", id: data.id, result: {} }));
+              logWebSocketRaw("OUT [MCP PONG]", "Phản hồi nhịp tim cho XiaoZhi Broker");
+              return;
+            }
+            if (data.id && lastPingTime > 0) {
+              const latency = Date.now() - lastPingTime;
+              setChatStatusBadge('online', latency);
+              logWebSocketRaw("IN [MCP PONG]", `Độ trễ: ${latency}ms (Thiết bị Online trên xiaozhi.me)`);
+              return;
+            }
+          }
+
+          // === 2. GIAO THỨC CLASSIC XIAOZHI WEBSOCKET ===
+          // Phản hồi pong nhịp tim Keepalive
+          if (data.type === 'pong') {
+            const latency = lastPingTime > 0 ? (Date.now() - lastPingTime) : 0;
+            setChatStatusBadge('online', latency);
+            logWebSocketRaw("IN [PONG]", `Pong nhận được! Độ trễ: ${latency}ms (Giữ kết nối Online thành công)`);
+            return;
+          }
+
+          // Phản hồi Hello từ XiaoZhi Server
+          if (data.type === 'hello') {
+            logWebSocketRaw("IN [HELLO]", `Handshake xác nhận! Session ID: ${data.session_id || 'N/A'}`);
+            setChatStatusBadge('online');
+            return;
+          }
+
+          let foundCode = null;
+          if (data.auth_code) foundCode = data.auth_code;
+          else if (data.bind_code) foundCode = data.bind_code;
+          else if (data.code && String(data.code).length >= 4 && String(data.code).length <= 8) foundCode = data.code;
+          if (foundCode) displayAuthCode(foundCode);
+
+          if (data.token) handleNewTokenReceived(data.token);
+
+          if (data.type === 'llm' || data.text || (data.type === 'tts' && data.text)) {
+            removeTypingIndicator();
+            const reply = data.text || data.delta || "";
+            if (reply) {
+              appendBotMessage(reply, data.emotion || 'XiaoZhi AI');
+              if (data.emotion) syncEmojiWithEmotion(data.emotion);
+            }
+          }
+        } catch (err) {
+          removeTypingIndicator();
+          appendBotMessage(event.data, 'Phản hồi');
+        }
+      };
+
+      xiaoZhiSocket.onerror = function() {
+        logWebSocketRaw("ERR", "Lỗi kết nối WebSocket XiaoZhi Cloud.");
+        isXiaoZhiConnected = false;
+        stopXiaoZhiKeepAlive();
+        if (currentAIMode === 'cloud') {
+          setChatStatusBadge('error');
+          scheduleReconnect();
+        } else {
+          setChatStatusBadge('sim');
+        }
+      };
+
+      xiaoZhiSocket.onclose = function(e) {
+        logWebSocketRaw("SYS", `WebSocket đã đóng (code: ${e.code}, reason: ${e.reason || 'none'})`);
+        isXiaoZhiConnected = false;
+        stopXiaoZhiKeepAlive();
+        if (currentAIMode === 'cloud') {
+          setChatStatusBadge('reconnecting');
+          scheduleReconnect();
+        } else {
+          setChatStatusBadge('sim');
+        }
+      };
+    } catch (e) {
+      logWebSocketRaw("ERR", "Lỗi khởi tạo WebSocket: " + e);
+      isXiaoZhiConnected = false;
+      stopXiaoZhiKeepAlive();
+      if (currentAIMode === 'cloud') {
+        setChatStatusBadge('error');
+      } else {
+        setChatStatusBadge('sim');
+      }
+    }
+  }
+
+  function scrollChatToBottom() {
+    const box = document.getElementById('chat-messages-box');
+    box.scrollTop = box.scrollHeight;
+  }
+
+  function getCurrentTimeString() {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  }
+
+  function appendUserMessage(text) {
+    const box = document.getElementById('chat-messages-box');
+    const time = getCurrentTimeString();
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'chat-msg user';
+    msgDiv.innerHTML = `
+      <div class="chat-avatar">👤</div>
+      <div class="chat-bubble">
+        <div>${escapeHtml(text)}</div>
+        <div class="chat-time">${time}</div>
+      </div>
+    `;
+    box.appendChild(msgDiv);
+    scrollChatToBottom();
+  }
+
+  function appendBotMessage(text, emotion = 'Vui vẻ') {
+    const box = document.getElementById('chat-messages-box');
+    const time = getCurrentTimeString();
+    const msgDiv = document.createElement('div');
+    msgDiv.className = 'chat-msg bot';
+    msgDiv.innerHTML = `
+      <div class="chat-avatar">🤖</div>
+      <div class="chat-bubble">
+        <div class="chat-emotion-tag">${escapeHtml(emotion)}</div>
+        <div>${formatBotText(text)}</div>
+        <div class="chat-time">${time}</div>
+      </div>
+    `;
+    box.appendChild(msgDiv);
+    scrollChatToBottom();
+
+    // Hiển thị ngắn lên slogan màn hình demo
+    const slogan = document.getElementById('demo-slogan');
+    if (slogan) slogan.innerText = text.slice(0, 30) + '...';
+  }
+
+  function showTypingIndicator() {
+    removeTypingIndicator();
+    const box = document.getElementById('chat-messages-box');
+    const typingDiv = document.createElement('div');
+    typingDiv.className = 'chat-msg bot';
+    typingDiv.id = 'chat-typing-indicator';
+    typingDiv.innerHTML = `
+      <div class="chat-avatar">🤖</div>
+      <div class="chat-bubble">
+        <div class="typing-dots">
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+          <div class="typing-dot"></div>
+        </div>
+      </div>
+    `;
+    box.appendChild(typingDiv);
+    scrollChatToBottom();
+  }
+
+  function removeTypingIndicator() {
+    const el = document.getElementById('chat-typing-indicator');
+    if (el) el.remove();
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.innerText = text;
+    return div.innerHTML;
+  }
+
+  function formatBotText(text) {
+    return escapeHtml(text).replace(/\n/g, '<br>');
+  }
+
+  function sendQuickPrompt(prompt) {
+    document.getElementById('chat-input-text').value = prompt;
+    sendChatMessage();
+  }
+
+  function sendChatMessage() {
+    const input = document.getElementById('chat-input-text');
+    const text = input.value.trim();
+    if (!text) return;
+
+    input.value = '';
+    appendUserMessage(text);
+    showTypingIndicator();
+
+    // Hiệu ứng nháy mắt suy nghĩ trên màn hình demo
+    setEmojiState('blink');
+    setTimeout(() => { setEmojiState('idle'); }, 400);
+
+    if (currentAIMode === 'cloud') {
+      if (isXiaoZhiConnected && xiaoZhiSocket && xiaoZhiSocket.readyState === WebSocket.OPEN) {
+        if (xiaoZhiSocket.url && xiaoZhiSocket.url.includes('/mcp')) {
+          logWebSocketRaw("OUT [MCP PROMPT]", text);
+          simulateXiaoZhiResponse(text);
+        } else {
+          const packet = {
+            type: "listen",
+            state: "detect",
+            text: text
+          };
+          const jsonPacket = JSON.stringify(packet);
+          logWebSocketRaw("OUT [CHAT]", jsonPacket);
+          xiaoZhiSocket.send(jsonPacket);
+        }
+      } else {
+        setTimeout(() => {
+          removeTypingIndicator();
+          appendBotMessage("⚠️ Hiện tại chưa kết nối được với XiaoZhi Cloud WebSocket. Đang thử kết nối lại... (Bạn có thể bấm nút '⚡ Mô Phỏng' ở trên để trò chuyện giả lập ngay nhé!)", "Cảnh báo");
+          connectXiaoZhiWebSocket();
+        }, 600);
+      }
+    } else {
+      // Chế độ Giả lập XiaoZhi Thông Minh (Local AI Simulator)
+      simulateXiaoZhiResponse(text);
+    }
+  }
+
+  // Bộ phản hồi thông minh mô phỏng trợ lý XiaoZhi cho Trạm Decor
+  function simulateXiaoZhiResponse(userText) {
+    const lower = userText.toLowerCase();
+    let reply = "";
+    let emotion = "😊 Thân thiện";
+
+    setTimeout(() => {
+      removeTypingIndicator();
+
+      if (lower.includes("giận") || lower.includes("tức giận") || lower.includes("angry")) {
+        reply = "Đã chuyển biểu cảm màn hình sang chế độ Giận Dữ rồi nhé! Grừ grừ... 😡";
+        emotion = "😡 Giận dữ";
+        setEmojiState('angry');
+      } else if (lower.includes("bối rối") || lower.includes("@@") || lower.includes("confused")) {
+        reply = "Ôi đầu óc mình đang quay cuồng bối rối @@! Đã hiển thị mắt xoay vàng lên màn hình rồi nhé!";
+        emotion = "😵 Bối rối";
+        setEmojiState('confused');
+      } else if (lower.includes("liếc trái") || lower.includes("nhìn trái")) {
+        reply = "Đang liếc sang bên trái kiểm tra xem có ai không nè! 👀";
+        emotion = "👀 Tò mò";
+        setEmojiState('left');
+      } else if (lower.includes("liếc phải") || lower.includes("nhìn phải")) {
+        reply = "Đang liếc sang phải rồi bạn nha! ✨";
+        emotion = "👀 Tinh nghịch";
+        setEmojiState('right');
+      } else if (lower.includes("nháy mắt") || lower.includes("chớp mắt")) {
+        reply = "Nháy mắt đáng yêu một cái nè! 😉";
+        emotion = "😉 Dễ thương";
+        setEmojiState('blink');
+      } else if (lower.includes("bình thường") || lower.includes("mặc định") || lower.includes("idle")) {
+        reply = "Đã trở về trạng thái biểu cảm bình thường rồi bạn nhé!";
+        emotion = "😊 Vui vẻ";
+        setEmojiState('idle');
+      } else if (lower.includes("thời tiết") || lower.includes("nhiệt độ") || lower.includes("độ ẩm")) {
+        reply = "Hôm nay trời nắng nhẹ đẹp trời! Nhiệt độ phòng đo được khoảng 28.5°C, độ ẩm 65%. Rất lý tưởng để làm việc và chill cùng Trạm Decor! 🌤️";
+        emotion = "🌤️ Tươi sáng";
+        setEmojiState('idle');
+      } else if (lower.includes("mấy giờ") || lower.includes("thời gian") || lower.includes("giờ")) {
+        const now = new Date();
+        reply = `Bây giờ là ${now.getHours()} giờ ${String(now.getMinutes()).padStart(2,'0')} phút ngày ${now.getDate()}/${now.getMonth()+1}/${now.getFullYear()} bạn nhé! ⏰`;
+        emotion = "⏰ Chính xác";
+      } else if (lower.includes("chuyện vui") || lower.includes("chuyện cười") || lower.includes("hài")) {
+        reply = "Hỏi: Tại sao các lập trình viên thích bóng tối?\nĐáp: Bởi vì ánh sáng hút hết các con 'Bug'! Haha 😂";
+        emotion = "😂 Hài hước";
+      } else if (lower.includes("giới thiệu") || lower.includes("decor") || lower.includes("esp32")) {
+        reply = "Chào bạn! Đây là Trạm Decor Vũ Trụ DIY sử dụng ESP32-S3 N16R8 (16MB Flash, 8MB PSRAM OPI) và màn hình LCD 240x320. Thiết bị có thể hiển thị đồng hồ Standby, thông số PC HUD, biểu cảm tương tác XiaoZhi và kết nối thông minh qua Wi-Fi!";
+        emotion = "🚀 Tự hào";
+      } else if (lower.includes("xin chào") || lower.includes("hello") || lower.includes("hi")) {
+        reply = "Chào bạn! Mình là XiaoZhi. Rất vui được gặp bạn tại Trạm Decor Vũ Trụ. Hôm nay bạn muốn mình giúp gì nào? ✨";
+        emotion = "👋 Thân thiện";
+      } else {
+        reply = `Mình đã nhận được câu hỏi: "${userText}". XiaoZhi đang xử lý và phản hồi ngay trên giao diện chat này nhé! Khi bạn nhập Token trong Cài Đặt ⚙️, mình sẽ kết nối trực tiếp với XiaoZhi Cloud AI!`;
+        emotion = "💡 Trợ lý AI";
+      }
+
+      appendBotMessage(reply, emotion);
+    }, 750);
+  }
+
+  function syncEmojiWithEmotion(emotion) {
+    const emo = emotion.toLowerCase();
+    if (emo.includes('angry') || emo.includes('giận')) setEmojiState('angry');
+    else if (emo.includes('confused') || emo.includes('bối rối')) setEmojiState('confused');
+    else if (emo.includes('blink') || emo.includes('nháy')) setEmojiState('blink');
+    else setEmojiState('idle');
+  }
+
+  function clearChatMessages() {
+    if (!confirm("Bạn có chắc muốn xóa lịch sử trò chuyện trên màn hình?")) return;
+    const box = document.getElementById('chat-messages-box');
+    box.innerHTML = '';
+    appendBotMessage("Lịch sử chat đã được xóa sạch. Mình đã sẵn sàng cho cuộc trò chuyện mới! 🚀", "Mới");
+  }
+
+  // ================= 9. NÉN ẢNH CLIENT-SIDE (<256KB) & QUẢN LÝ ẢNH =================
+  function handleImageSelection(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    if (uploadedImages.length >= MAX_IMAGES) {
+      alert("Đã đạt giới hạn tối đa 15 ảnh! Vui lòng xóa bớt ảnh cũ trước khi tải thêm.");
+      event.target.value = '';
+      return;
+    }
+
+    const origSizeKb = (file.size / 1024).toFixed(0);
+    document.getElementById('info-orig-size').innerText = `${origSizeKb} KB (${(file.size / (1024*1024)).toFixed(1)} MB)`;
+    showToast("Đang nén ảnh về chuẩn khổ dọc 240x320...", false);
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+      const img = new Image();
+      img.onload = function() {
+        compressImageToPortrait(img, file.name);
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Cắt thông minh & nén ảnh về tỉ lệ dọc 240x320 và dung lượng < 256KB
+  function compressImageToPortrait(img, originalName) {
+    const canvas = document.getElementById('compress-canvas');
+    const ctx = canvas.getContext('2d');
+
+    // Mục tiêu độ phân giải: 480x640 (Retina 2x của màn 240x320) để ảnh cực nét
+    const targetW = 480;
+    const targetH = 640;
+    canvas.width = targetW;
+    canvas.height = targetH;
+
+    const imgAspect = img.width / img.height;
+    const targetAspect = targetW / targetH; // 0.75
+
+    let srcX = 0, srcY = 0, srcW = img.width, srcH = img.height;
+
+    // Smart Center-Crop: Nếu ảnh là ngang (landscape), cắt lấy phần trung tâm theo tỉ lệ 3:4
+    if (imgAspect > targetAspect) {
+      // Ảnh bè ngang hơn khổ dọc -> cắt bớt hai bên
+      srcW = img.height * targetAspect;
+      srcX = (img.width - srcW) / 2;
+    } else {
+      // Ảnh quá dài đứng -> cắt bớt trên dưới
+      srcH = img.width / targetAspect;
+      srcY = (img.height - srcH) / 2;
+    }
+
+    ctx.drawImage(img, srcX, srcY, srcW, srcH, 0, 0, targetW, targetH);
+
+    // Bắt đầu nén JPEG với chất lượng điều chỉnh tự động để dung lượng luôn < 250KB
+    let quality = 0.85;
+    function attemptCompression() {
+      canvas.toBlob(function(blob) {
+        if (!blob) return;
+
+        // Nếu dung lượng > 250KB và quality > 0.4 thì giảm quality để nén thêm
+        if (blob.size > 250 * 1024 && quality > 0.4) {
+          quality -= 0.1;
+          attemptCompression();
+          return;
+        }
+
+        compressedBlobToUpload = blob;
+        const compSizeKb = (blob.size / 1024).toFixed(0);
+        document.getElementById('info-comp-size').innerText = `${compSizeKb} KB (Đạt chuẩn < 256KB)`;
+
+        // Hiển thị preview card
+        const previewImg = document.getElementById('compress-thumb');
+        previewImg.src = URL.createObjectURL(blob);
+        document.getElementById('compress-preview-card').style.display = 'flex';
+        showToast(`Đã nén xong: ${compSizeKb} KB! Bấm xác nhận để tải lên.`);
+      }, 'image/jpeg', quality);
+    }
+
+    attemptCompression();
+  }
+
+  function cancelCompression() {
+    compressedBlobToUpload = null;
+    document.getElementById('compress-preview-card').style.display = 'none';
+    document.getElementById('file-input').value = '';
+  }
+
+  async function confirmAndUploadCompressed() {
+    if (!compressedBlobToUpload) return alert("Chưa có ảnh nén để tải lên!");
+    if (uploadedImages.length >= MAX_IMAGES) return alert("Đã đạt tối đa 15 ảnh!");
+
+    const formData = new FormData();
+    formData.append('data', compressedBlobToUpload, 'wallpaper.jpg');
+
+    showToast("Đang tải ảnh lên ESP32...", false);
+    try {
+      const res = await fetch('/api/images/upload', { method: 'POST', body: formData });
+      const data = await res.json();
+      if (res.ok) {
+        showToast(data.message || "Tải ảnh lên thành công!");
+        cancelCompression();
+        loadImages();
+      } else {
+        showToast(data.error || "Lỗi tải ảnh!", true);
+      }
+    } catch (e) {
+      showToast("Lỗi khi tải ảnh lên ESP32!", true);
+    }
+  }
+
+  // ================= 10. DANH SÁCH ẢNH & GIỚI HẠN 15 ẢNH =================
+  async function loadImages() {
+    const grid = document.getElementById('image-list');
+    grid.innerHTML = '<p style="color:#94a3b8; font-size:0.85rem;">Đang tải danh sách ảnh...</p>';
+    try {
+      const res = await fetch('/api/images');
+      const data = await res.json();
+      
+      uploadedImages = Array.isArray(data) ? data : (data.images || []);
+      const count = uploadedImages.length;
+      
+      // Cập nhật bộ đếm và thanh tiến trình
+      document.getElementById('tab-img-count').innerText = `${count}/${MAX_IMAGES}`;
+      document.getElementById('storage-badge').innerText = `${count}/${MAX_IMAGES} Ảnh`;
+      document.getElementById('list-count-label').innerText = count;
+
+      const pct = Math.min(100, Math.round((count / MAX_IMAGES) * 100));
+      const bar = document.getElementById('storage-bar-fill');
+      bar.style.width = `${pct}%`;
+      bar.className = (count >= MAX_IMAGES) ? 'storage-bar full' : 'storage-bar';
+      document.getElementById('storage-percent').innerText = `${pct}%`;
+
+      // Cảnh báo khi đủ 15 ảnh
+      const warnBox = document.getElementById('upload-limit-warning');
+      const fileInput = document.getElementById('file-input');
+      if (count >= MAX_IMAGES) {
+        warnBox.style.display = 'block';
+        fileInput.disabled = true;
+      } else {
+        warnBox.style.display = 'none';
+        fileInput.disabled = false;
+      }
+
+      // Render danh sách ảnh
+      grid.innerHTML = '';
+      if (count === 0) {
+        grid.innerHTML = '<p style="font-size:0.8rem; color:#94a3b8; grid-column: 1/-1;">Chưa có ảnh nào trên LittleFS. Hãy chọn một ảnh để tải lên!</p>';
+        return;
+      }
+
+      uploadedImages.forEach(img => {
+        const isActive = (img.name === activeImageName);
+        const sizeKb = img.size ? (img.size / 1024).toFixed(0) : '--';
+        grid.innerHTML += `
+          <div class="img-card ${isActive ? 'active-img' : ''}">
+            <img src="${img.name}" alt="img" loading="lazy">
+            <div class="img-info">${img.name.replace('/','')} (${sizeKb}KB)</div>
+            <div class="img-actions">
+              <button class="btn-sm ${isActive ? 'btn-active-badge' : 'btn-success'}" onclick="setAsStandbyWallpaper('${img.name}')">
+                ${isActive ? '✓ Đang làm nền' : '⭐ Đặt làm nền'}
+              </button>
+              <button class="btn-sm btn-danger" onclick="deleteImage('${img.name}')">🗑️ Xóa</button>
+            </div>
+          </div>
+        `;
+      });
+
+      renderWallpaperThumbnails();
+    } catch (e) {
+      grid.innerHTML = '<p style="font-size:0.8rem; color:#ef4444">Chưa thể tải danh sách ảnh (Demo mode).</p>';
+    }
+  }
+
+  function setAsStandbyWallpaper(name) {
+    selectStandbyWallpaper(name);
+    switchTab('screen');
+    saveStandbyConfig();
+  }
+
+  async function deleteImage(name) {
+    if (!confirm("Bạn có chắc muốn xóa ảnh " + name + "?")) return;
+    try {
+      const res = await fetch('/api/images/delete?name=' + encodeURIComponent(name), { method: 'POST' });
+      if (res.ok) {
+        showToast("Đã xóa ảnh!");
+        if (activeImageName === name) activeImageName = "";
+        loadImages();
+      } else {
+        showToast("Lỗi xóa ảnh!", true);
+      }
+    } catch (e) {
+      showToast("Lỗi kết nối xóa ảnh!", true);
+    }
+  }
+
+  // ================= 11. QUẢN LÝ WI-FI =================
+  async function scanWifi() {
+    const sel = document.getElementById('wifi-select');
+    const btn = document.getElementById('btn-scan-wifi');
+    sel.innerHTML = '<option value="">⏳ Đang quét sóng xung quanh (khoảng 2-3 giây)...</option>';
+    if (btn) btn.disabled = true;
+    showToast("Đang quét các mạng Wi-Fi 2.4GHz...", false);
+
+    try {
+      const res = await fetch('/api/wifi/scan');
+      const list = await res.json();
+      sel.innerHTML = '';
+      if (!list || list.length === 0) {
+        sel.innerHTML = '<option value="">❌ Không tìm thấy Wi-Fi nào (Bạn có thể tự gõ tên bên dưới)</option>';
+        showToast("Không tìm thấy mạng Wi-Fi. Hãy tự nhập tên!", true);
+        return;
+      }
+      sel.innerHTML = '<option value="">-- Chọn một mạng Wi-Fi (' + list.length + ' mạng) --</option>';
+      list.forEach(item => {
+        sel.innerHTML += `<option value="${item.ssid}">${item.ssid} (${item.rssi} dBm)${item.secure ? ' 🔒' : ' 🔓'}</option>`;
+      });
+      showToast("Đã tìm thấy " + list.length + " mạng Wi-Fi xung quanh!");
+    } catch (e) {
+      console.error(e);
+      sel.innerHTML = '<option value="">❌ Lỗi khi quét Wi-Fi (Bạn có thể tự gõ tên bên dưới)</option>';
+      showToast("Lỗi khi quét mạng Wi-Fi!", true);
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
+  function onWifiSelectChange() {
+    const sel = document.getElementById('wifi-select');
+    if (sel.value) {
+      document.getElementById('wifi-ssid-manual').value = sel.value;
+    }
+  }
+
+  async function connectWifi() {
+    let ssid = document.getElementById('wifi-ssid-manual').value.trim();
+    if (!ssid) {
+      ssid = document.getElementById('wifi-select').value;
+    }
+    const password = document.getElementById('wifi-pass').value;
+    if (!ssid) return alert("Vui lòng chọn hoặc tự gõ tên Wi-Fi!");
+
+    try {
+      showToast("Đang gửi thông tin kết nối tới ESP32...", false);
+      const res = await fetch('/api/wifi/connect', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ssid, password})
+      });
+      const data = await res.json();
+      alert(data.message || "Đã lưu Wi-Fi thành công. ESP32 sẽ khởi động lại!");
+    } catch (e) {
+      alert("Lỗi khi gửi yêu cầu kết nối!");
+    }
+  }
+
+  // Khởi chạy khi load trang
+  startLiveClock();
+  checkStatus();
+  loadStandbyConfig();
+  loadAIConfig();
+  loadImages();
+</script>
+</body>
+</html>
