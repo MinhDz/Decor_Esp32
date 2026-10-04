@@ -579,6 +579,10 @@ namespace TestDisplay {
   static int s40GalleryIndex = 0;
   static int s40AboutPage = 0;
   static uint8_t s40QrModeTab = 0; // 0: Kết nối Wi-Fi SoftAP, 1: Mở Web Cài Đặt (http://192.168.4.1/#wifi)
+  static bool s40AboutMenuOpen = false;
+  static int  s40AboutMenuCursor = 0;
+  static int  s40OtaCheckState = 0; // 0: Bình thường, 1: Đang kiểm tra, 2: Có bản mới, 3: Bản mới nhất, 4: Lỗi mạng
+  static OtaUpdateInfo s40OtaUpdateInfo;
   static int s40MemSubState = 0;
   static int s40MemFileCursor = 0;
   static int s40MemOptionCursor = 0;
@@ -3232,15 +3236,199 @@ namespace TestDisplay {
     }
   }
 
+  // ============================================================================
+  // HÀM VẼ POPUP MENU TÙY CHỌN HỆ THỐNG (CHUẨN SYMBIAN S40 OPTIONS MENU)
+  // ============================================================================
+  static void drawAboutPopupMenu(int w, int h) {
+    int mw = 216;
+    int mh = 146;
+    int mx = (w - mw) / 2;
+    int my = 100;
+
+    // Bóng đổ mờ
+    tft->fillRoundRect(mx + 4, my + 4, mw, mh, 8, 0x0000);
+    // Khung Card Popup
+    tft->fillRoundRect(mx, my, mw, mh, 8, 0x10A2); // Deep Navy Blue
+    tft->drawRoundRect(mx, my, mw, mh, 8, C_NEON_CYAN);
+    tft->drawRoundRect(mx + 1, my + 1, mw - 2, mh - 2, 7, C_WHITE);
+
+    // Tiêu đề Popup
+    tft->fillRoundRect(mx + 4, my + 4, mw - 8, 24, 5, 0x0210);
+    tft->setTextColor(C_YELLOW, 0x0210);
+    tft->setTextSize(1);
+    tft->setCursor(mx + 14, my + 11);
+    tft->print("TÙY CHỌN HỆ THỐNG");
+
+    const char* items[4] = {
+      "1. Kiem tra cap nhat OTA",
+      "2. Ma QR Cai Dat Wi-Fi",
+      "3. Doi sang Trang ke tiep",
+      "4. Dong menu tuy chon"
+    };
+
+    for (int i = 0; i < 4; i++) {
+      int iy = my + 34 + i * 26;
+      bool sel = (i == s40AboutMenuCursor);
+      if (sel) {
+        tft->fillRoundRect(mx + 6, iy, mw - 12, 22, 4, C_NEON_PURPLE);
+        tft->drawRoundRect(mx + 6, iy, mw - 12, 22, 4, C_YELLOW);
+        tft->setTextColor(C_WHITE, C_NEON_PURPLE);
+      } else {
+        tft->setTextColor(0xBDD7, 0x10A2);
+      }
+      tft->setCursor(mx + 14, iy + 6);
+      tft->print(items[i]);
+    }
+  }
+
+  // ============================================================================
+  // HÀM VẼ HỘP THOẠI TRẠNG THÁI KIỂM TRA CẬP NHẬT CLOUD OTA (GITHUB)
+  // ============================================================================
+  static void drawAboutOtaModal(int w, int h) {
+    int mw = 224;
+    int mh = (s40OtaCheckState == 2) ? 220 : 160;
+    int mx = (w - mw) / 2;
+    int my = 50;
+
+    // Bóng đổ mờ
+    tft->fillRoundRect(mx + 4, my + 4, mw, mh, 8, 0x0000);
+
+    uint16_t borderCol = (s40OtaCheckState == 1) ? C_NEON_CYAN :
+                         ((s40OtaCheckState == 2) ? C_NEON_GREEN :
+                         ((s40OtaCheckState == 3) ? C_NEON_CYAN : C_RED));
+
+    tft->fillRoundRect(mx, my, mw, mh, 8, C_CARD_BG);
+    tft->drawRoundRect(mx, my, mw, mh, 8, borderCol);
+    tft->drawRoundRect(mx + 1, my + 1, mw - 2, mh - 2, 7, C_WHITE);
+
+    if (s40OtaCheckState == 1) {
+      // 1. Đang kết nối kiểm tra
+      tft->fillRoundRect(mx + 4, my + 4, mw - 8, 24, 5, 0x0210);
+      tft->setTextColor(C_NEON_CYAN, 0x0210);
+      tft->setCursor(mx + 16, my + 11);
+      tft->print("KIỂM TRA CẬP NHẬT...");
+
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 48);
+      tft->print("Đang kết nối GitHub...");
+      tft->setCursor(mx + 14, my + 68);
+      tft->print("Vui lòng đợi giây lát...");
+
+      tft->drawRoundRect(mx + 20, my + 105, mw - 40, 12, 3, C_CARD_BORDER);
+      tft->fillRect(mx + 22, my + 107, (mw - 44) * 3 / 4, 8, C_NEON_CYAN);
+    } else if (s40OtaCheckState == 2) {
+      // 2. Phát hiện bản cập nhật mới!
+      tft->fillRoundRect(mx + 4, my + 4, mw - 8, 24, 5, 0x0320);
+      tft->setTextColor(C_NEON_GREEN, 0x0320);
+      tft->setCursor(mx + 16, my + 11);
+      tft->print("PHÁT HIỆN BẢN MỚI!");
+
+      tft->setTextColor(C_YELLOW, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 38);
+      tft->printf("Bản mới : %s", s40OtaUpdateInfo.latestVersion.c_str());
+
+      tft->setTextColor(C_SLATE, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 54);
+      tft->printf("Hiện tại: %s", FIRMWARE_VERSION);
+
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 70);
+      float mb = (float)s40OtaUpdateInfo.binSize / (1024.0f * 1024.0f);
+      tft->printf("Kích thước: %.2f MB", mb > 0.1f ? mb : 1.45f);
+
+      tft->drawFastHLine(mx + 10, my + 88, mw - 20, C_CARD_BORDER);
+
+      tft->setTextColor(C_NEON_AMBER, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 96);
+      tft->print("Bấm OK để nâng cấp OTA:");
+
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 112);
+      tft->print("* Tải trực tiếp từ GitHub");
+      tft->setCursor(mx + 14, my + 128);
+      tft->print("* Tự reboot sang bản mới");
+
+      int btnW = (mw - 28) / 2;
+      tft->fillRoundRect(mx + 10, my + 172, btnW, 28, 5, C_NEON_GREEN);
+      tft->setTextColor(C_BLACK, C_NEON_GREEN);
+      tft->setCursor(mx + 16, my + 180);
+      tft->print("[OK] NÂNG CẤP");
+
+      tft->fillRoundRect(mx + 18 + btnW, my + 172, btnW, 28, 5, C_CARD_BORDER);
+      tft->setTextColor(C_WHITE, C_CARD_BORDER);
+      tft->setCursor(mx + 26 + btnW, my + 180);
+      tft->print("[EXIT] ĐÓNG");
+    } else if (s40OtaCheckState == 3) {
+      // 3. Đã là bản mới nhất!
+      tft->fillRoundRect(mx + 4, my + 4, mw - 8, 24, 5, 0x0210);
+      tft->setTextColor(C_NEON_CYAN, 0x0210);
+      tft->setCursor(mx + 16, my + 11);
+      tft->print("PHIÊN BẢN MỚI NHẤT");
+
+      tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 44);
+      tft->print("Space OS v3.1.0");
+
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 64);
+      tft->print("Thiết bị đang chạy bản");
+      tft->setCursor(mx + 14, my + 80);
+      tft->print("mới nhất trên GitHub!");
+
+      tft->fillRoundRect(mx + (mw - 100) / 2, my + 115, 100, 26, 5, C_NEON_CYAN);
+      tft->setTextColor(C_BLACK, C_NEON_CYAN);
+      tft->setCursor(mx + (mw - 100) / 2 + 18, my + 123);
+      tft->print("[OK] ĐỒNG Ý");
+    } else if (s40OtaCheckState == 4) {
+      // 4. Lỗi kết nối mạng
+      tft->fillRoundRect(mx + 4, my + 4, mw - 8, 24, 5, 0x4000);
+      tft->setTextColor(C_RED, 0x4000);
+      tft->setCursor(mx + 16, my + 11);
+      tft->print("LỖI KẾT NỐI MẠNG");
+
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->setCursor(mx + 14, my + 44);
+      tft->print("Không thể kết nối GitHub!");
+      tft->setCursor(mx + 14, my + 64);
+      tft->print("Vui lòng kiểm tra lại");
+      tft->setCursor(mx + 14, my + 80);
+      tft->print("sóng Wi-Fi & Internet.");
+
+      tft->fillRoundRect(mx + (mw - 100) / 2, my + 115, 100, 26, 5, C_RED);
+      tft->setTextColor(C_WHITE, C_RED);
+      tft->setCursor(mx + (mw - 100) / 2 + 20, my + 123);
+      tft->print("[OK] ĐÓNG");
+    }
+  }
+
   // CHẾ ĐỘ 8: THÔNG TIN THIẾT BỊ & KẾT NỐI MẠNG (CHÍNH THỨC - 3 TRANG)
   static void drawAboutAppScreen() {
     if (!tft) return;
     int w = tft->width();
     tft->fillScreen(C_DARK_BG);
 
-    if (s40AboutPage == 0) {
-      drawSymbianChrome("THÔNG TIN THIẾT BỊ", "Đổi trang", "< Trang 1/3 >", "Quay lại");
+    const char* leftSoft = "Tùy chọn";
+    const char* midTitle = (s40AboutPage == 0) ? "< Trang 1/3 >" : ((s40AboutPage == 1) ? "< Trang 2/3 >" : "< Trang 3/3 >");
+    const char* rightSoft = "Quay lại";
 
+    if (s40OtaCheckState != 0) {
+      if (s40OtaCheckState == 2) {
+        leftSoft = "Nâng cấp";
+        rightSoft = "Đóng";
+      } else {
+        leftSoft = "Đóng";
+        rightSoft = "";
+      }
+      midTitle = "";
+    } else if (s40AboutMenuOpen) {
+      leftSoft = "Chọn";
+      midTitle = "< Chọn mục >";
+      rightSoft = "Đóng";
+    }
+
+    drawSymbianChrome("THÔNG TIN THIẾT BỊ", leftSoft, midTitle, rightSoft);
+
+    if (s40AboutPage == 0) {
       tft->fillRoundRect(6, 28, w - 12, 264, 6, C_CARD_BG);
       tft->drawRoundRect(6, 28, w - 12, 264, 6, C_NEON_PURPLE);
 
@@ -3286,12 +3474,10 @@ namespace TestDisplay {
       tft->printf("Hoạt động  : %lu phút %lu giây", (millis() / 60000UL), (millis() / 1000UL) % 60UL);
       tft->setTextColor(C_SLATE, C_CARD_BG);
       tft->setCursor(14, 242);
-      tft->print("Bấm Trái/Phải hoặc OK để xem");
+      tft->print("Bấm MENU: Tùy chọn & Cập nhật OTA");
       tft->setCursor(14, 256);
       tft->print("Trang 2: Bộ nhớ | Trang 3: QR Wi-Fi");
     } else if (s40AboutPage == 1) {
-      drawSymbianChrome("CẤU HÌNH HỆ THỐNG", "Đổi trang", "< Trang 2/3 >", "Quay lại");
-
       tft->fillRoundRect(6, 28, w - 12, 264, 6, C_CARD_BG);
       tft->drawRoundRect(6, 28, w - 12, 264, 6, C_NEON_PURPLE);
 
@@ -3341,13 +3527,21 @@ namespace TestDisplay {
       }
       tft->setTextColor(C_SLATE, C_CARD_BG);
       tft->setCursor(14, 238);
-      tft->print("Bấm OK hoặc Trái/Phải để xem");
+      tft->print("Bấm MENU: Tùy chọn | OK: Trang 3");
       tft->setCursor(14, 252);
       tft->print("Trang 3: Mã QR Cài Đặt Wi-Fi");
     } else {
       // TRANG 3: MÃ QR CÀI ĐẶT WI-FI & WEB PORTAL
-      drawSymbianChrome("MÃ QR CÀI ĐẶT WI-FI", "Đổi mã", "< Trang 3/3 >", "Quay lại");
       drawQrContentCard(w, false);
+    }
+
+    // Hiển thị Menu Tùy Chọn Popup nếu đang mở
+    if (s40AboutMenuOpen) {
+      drawAboutPopupMenu(w, tft->height());
+    }
+    // Hiển thị Hộp thoại Kiểm tra OTA nếu đang kích hoạt
+    if (s40OtaCheckState != 0) {
+      drawAboutOtaModal(w, tft->height());
     }
   }
 
@@ -7121,6 +7315,19 @@ namespace TestDisplay {
       return;
     }
 
+    // Nếu đang ở App Thông tin Thiết bị (Mode 8) và bấm phím MENU (keyIndex == 5)
+    if (currentMode == 8 && keyIndex == 5) {
+      if (s40OtaCheckState != 0) {
+        s40OtaCheckState = 0;
+        drawAboutAppScreen();
+      } else {
+        s40AboutMenuOpen = !s40AboutMenuOpen;
+        s40AboutMenuCursor = 0;
+        drawAboutAppScreen();
+      }
+      return;
+    }
+
     // Phím MENU (keyIndex == 5): Từ các màn hình khác mở ngay Giao diện Symbian S40 Menu 4x3
     if (keyIndex == 5) {
       currentMode = 4;
@@ -7273,31 +7480,101 @@ namespace TestDisplay {
         refreshActiveScreen();
       }
     } else if (currentMode == 8) {
-      if (keyIndex == 0) {
-        if (s40AboutPage == 2) {
-          s40QrModeTab = (s40QrModeTab + 1) % 2;
-          drawAboutAppScreen();
+      if (s40OtaCheckState != 0) {
+        if (s40OtaCheckState == 2) {
+          // Trạng thái 2: Đã phát hiện bản cập nhật mới
+          if (keyIndex == 0) {
+            // OK: Nâng cấp OTA ngay
+            showSymbianToast("BẮT ĐẦU TẢI & NÂNG CẤP...");
+            s40OtaCheckState = 0;
+            OtaManager::startCloudUpdate(s40OtaUpdateInfo.downloadUrl);
+            drawAboutAppScreen();
+          } else if (keyIndex == 6 || keyIndex == 5) {
+            // EXIT hoặc MENU: Đóng modal
+            s40OtaCheckState = 0;
+            drawAboutAppScreen();
+          }
         } else {
-          s40AboutPage = (s40AboutPage + 1) % 3;
+          // Trạng thái 1, 3, hoặc 4: Bấm OK hoặc EXIT hoặc MENU để đóng modal
+          if (keyIndex == 0 || keyIndex == 6 || keyIndex == 5) {
+            s40OtaCheckState = 0;
+            drawAboutAppScreen();
+          }
+        }
+      } else if (s40AboutMenuOpen) {
+        if (keyIndex == 1) { // UP
+          s40AboutMenuCursor = (s40AboutMenuCursor + 3) % 4;
+          drawAboutAppScreen();
+        } else if (keyIndex == 2) { // DOWN
+          s40AboutMenuCursor = (s40AboutMenuCursor + 1) % 4;
+          drawAboutAppScreen();
+        } else if (keyIndex == 0) { // OK
+          if (s40AboutMenuCursor == 0) {
+            // Mục 0: Kiểm tra cập nhật OTA từ Cloud GitHub
+            s40AboutMenuOpen = false;
+            s40OtaCheckState = 1; // Đang kết nối...
+            drawAboutAppScreen();
+
+            // Kiểm tra manifest từ xa
+            bool checkOk = OtaManager::checkCloudUpdate(s40OtaUpdateInfo);
+            if (!checkOk) {
+              s40OtaCheckState = 4; // Lỗi mạng / không truy cập được manifest
+            } else if (s40OtaUpdateInfo.hasUpdate) {
+              s40OtaCheckState = 2; // Phát hiện bản mới
+            } else {
+              s40OtaCheckState = 3; // Bản mới nhất
+            }
+            drawAboutAppScreen();
+          } else if (s40AboutMenuCursor == 1) {
+            // Mục 1: Mã QR Cài Đặt Wi-Fi
+            s40AboutMenuOpen = false;
+            s40AboutPage = 2;
+            drawAboutAppScreen();
+          } else if (s40AboutMenuCursor == 2) {
+            // Mục 2: Sang trang kế tiếp
+            s40AboutMenuOpen = false;
+            s40AboutPage = (s40AboutPage + 1) % 3;
+            drawAboutAppScreen();
+          } else if (s40AboutMenuCursor == 3) {
+            // Mục 3: Đóng menu
+            s40AboutMenuOpen = false;
+            drawAboutAppScreen();
+          }
+        } else if (keyIndex == 6) { // EXIT
+          s40AboutMenuOpen = false;
           drawAboutAppScreen();
         }
-      } else if (keyIndex == 3) { // LEFT
-        s40AboutPage = (s40AboutPage + 2) % 3;
-        drawAboutAppScreen();
-      } else if (keyIndex == 4) { // RIGHT
-        s40AboutPage = (s40AboutPage + 1) % 3;
-        drawAboutAppScreen();
-      } else if (keyIndex == 1 || keyIndex == 2) { // UP / DOWN
-        if (s40AboutPage == 2) {
-          s40QrModeTab = (s40QrModeTab + 1) % 2;
+      } else {
+        // Duyệt trang bình thường
+        if (keyIndex == 0) {
+          if (s40AboutPage == 2) {
+            // Ở trang QR: Đổi giữa QR Wi-Fi và QR Web
+            s40QrModeTab = (s40QrModeTab + 1) % 2;
+            drawAboutAppScreen();
+          } else {
+            // Ở trang 1 hoặc 2: Bấm OK mở Menu Tùy Chọn Popup
+            s40AboutMenuOpen = true;
+            s40AboutMenuCursor = 0;
+            drawAboutAppScreen();
+          }
+        } else if (keyIndex == 3) { // LEFT
+          s40AboutPage = (s40AboutPage + 2) % 3;
           drawAboutAppScreen();
-        } else {
+        } else if (keyIndex == 4) { // RIGHT
           s40AboutPage = (s40AboutPage + 1) % 3;
           drawAboutAppScreen();
+        } else if (keyIndex == 1 || keyIndex == 2) { // UP / DOWN
+          if (s40AboutPage == 2) {
+            s40QrModeTab = (s40QrModeTab + 1) % 2;
+            drawAboutAppScreen();
+          } else {
+            s40AboutPage = (s40AboutPage + 1) % 3;
+            drawAboutAppScreen();
+          }
+        } else if (keyIndex == 6) { // EXIT
+          currentMode = 4;
+          refreshActiveScreen();
         }
-      } else if (keyIndex == 6) {
-        currentMode = 4;
-        refreshActiveScreen();
       }
     } else if (currentMode == 16) {
       if (keyIndex == 0 || keyIndex == 1 || keyIndex == 2 || keyIndex == 3 || keyIndex == 4) {

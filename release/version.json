@@ -4,6 +4,6 @@
   "build_date": "2026-10-05",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
   "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.1.0/firmware.bin",
-  "size": 1515504,
+  "size": 1518704,
   "changelog": "🚀 Space OS v3.1.0 Bản Cập Nhật Lớn:\n- Tích hợp Mã QR Kết Nối Wi-Fi tự động chuẩn ISO (camera quét kết nối ngay).\n- Hệ thống Captive Portal DNS cổng 53 tự động bật trang cấu hình khi vào mạng SoftAP.\n- Tự động chuyển tab 'Cài Đặt Wi-Fi' và quét radar sóng Wi-Fi 2.4GHz.\n- Đồng bộ toàn diện phiên bản hệ điều hành Space OS v3.1.0 trên màn hình ST7789 và Web UI.\n- Bổ sung phím tắt 'q' và menu biểu tượng Mã QR trên giao diện Symbian S40."
 }
