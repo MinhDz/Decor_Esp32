@@ -72,10 +72,12 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
       DeserializationError err = deserializeJson(resDoc, payload);
       if (!err) {
         // 1. Kiểm tra mã kích hoạt
+        bool isPendingActivation = false;
         if (resDoc["activation"]["code"].is<const char*>()) {
           const char* code = resDoc["activation"]["code"];
           const char* msg = resDoc["activation"]["message"] | "";
           s_lastAuthCode = String(code);
+          isPendingActivation = true;
           Serial.println("🔑 TRẠNG THÁI: CHƯA LIÊN KẾT (CẦN THÊM THIẾT BỊ TRÊN XIAOZHI.ME)");
           Serial.printf("👉 MÃ XÁC THỰC (AUTH CODE) : >>>  %s  <<<\n", code);
           if (strlen(msg) > 0) {
@@ -96,8 +98,8 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
           Serial.printf("🌐 WebSocket Server Endpoint : %s\n", wsUrl);
           Serial.printf("🔑 Token                     : %s\n", (token && strlen(token) > 0) ? token : "(Chưa có)");
 
-          // Tự động lưu Token vào config.json nếu nhận được token
-          if (token && strlen(token) > 0) {
+          // CHỈ lưu token thật (JWT) khi KHÔNG có mã kích hoạt và token không phải "test-token"
+          if (!isPendingActivation && token && strlen(token) > 20 && strcmp(token, "test-token") != 0) {
             JsonDocument cfgDoc;
             if (LittleFS.exists(FILE_CONFIG)) {
               File f = LittleFS.open(FILE_CONFIG, "r");
@@ -113,6 +115,22 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
               serializeJson(cfgDoc, f);
               f.close();
               Serial.println("💾 Đã tự động cập nhật Token và Endpoint vào /config.json!");
+            }
+          } else if (isPendingActivation) {
+            // Khi đang chờ kích hoạt, chắc chắn rằng /config.json không lưu token rác "test-token"
+            JsonDocument cfgDoc;
+            if (LittleFS.exists(FILE_CONFIG)) {
+              File f = LittleFS.open(FILE_CONFIG, "r");
+              deserializeJson(cfgDoc, f);
+              f.close();
+            }
+            cfgDoc["token"] = "";
+            cfgDoc["mac"] = mac;
+            cfgDoc["uuid"] = uuid;
+            File f = LittleFS.open(FILE_CONFIG, "w");
+            if (f) {
+              serializeJson(cfgDoc, f);
+              f.close();
             }
           }
         }
@@ -185,6 +203,7 @@ String XiaoZhiClient::getLastAuthCode() {
 }
 
 bool XiaoZhiClient::isDeviceBound() {
+  if (s_lastAuthCode.length() > 0) return false;
   if (!LittleFS.exists(FILE_CONFIG)) return false;
   File f = LittleFS.open(FILE_CONFIG, "r");
   if (!f) return false;
@@ -194,7 +213,7 @@ bool XiaoZhiClient::isDeviceBound() {
   if (err) return false;
   if (!doc["token"].is<const char*>()) return false;
   const char* t = doc["token"];
-  return (t && strlen(t) > 0);
+  return (t && strlen(t) > 20 && strcmp(t, "test-token") != 0);
 }
 
 String XiaoZhiClient::getStoredToken() {

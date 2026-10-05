@@ -3952,6 +3952,7 @@ namespace TestDisplay {
             s40AiOtpCode = "CHO OTP";
             s40AiBindStatus = "Dang cho phan hoi tu may chu XiaoZhi...";
           }
+          drawXiaoZhiBindingScreen();
         }
       }
     }
