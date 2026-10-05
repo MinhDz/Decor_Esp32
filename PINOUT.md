@@ -221,3 +221,4 @@ flowchart TD
 3. **Chống nhiễu I2S & nguồn sụt áp**:
    - Chân nguồn 5V của MAX98357A nên lấy từ chân VBUS/5V của ESP32 và có tụ hóa $100\,\mu\text{F} - 220\,\mu\text{F}$ lọc nguồn tại chỗ để âm bass căng và không gây sập cổng USB.
    - Ba dây I2S của MAX98357A (GPIO 15, 16, 17) và ba dây Mic INMP441 (GPIO 4, 5, 6) chạy theo 2 hướng khác nhau, tránh song song sát nhau để tránh hiện tượng dội âm (acoustic echo).
+

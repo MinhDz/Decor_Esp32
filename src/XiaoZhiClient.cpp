@@ -184,6 +184,84 @@ String XiaoZhiClient::getLastAuthCode() {
   return s_lastAuthCode;
 }
 
+bool XiaoZhiClient::isDeviceBound() {
+  if (!LittleFS.exists(FILE_CONFIG)) return false;
+  File f = LittleFS.open(FILE_CONFIG, "r");
+  if (!f) return false;
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) return false;
+  if (!doc["token"].is<const char*>()) return false;
+  const char* t = doc["token"];
+  return (t && strlen(t) > 0);
+}
+
+String XiaoZhiClient::getStoredToken() {
+  if (!LittleFS.exists(FILE_CONFIG)) return "";
+  File f = LittleFS.open(FILE_CONFIG, "r");
+  if (!f) return "";
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) return "";
+  if (!doc["token"].is<const char*>()) return "";
+  return String(doc["token"].as<const char*>());
+}
+
+String XiaoZhiClient::getStoredMac() {
+  if (LittleFS.exists(FILE_CONFIG)) {
+    File f = LittleFS.open(FILE_CONFIG, "r");
+    if (f) {
+      JsonDocument doc;
+      if (!deserializeJson(doc, f)) {
+        f.close();
+        if (doc["mac"].is<const char*>() && strlen(doc["mac"]) > 0) {
+          return String(doc["mac"].as<const char*>());
+        }
+      } else {
+        f.close();
+      }
+    }
+  }
+  return WiFi.macAddress();
+}
+
+String XiaoZhiClient::getStoredEndpoint() {
+  if (LittleFS.exists(FILE_CONFIG)) {
+    File f = LittleFS.open(FILE_CONFIG, "r");
+    if (f) {
+      JsonDocument doc;
+      if (!deserializeJson(doc, f)) {
+        f.close();
+        if (doc["endpoint"].is<const char*>() && strlen(doc["endpoint"]) > 0) {
+          return String(doc["endpoint"].as<const char*>());
+        }
+      } else {
+        f.close();
+      }
+    }
+  }
+  return String(XIAOZHI_DEFAULT_ENDPOINT);
+}
+
+void XiaoZhiClient::unbindDevice() {
+  JsonDocument doc;
+  if (LittleFS.exists(FILE_CONFIG)) {
+    File f = LittleFS.open(FILE_CONFIG, "r");
+    deserializeJson(doc, f);
+    f.close();
+  }
+  doc["token"] = "";
+  File f = LittleFS.open(FILE_CONFIG, "w");
+  if (f) {
+    serializeJson(doc, f);
+    f.close();
+    Serial.println("🗑️ [XIAOZHI] Đã xóa Token khỏi /config.json (Chuyển sang trạng thái Chưa liên kết).");
+  }
+  s_lastAuthCode = "";
+}
+
 String XiaoZhiClient::askXiaoZhiAI(const String& userText, String& outEmotion, float tempC, float humPct) {
   outEmotion = "happy";
   Serial.println("\n==================================================================");

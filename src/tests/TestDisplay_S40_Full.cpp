@@ -588,7 +588,14 @@ namespace TestDisplay {
   static int s40MemOptionCursor = 0;
 
   // Trạng thái Ứng dụng "Gọi Trợ Lý XiaoZhi AI" (Mode 11)
-  enum AiConvState { AI_STATE_IDLE = 0, AI_STATE_LISTENING = 1, AI_STATE_THINKING = 2, AI_STATE_REPLYING = 3 };
+  enum AiConvState {
+    AI_STATE_IDLE = 0,
+    AI_STATE_LISTENING = 1,
+    AI_STATE_THINKING = 2,
+    AI_STATE_REPLYING = 3,
+    AI_STATE_BINDING = 4,         // Chờ liên kết XiaoZhi Hub qua mã OTP
+    AI_STATE_BINDING_CHECKING = 5 // Đang kết nối server kiểm tra trạng thái liên kết
+  };
   static AiConvState s40AiState = AI_STATE_IDLE;
   static int s40AiPromptCursor = 0;
   static String s40AiUserSpeechText = "Xin chào XiaoZhi, giới thiệu về bạn và nhiệt độ phòng hiện tại đi!";
@@ -601,6 +608,10 @@ namespace TestDisplay {
   static unsigned long s40AiLastScrollMs = 0;
   static bool s40AiHeardSpeech = false;
   static int s40AiMaxMicLevel = 0;
+  static String s40AiOtpCode = "...";
+  static String s40AiMacStr = "";
+  static String s40AiBindStatus = "Dang dong bo voi XiaoZhi Cloud...";
+  static unsigned long s40AiLastOtpPollMs = 0;
 
   static String s40ToastMsg = "";
   static unsigned long s40ToastExpireMs = 0;
@@ -3853,8 +3864,101 @@ namespace TestDisplay {
     }
   }
 
+  static void drawXiaoZhiBindingScreen() {
+    if (!tft) return;
+    int W = tft->width();
+
+    tft->fillRect(0, 0, W, 296, C_BLACK);
+    drawSymbianHeader("XAC THUC XIAOZHI HUB");
+
+    // 1. Vẽ đôi mắt XiaoZhi biểu cảm chờ đợi
+    drawXiaoZhiEyesBox(6, 24, W - 12, 105, 1, 2);
+
+    // 2. Thẻ hiển thị mã OTP trung tâm
+    int cardX = 6, cardY = 135, cardW = W - 12, cardH = 132;
+    tft->fillRoundRect(cardX, cardY, cardW, cardH, 6, C_CARD_BG);
+    tft->drawRoundRect(cardX, cardY, cardW, cardH, 6, C_NEON_CYAN);
+
+    // Tiêu đề thẻ
+    tft->setTextSize(1);
+    tft->setTextColor(C_SLATE, C_CARD_BG);
+    tft->setCursor(cardX + 10, cardY + 8);
+    tft->print("MA XAC THUC AGENT (OTP):");
+
+    // Hộp số OTP to nổi bật
+    int boxX = cardX + 10, boxY = cardY + 22, boxW = cardW - 20, boxH = 34;
+    tft->fillRoundRect(boxX, boxY, boxW, boxH, 4, 0x0821);
+    uint16_t borderCol = (s40AiOtpCode != "NO WIFI" && s40AiOtpCode != "..." && s40AiOtpCode != "CHO OTP") ? C_YELLOW : 0x4208;
+    tft->drawRoundRect(boxX, boxY, boxW, boxH, 4, borderCol);
+
+    tft->setTextSize(3);
+    tft->setTextColor(C_YELLOW, 0x0821);
+    int textW = s40AiOtpCode.length() * 18;
+    int otpX = boxX + (boxW - textW) / 2;
+    tft->setCursor(max(boxX + 6, otpX), boxY + 6);
+    tft->print(s40AiOtpCode);
+
+    // Chi tiết thiết bị
+    tft->setTextSize(1);
+    tft->setTextColor(C_WHITE, C_CARD_BG);
+    tft->setCursor(cardX + 10, cardY + 62);
+    tft->printf("MAC: %s", s40AiMacStr.c_str());
+
+    tft->setCursor(cardX + 10, cardY + 74);
+    tft->print("Trang Hub: xiaozhi.me / tenclass.net");
+
+    tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+    tft->setCursor(cardX + 10, cardY + 86);
+    tft->print("Huong dan: Mo Hub -> Them thiet bi");
+
+    tft->setCursor(cardX + 10, cardY + 98);
+    tft->print("           Nhap MAC & Ma OTP de ket noi");
+
+    tft->setTextColor(0x8410, C_CARD_BG);
+    tft->setCursor(cardX + 10, cardY + 114);
+    tft->printf("Trang thai: %s", s40AiBindStatus.c_str());
+
+    // Thanh softkeys đáy màn hình
+    drawSymbianSoftkeys("Kiem tra(OK)", "xiaozhi.me", "Thoat(Exit)");
+  }
+
+  static void enterXiaoZhiAssistantMode() {
+    currentMode = 11;
+    s40AiMacStr = WiFi.macAddress();
+    if (XiaoZhiClient::isDeviceBound()) {
+      s40AiState = AI_STATE_IDLE;
+    } else {
+      s40AiState = AI_STATE_BINDING;
+      if (WiFi.status() != WL_CONNECTED) {
+        s40AiBindStatus = "Chua co Wi-Fi! Hay ket noi Wi-Fi truoc.";
+        s40AiOtpCode = "NO WIFI";
+      } else {
+        s40AiBindStatus = "Dang lay ma OTP tu XiaoZhi Cloud...";
+        s40AiOtpCode = "...";
+        String otaPayload = XiaoZhiClient::queryOTA(true);
+        if (XiaoZhiClient::isDeviceBound()) {
+          s40AiState = AI_STATE_IDLE;
+          s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de hoi thoai.";
+        } else {
+          String authCode = XiaoZhiClient::getLastAuthCode();
+          if (authCode.length() > 0) {
+            s40AiOtpCode = authCode;
+            s40AiBindStatus = "Da co ma OTP! Vui long nhap tren Hub.";
+          } else {
+            s40AiOtpCode = "CHO OTP";
+            s40AiBindStatus = "Dang cho phan hoi tu may chu XiaoZhi...";
+          }
+        }
+      }
+    }
+  }
+
   static void drawXiaoZhiAssistantScreen(bool fullRedraw) {
     if (!tft) return;
+    if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
+      drawXiaoZhiBindingScreen();
+      return;
+    }
     int W = tft->width();
 
     if (fullRedraw) {
@@ -7557,7 +7661,7 @@ namespace TestDisplay {
         else if (s40MenuCursor == 2) currentMode = 2;  // 3. Máy tính (PC)
         else if (s40MenuCursor == 3) currentMode = 7;  // 4. Thư viện ảnh
         else if (s40MenuCursor == 4) { s40MemSubState = 0; currentMode = 10; } // 5. Bộ nhớ SD
-        else if (s40MenuCursor == 5) { s40AiState = AI_STATE_IDLE; currentMode = 11; } // 6. Trợ lý AI
+        else if (s40MenuCursor == 5) { enterXiaoZhiAssistantMode(); } // 6. Trợ lý AI (Tự động kiểm tra liên kết / OTP)
         else if (s40MenuCursor == 6) { s40MediaSubState = 0; refreshMediaPlaylist(); currentMode = 12; } // 7. Âm nhạc
         else if (s40MenuCursor == 7) { currentMode = 13; } // 8. Đồng hồ
         else if (s40MenuCursor == 8) { currentMode = 14; } // 9. Lịch vạn niên
@@ -8137,6 +8241,41 @@ namespace TestDisplay {
         }
       }
     } else if (currentMode == 11) {
+      if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
+        if (keyIndex == 0) { // OK: Kiểm tra lại liên kết với XiaoZhi Hub
+          TestAudio::playKeyBeep();
+          if (WiFi.status() != WL_CONNECTED) {
+            s40AiBindStatus = "Chua co Wi-Fi! Hay ket noi Wi-Fi truoc.";
+            s40AiOtpCode = "NO WIFI";
+            drawXiaoZhiAssistantScreen(true);
+            return;
+          }
+          s40AiBindStatus = "Dang kiem tra voi XiaoZhi Hub...";
+          drawXiaoZhiAssistantScreen(true);
+          XiaoZhiClient::queryOTA(true);
+          if (XiaoZhiClient::isDeviceBound()) {
+            TestAudio::playOkChime();
+            showSymbianToast("KET NOI XIAOZHI THANH CONG!");
+            s40AiState = AI_STATE_IDLE;
+            s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de hoi thoai.";
+            drawXiaoZhiAssistantScreen(true);
+          } else {
+            String authCode = XiaoZhiClient::getLastAuthCode();
+            if (authCode.length() > 0) {
+              s40AiOtpCode = authCode;
+              s40AiBindStatus = "Da co OTP! Nhap MAC & OTP tren Hub.";
+            } else {
+              s40AiBindStatus = "Khong lay duoc OTP. Vui long thu lai!";
+            }
+            drawXiaoZhiAssistantScreen(true);
+          }
+        } else if (keyIndex == 6) { // EXIT: Thoát về menu
+          currentMode = 4;
+          refreshActiveScreen();
+        }
+        return;
+      }
+
       if (keyIndex == 0) {
         if (s40AiState == AI_STATE_IDLE || s40AiState == AI_STATE_REPLYING) {
           startXiaoZhiListening();
@@ -9209,6 +9348,31 @@ namespace TestDisplay {
     } else if (currentMode == 15) {
       updateActiveGameLoop(now);
     } else if (currentMode == 11) {
+      if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
+        // Tự động kiểm tra trạng thái liên kết với XiaoZhi Cloud mỗi 7 giây nếu có Wi-Fi
+        if (now - s40AiLastOtpPollMs >= 7000) {
+          s40AiLastOtpPollMs = now;
+          if (WiFi.status() == WL_CONNECTED) {
+            XiaoZhiClient::queryOTA(false);
+            if (XiaoZhiClient::isDeviceBound()) {
+              TestAudio::playOkChime();
+              showSymbianToast("KET NOI XIAOZHI THANH CONG!");
+              s40AiState = AI_STATE_IDLE;
+              s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de bat dau hoi thoai.";
+              drawXiaoZhiAssistantScreen(true);
+            } else {
+              String authCode = XiaoZhiClient::getLastAuthCode();
+              if (authCode.length() > 0 && authCode != s40AiOtpCode) {
+                s40AiOtpCode = authCode;
+                s40AiBindStatus = "Da cap nhat OTP! Nhap MAC & OTP tren Hub.";
+                drawXiaoZhiAssistantScreen(true);
+              }
+            }
+          }
+        }
+        return;
+      }
+
       // Nếu đang thu âm giọng nói từ Mic INMP441 -> Đọc liên tục DMA I2S không bị trễ
       if (s40AiState == AI_STATE_LISTENING) {
         TestAudio::pollVoiceRecording();
@@ -9407,6 +9571,7 @@ namespace TestDisplay {
     Serial.println("  [4] : Chế độ BẢNG DIAGNOSTIC SƠ ĐỒ CHÂN & SÓNG ÂM INMP441");
     Serial.println("  [5] : Mở BỘ ĐIỀU KHIỂN SYMBIAN S40 MENU 4x3 (14 Icon)");
     Serial.println("  [6] : Mở TRỢ LÝ XIAOZHI AI (2/3 Biểu Cảm + 1/3 Hội Thoại Tự Cuộn)");
+    Serial.println("  [u] : HỦY LIÊN KẾT XIAOZHI (Xóa Token & Hiện Mã OTP Kích Hoạt Mới)");
     Serial.println("  [q] : Mở MÃ QR CÀI ĐẶT & KẾT NỐI WI-FI (Nối Wi-Fi & Quét Mạng)");
     Serial.println("==============================================================");
   }
@@ -9449,9 +9614,14 @@ namespace TestDisplay {
       case '6':
       case 'z':
       case 'Z':
-        s40AiState = AI_STATE_IDLE;
-        currentMode = 11;
-        refreshActiveScreen();
+        enterXiaoZhiAssistantMode();
+        return true;
+      case 'u':
+      case 'U':
+        Serial.println("🗑️ [SERIAL] Đã nhận lệnh Hủy liên kết XiaoZhi (Unbind)!");
+        XiaoZhiClient::unbindDevice();
+        enterXiaoZhiAssistantMode();
+        showSymbianToast("DA HUY LIEN KET XIAOZHI");
         return true;
       case 'q':
       case 'Q':

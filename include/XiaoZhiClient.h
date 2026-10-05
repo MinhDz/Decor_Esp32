@@ -9,6 +9,13 @@ public:
   static void getAIConfig(JsonDocument& doc);
   static bool saveAIConfig(const String& body);
 
+  // Kiểm tra trạng thái liên kết thiết bị với XiaoZhi Cloud / Hub
+  static bool isDeviceBound();
+  static String getStoredToken();
+  static String getStoredMac();
+  static String getStoredEndpoint();
+  static void unbindDevice();
+
   // Nhận diện giọng nói thực tế từ bộ đệm PCM 16-bit 8000Hz của Mic INMP441 (Google Speech-to-Text vi-VN)
   static String transcribeMicAudioPcm16(const int16_t* pcmSamples, size_t sampleCount, uint32_t sampleRate, String& outUtf8Transcript);
 
