@@ -91,48 +91,36 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
 
         Serial.println("------------------------------------------------------------------");
 
-        // 2. Thông tin WebSocket
-        if (resDoc["websocket"]["url"].is<const char*>()) {
-          const char* wsUrl = resDoc["websocket"]["url"];
-          const char* token = resDoc["websocket"]["token"] | "";
-          Serial.printf("🌐 WebSocket Server Endpoint : %s\n", wsUrl);
-          Serial.printf("🔑 Token                     : %s\n", (token && strlen(token) > 0) ? token : "(Chưa có)");
+        // 2. Cập nhật cấu hình vào LittleFS
+        JsonDocument cfgDoc;
+        if (LittleFS.exists(FILE_CONFIG)) {
+          File f = LittleFS.open(FILE_CONFIG, "r");
+          deserializeJson(cfgDoc, f);
+          f.close();
+        }
 
-          // CHỈ lưu token thật (JWT) khi KHÔNG có mã kích hoạt và token không phải "test-token"
-          if (!isPendingActivation && token && strlen(token) > 20 && strcmp(token, "test-token") != 0) {
-            JsonDocument cfgDoc;
-            if (LittleFS.exists(FILE_CONFIG)) {
-              File f = LittleFS.open(FILE_CONFIG, "r");
-              deserializeJson(cfgDoc, f);
-              f.close();
-            }
-            cfgDoc["endpoint"] = wsUrl;
-            cfgDoc["token"] = token;
-            cfgDoc["mac"] = mac;
-            cfgDoc["uuid"] = uuid;
-            File f = LittleFS.open(FILE_CONFIG, "w");
-            if (f) {
-              serializeJson(cfgDoc, f);
-              f.close();
-              Serial.println("💾 Đã tự động cập nhật Token và Endpoint vào /config.json!");
-            }
-          } else if (isPendingActivation) {
-            // Khi đang chờ kích hoạt, chắc chắn rằng /config.json không lưu token rác "test-token"
-            JsonDocument cfgDoc;
-            if (LittleFS.exists(FILE_CONFIG)) {
-              File f = LittleFS.open(FILE_CONFIG, "r");
-              deserializeJson(cfgDoc, f);
-              f.close();
-            }
-            cfgDoc["token"] = "";
-            cfgDoc["mac"] = mac;
-            cfgDoc["uuid"] = uuid;
-            File f = LittleFS.open(FILE_CONFIG, "w");
-            if (f) {
-              serializeJson(cfgDoc, f);
-              f.close();
-            }
-          }
+        if (resDoc["websocket"]["url"].is<const char*>()) {
+          cfgDoc["endpoint"] = resDoc["websocket"]["url"].as<const char*>();
+          Serial.printf("🌐 WebSocket Server Endpoint : %s\n", resDoc["websocket"]["url"].as<const char*>());
+        }
+        cfgDoc["mac"] = mac;
+        cfgDoc["uuid"] = uuid;
+
+        if (isPendingActivation) {
+          cfgDoc["bound"] = false;
+          cfgDoc["token"] = "";
+        } else {
+          cfgDoc["bound"] = true;
+          const char* token = resDoc["websocket"]["token"] | "test-token";
+          cfgDoc["token"] = token;
+          Serial.printf("🔑 Token                     : %s\n", token);
+          Serial.println("💾 Đã tự động cập nhật cờ ĐÃ LIÊN KẾT (bound=true) vào /config.json!");
+        }
+
+        File f = LittleFS.open(FILE_CONFIG, "w");
+        if (f) {
+          serializeJson(cfgDoc, f);
+          f.close();
         }
 
         // 3. Thông tin MQTT
@@ -211,9 +199,14 @@ bool XiaoZhiClient::isDeviceBound() {
   DeserializationError err = deserializeJson(doc, f);
   f.close();
   if (err) return false;
-  if (!doc["token"].is<const char*>()) return false;
-  const char* t = doc["token"];
-  return (t && strlen(t) > 20 && strcmp(t, "test-token") != 0);
+  if (doc["bound"].is<bool>()) {
+    return doc["bound"].as<bool>();
+  }
+  if (doc["token"].is<const char*>()) {
+    const char* t = doc["token"];
+    return (t && strlen(t) > 0);
+  }
+  return false;
 }
 
 String XiaoZhiClient::getStoredToken() {
@@ -271,13 +264,14 @@ void XiaoZhiClient::unbindDevice() {
     deserializeJson(doc, f);
     f.close();
   }
+  doc["bound"] = false;
   doc["token"] = "";
   doc["mac"] = "";
   File f = LittleFS.open(FILE_CONFIG, "w");
   if (f) {
     serializeJson(doc, f);
     f.close();
-    Serial.println("🗑️ [XIAOZHI] Đã xóa Token và MAC khỏi /config.json (Chuyển sang trạng thái Chưa liên kết).");
+    Serial.println("🗑️ [XIAOZHI] Đã xóa Token và cờ liên kết khỏi /config.json!");
   }
 
   // Xóa UUID cũ để máy chủ XiaoZhi OTA nhận diện đây là yêu cầu cấp mã OTP mới
