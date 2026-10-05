@@ -18,6 +18,16 @@ namespace TestAudio {
   int getSpeakerVolumePct();
   void setSpeakerVolumePct(int pct);
 
+  // --- BỘ ÂM BÁO & NHẠC CHUÔNG MONO CỔ ĐIỂN NOKIA SYMBIAN S40 ---
+  void playKeyBeep();                         // Tiếng bíp bàn phím mono dứt khoát (~16ms, 2093Hz)
+  void playOkChime();                          // Âm xác nhận OK / Lưu thành công (E6 -> B6)
+  void playDeleteChime();                      // Âm xóa tệp / Hủy bỏ / Cảnh báo (G5 -> D5)
+  void playSmsSpecialTone();                   // Âm tin nhắn Nokia Morse SMS kinh điển (... -- ...)
+  void playNokiaTune();                        // Nhạc chuông Nokia Tune kinh điển (Grande Valse)
+  void playAlarmTuneStep(int tuneIdx, int step = 0); // Phát từng nhịp chuông báo thức theo giai điệu
+  const char* getAlarmTuneName(int tuneIdx);
+  int getAlarmTuneCount();
+
   // Bật/tắt chế độ thu âm trực tiếp Mic INMP441 & Hiển thị sóng âm lên ST7789
   void enableMicMonitor(bool enable);
   void toggleMicMonitor();

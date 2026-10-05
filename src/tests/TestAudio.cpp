@@ -127,6 +127,7 @@ namespace TestAudio {
   // --- PHÁT ÂM BÁO QUA PWM (GPIO 15 - CHO LOA NỐI TRỞ & TỤ) ---
   void playPwmTone(uint16_t freqHz, uint16_t durationMs, uint8_t pin) {
     if (freqHz == 0 || durationMs == 0) return;
+    if (speakerVolumePct <= 0) return; // Tắt tiếng khi âm lượng = 0%
     if (currentDriverMode != MODE_NONE) {
       i2s_driver_uninstall(I2S_PORT);
       currentDriverMode = MODE_NONE;
@@ -134,7 +135,9 @@ namespace TestAudio {
     const uint8_t PWM_CH_SPK = 3;
     ledcSetup(PWM_CH_SPK, freqHz, 8);
     ledcAttachPin(pin, PWM_CH_SPK);
-    ledcWrite(PWM_CH_SPK, 128); // 50% duty
+    // Tính duty cycle theo âm lượng hệ thống: 1% -> duty 10, 100% -> duty 128 (50% square wave)
+    uint8_t duty = (uint8_t)map(constrain(speakerVolumePct, 1, 100), 1, 100, 10, 128);
+    ledcWrite(PWM_CH_SPK, duty);
     delay(durationMs);
     ledcWrite(PWM_CH_SPK, 0);
     ledcDetachPin(pin);
@@ -183,7 +186,146 @@ namespace TestAudio {
   }
 
   void playClickBeep(uint16_t freqHz) {
-    playPwmTone(freqHz, 35, PIN_I2S_SPK_DIN);
+    playPwmTone(freqHz, 20, PIN_I2S_SPK_DIN);
+  }
+
+  // --- BỘ ÂM BÁO & NHẠC CHUÔNG MONO CỔ ĐIỂN NOKIA SYMBIAN S40 ---
+  void playKeyBeep() {
+    // Tiếng bíp bàn phím mono siêu ngắn dứt khoát (~16ms, C7 2093Hz) chuẩn Nokia S40
+    playPwmTone(2093, 16, PIN_I2S_SPK_DIN);
+  }
+
+  void playOkChime() {
+    // Âm xác nhận OK / Lưu thành công (E6 1318Hz -> B6 1975Hz vui tươi, dứt khoát)
+    playPwmTone(1318, 40, PIN_I2S_SPK_DIN);
+    delay(12);
+    playPwmTone(1975, 80, PIN_I2S_SPK_DIN);
+  }
+
+  void playDeleteChime() {
+    // Âm xóa tệp / Hủy bỏ / Cảnh báo (G5 784Hz -> D5 587Hz âm trầm dứt khoát)
+    playPwmTone(784, 55, PIN_I2S_SPK_DIN);
+    delay(15);
+    playPwmTone(587, 95, PIN_I2S_SPK_DIN);
+  }
+
+  void playSmsSpecialTone() {
+    // Âm tin nhắn Nokia Morse SMS kinh điển: "... -- ..." (S-M-S)
+    for (int i = 0; i < 3; i++) {
+      playPwmTone(1350, 40, PIN_I2S_SPK_DIN);
+      delay(35);
+    }
+    delay(75);
+    for (int i = 0; i < 2; i++) {
+      playPwmTone(1350, 110, PIN_I2S_SPK_DIN);
+      delay(45);
+    }
+    delay(75);
+    for (int i = 0; i < 3; i++) {
+      playPwmTone(1350, 40, PIN_I2S_SPK_DIN);
+      delay(35);
+    }
+  }
+
+  void playNokiaTune() {
+    // Nhạc chuông Nokia Tune huyền thoại (Grande Valse Francisco Tárrega)
+    struct Note { uint16_t freq; uint16_t dur; };
+    const Note melody[] = {
+      { 1318, 110 }, // E6
+      { 1175, 110 }, // D6
+      { 740,  220 }, // F#5
+      { 831,  220 }, // G#5
+      { 1109, 110 }, // C#6
+      { 988,  110 }, // B5
+      { 587,  220 }, // D5
+      { 659,  220 }, // E5
+      { 988,  110 }, // B5
+      { 880,  110 }, // A5
+      { 554,  220 }, // C#5
+      { 659,  220 }, // E5
+      { 880,  440 }  // A5
+    };
+    for (size_t i = 0; i < sizeof(melody) / sizeof(melody[0]); i++) {
+      playPwmTone(melody[i].freq, melody[i].dur, PIN_I2S_SPK_DIN);
+      delay(15);
+    }
+  }
+
+  static const char* S40_ALARM_TUNE_NAMES[4] = {
+    "1. Bíp Dồn Dập (Standard)",
+    "2. Nokia Tune Cổ Điển",
+    "3. Tin Nhắn SMS (Morse)",
+    "4. Chuông 4 Nốt (C5-C6)"
+  };
+
+  const char* getAlarmTuneName(int tuneIdx) {
+    if (tuneIdx < 0 || tuneIdx >= 4) return S40_ALARM_TUNE_NAMES[0];
+    return S40_ALARM_TUNE_NAMES[tuneIdx];
+  }
+
+  int getAlarmTuneCount() { return 4; }
+
+  void playAlarmTuneStep(int tuneIdx, int step) {
+    if (speakerVolumePct <= 0) return;
+    switch (tuneIdx) {
+      case 1: {
+        // Nokia Tune: Chạy từng cụm 4 nốt theo chu kỳ hoạt họa báo thức
+        struct Note { uint16_t f; uint16_t d; };
+        const Note p0[] = { { 1318, 95 }, { 1175, 95 }, { 740, 190 }, { 831, 190 } };
+        const Note p1[] = { { 1109, 95 }, { 988, 95 }, { 587, 190 }, { 659, 190 } };
+        const Note p2[] = { { 988, 95 }, { 880, 95 }, { 554, 190 }, { 659, 190 } };
+        const Note p3[] = { { 880, 360 } };
+        const Note* phrases[4] = { p0, p1, p2, p3 };
+        const int phraseLens[4] = { 4, 4, 4, 1 };
+        int pIdx = step % 4;
+        for (int i = 0; i < phraseLens[pIdx]; i++) {
+          playPwmTone(phrases[pIdx][i].f, phrases[pIdx][i].d, PIN_I2S_SPK_DIN);
+          delay(12);
+        }
+        break;
+      }
+      case 2: {
+        // Tin nhắn SMS Morse (... -- ...)
+        for (int i = 0; i < 3; i++) {
+          playPwmTone(1350, 35, PIN_I2S_SPK_DIN);
+          delay(25);
+        }
+        delay(60);
+        for (int i = 0; i < 2; i++) {
+          playPwmTone(1350, 95, PIN_I2S_SPK_DIN);
+          delay(35);
+        }
+        delay(60);
+        for (int i = 0; i < 3; i++) {
+          playPwmTone(1350, 35, PIN_I2S_SPK_DIN);
+          delay(25);
+        }
+        break;
+      }
+      case 3: {
+        // Chuông 4 Nốt (Ascending Chime C5-E5-G5-C6)
+        playPwmTone(523, 70, PIN_I2S_SPK_DIN);
+        delay(15);
+        playPwmTone(659, 70, PIN_I2S_SPK_DIN);
+        delay(15);
+        playPwmTone(784, 70, PIN_I2S_SPK_DIN);
+        delay(15);
+        playPwmTone(1046, 130, PIN_I2S_SPK_DIN);
+        break;
+      }
+      case 0:
+      default: {
+        // Bíp dồn dập Nokia Standard (Beep-Beep dồn nhịp)
+        int rep = (step % 2 == 0) ? 2 : 3;
+        for (int i = 0; i < rep; i++) {
+          playPwmTone(1760, 50, PIN_I2S_SPK_DIN);
+          delay(25);
+          playPwmTone(2349, 70, PIN_I2S_SPK_DIN);
+          delay(30);
+        }
+        break;
+      }
+    }
   }
 
   void enableMicMonitor(bool enable) {
@@ -1088,6 +1230,26 @@ namespace TestAudio {
     if (cmd == 'a' || cmd == 'A') {
       Serial.println("🎶 [TEST PWM] Phat giai dieu khoi dong Do-Mi-Son tren GPIO 15...");
       playStartupPwmChime(PIN_I2S_SPK_DIN);
+      return true;
+    }
+    if (cmd == 'n' || cmd == 'N') {
+      Serial.println("🎵 [S40 TUNE] Đang phát Nokia Tune kinh điển...");
+      playNokiaTune();
+      return true;
+    }
+    if (cmd == 'o' || cmd == 'O') {
+      Serial.println("🔔 [S40 TUNE] Đang phát âm báo OK...");
+      playOkChime();
+      return true;
+    }
+    if (cmd == 'd' || cmd == 'D') {
+      Serial.println("🔕 [S40 TUNE] Đang phát âm báo Delete...");
+      playDeleteChime();
+      return true;
+    }
+    if (cmd == 'r' || cmd == 'R') {
+      Serial.println("📩 [S40 TUNE] Đang phát âm tin nhắn Nokia SMS Morse (... -- ...)...");
+      playSmsSpecialTone();
       return true;
     }
     if (cmd == 'v' || cmd == 'V' || cmd == 's' || cmd == 'S') {

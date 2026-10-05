@@ -2282,6 +2282,30 @@ void WebRoutes::begin() {
   server.on("/api/ota_start", HTTP_POST, handleOtaStart);
   server.on("/update", HTTP_POST, handleLocalUpdate, handleLocalUpdateUpload);
 
+  // 6b2. REST API phát thử các âm báo S40 (Nokia Tune, OK, Delete, SMS Morse, Beep)
+  server.on("/api/audio/play_tune", HTTP_POST, []() {
+    String tune = server.hasArg("tune") ? server.arg("tune") : "nokia";
+    if (server.hasArg("plain")) {
+      StaticJsonDocument<128> doc;
+      deserializeJson(doc, server.arg("plain"));
+      if (doc.containsKey("tune")) tune = doc["tune"].as<String>();
+    }
+    if (tune == "nokia" || tune == "1")       TestAudio::playNokiaTune();
+    else if (tune == "ok")                     TestAudio::playOkChime();
+    else if (tune == "delete" || tune == "del") TestAudio::playDeleteChime();
+    else if (tune == "sms" || tune == "2")     TestAudio::playSmsSpecialTone();
+    else if (tune == "beep" || tune == "0")    TestAudio::playKeyBeep();
+    else if (tune == "chime" || tune == "3")   TestAudio::playStartupChime();
+    else TestAudio::playAlarmTuneStep(tune.toInt(), 0);
+
+    StaticJsonDocument<64> res;
+    res["success"] = true;
+    res["played"] = tune;
+    String out;
+    serializeJson(res, out);
+    server.send(200, "application/json", out);
+  });
+
   // 6c. Captive Portal Probes cho iOS / Android / Windows (Tự động mở trang Cấu hình Wi-Fi)
   auto handleCaptiveRedirect = []() {
     server.sendHeader("Location", "http://192.168.4.1/#wifi", true);

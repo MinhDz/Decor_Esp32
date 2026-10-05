@@ -1,9 +1,9 @@
 {
-  "version": "v3.1.1",
+  "version": "v3.1.2",
   "name": "Space OS",
   "build_date": "2026-10-05",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
-  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.1.1/firmware.bin",
-  "size": 1518544,
-  "changelog": "🚀 Space OS v3.1.1 Bản Tối Ưu Mượt Mà:\n- Đồng bộ triệt để giao diện không quét/nháy màn hình (Flicker-Free Partial Redraw) trên toàn bộ hệ điều hành.\n- Tối ưu cuộn & di chuyển con trỏ trong Cài đặt Hệ thống (Mode 6), Hình nền (Mode 5), Trung tâm Trò chơi (Mode 15), Lịch Vạn niên (Mode 14).\n- Menu Tùy chọn & Modal Kiểm tra Cập nhật OTA trong Thông tin Hệ thống (Mode 8) vẽ phủ mượt mà không load lại toàn màn hình.\n- Giữ nguyên trạng thái hiển thị thanh tiêu đề và thanh softkey để tối ưu độ phản hồi phím."
+  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.1.2/firmware.bin",
+  "size": 1523024,
+  "changelog": "🚀 Space OS v3.1.2 Bản Cập Nhật Âm Báo Mono S40:\n- Tích hợp bộ âm thanh mono cổ điển Nokia Symbian S40: tiếng bíp bàn phím dứt khoát (16ms), âm xác nhận OK (E6-B6), âm xóa tệp Delete (G5-D5).\n- Bổ sung 4 giai điệu chuông báo thức có thể chọn tùy ý trong Đồng hồ (Mode 13) và Cài đặt (Mode 6): Nokia Tune kinh điển, Bíp dồn dập Standard, Tin nhắn SMS Morse, Chuông 4 nốt C5-C6.\n- Hỗ trợ nghe thử trực tiếp âm thanh khi chọn chuông hoặc điều chỉnh âm lượng.\n- Bổ sung REST API /api/audio/play_tune và phím tắt Serial ('n', 'o', 'd', 'r') để phát thử âm báo từ xa."
 }

@@ -618,6 +618,7 @@ namespace TestDisplay {
   static bool lastTtp223State = false;
   static unsigned long lastTtp223ChangeMs = 0;
   static bool keyBeepEnabled = true;
+  static int s40AlarmTuneIdx = 1; // 0: Bíp Dồn Dập, 1: Nokia Tune Cổ Điển, 2: SMS Morse, 3: Chuông 4 Nốt
   static int micSensitivityMode = 1; // 0: Thấp, 1: Tiêu chuẩn, 2: Cao
   static bool lastPcLiveState = false;
 
@@ -2882,7 +2883,7 @@ namespace TestDisplay {
   static int lastDrawnSettingsFirstRow = -1;
 
   static void drawSingleSettingsRow(int idx, int vis, bool sel) {
-    if (!tft || idx < 0 || idx >= 10 || vis < 0 || vis >= 7) return;
+    if (!tft || idx < 0 || idx >= 11 || vis < 0 || vis >= 7) return;
     int w = tft->width();
     int ry = 30 + vis * 37;
 
@@ -2895,26 +2896,28 @@ namespace TestDisplay {
       "3. Đồng hồ kim (Analog)"
     };
 
-    const char* labels[10] = {
+    const char* labels[11] = {
       "1. Phong cách Giao diện",
       "2. Độ sáng màn hình",
       "3. Thời gian tắt màn hình",
       "4. Màn hình khóa (AOD)",
       "5. Âm lượng hệ thống",
       "6. Âm báo phím bấm",
-      "7. Độ nhạy Micro thu âm",
-      "8. Biểu cảm Trợ lý AI",
-      "9. Biểu đồ Sóng âm & Cảm biến",
-      "10. Động cơ & Vành đèn (L298N)"
+      "7. Nhạc chuông báo thức",
+      "8. Độ nhạy Micro thu âm",
+      "9. Biểu cảm Trợ lý AI",
+      "10. Biểu đồ Sóng âm & Cảm biến",
+      "11. Động cơ & Vành đèn (L298N)"
     };
 
-    String values[10] = {
+    String values[11] = {
       String(curTheme().name),
       String(screenBrightnessPct) + "%",
       String(TIMEOUT_LABELS[screenTimeoutIdx % 6]),
       String(aodStyleLabels[aodClockStyle % 4]),
       String(spkVol) + "%",
       keyBeepEnabled ? "Đang bật" : "Đang tắt",
+      String(TestAudio::getAlarmTuneName(s40AlarmTuneIdx)),
       String(micSensNames[micSensitivityMode % 3]),
       getEmojiStateName(),
       "Bấm OK để mở ->",
@@ -4999,9 +5002,11 @@ namespace TestDisplay {
         s40MemFileCursor--;
       }
       lastDrawnMemSubState = -1; // Reset để vẽ lại toàn bộ danh sách tệp
+      TestAudio::playDeleteChime();
       showSymbianToast("ĐÃ XÓA TỆP THÀNH CÔNG!");
       return true;
     } else {
+      TestAudio::playDeleteChime();
       showSymbianToast("LỖI: KHÔNG THỂ XÓA TỆP!");
       return false;
     }
@@ -5170,9 +5175,11 @@ namespace TestDisplay {
       if (s40MediaTrackIdx >= s40MediaTrackCount) {
         s40MediaTrackIdx = max(0, s40MediaTrackCount - 1);
       }
+      TestAudio::playDeleteChime();
       showSymbianToast("ĐÃ XÓA BÀI HÁT KHỎI THẺ SD!");
       return true;
     } else {
+      TestAudio::playDeleteChime();
       showSymbianToast("LỖI: KHÔNG THỂ XÓA BÀI HÁT!");
       return false;
     }
@@ -5823,6 +5830,7 @@ namespace TestDisplay {
         s40AlarmMin[i]    = p.getUChar(km, s40AlarmMin[i]) % 60;
         s40AlarmEnable[i] = p.getBool(ke, s40AlarmEnable[i]);
       }
+      s40AlarmTuneIdx = p.getInt("al_tune", 1) % 4;
       uint32_t savedPreset = p.getUInt("tm_pre", s40TimerPresetSec);
       if (savedPreset >= 10 && savedPreset <= 3600) {
         s40TimerPresetSec = savedPreset;
@@ -5844,6 +5852,7 @@ namespace TestDisplay {
         p.putUChar(km, s40AlarmMin[i]);
         p.putBool(ke, s40AlarmEnable[i]);
       }
+      p.putInt("al_tune", s40AlarmTuneIdx);
       p.putUInt("tm_pre", s40TimerPresetSec);
       p.end();
     }
@@ -5970,8 +5979,11 @@ namespace TestDisplay {
     s40PushAlertBigDigits  = bigDigits;
 
     drawPushAlertModal(true);
-    TestAudio::playTone(1760, 90, 85);
-    TestAudio::playTone(2349, 110, 85);
+    if (alertType == 1) {
+      TestAudio::playAlarmTuneStep(s40AlarmTuneIdx, 0);
+    } else {
+      TestAudio::playSmsSpecialTone();
+    }
   }
 
   // Trạng thái Cài đặt thời gian thủ công
@@ -6039,7 +6051,9 @@ namespace TestDisplay {
       tft->fillRect(6, 54, W - 12, 14, C_DARK_BG);
       tft->setTextColor(s40AlarmEditField > 0 ? C_YELLOW : C_NEON_CYAN, C_DARK_BG);
       tft->setCursor(8, 56);
-      if (s40AlarmEditField == 1) {
+      if (s40AlarmCursor == 3) {
+        tft->print("CHỌN CHUÔNG: [TRÁI/PHẢI] Đổi Chuông | [OK] Nghe thử");
+      } else if (s40AlarmEditField == 1) {
         tft->print("ĐANG CHỈNH GIỜ: [LÊN/XUỐNG] +-1h | [OK] Sang Phút");
       } else if (s40AlarmEditField == 2) {
         tft->print("CHỈNH PHÚT: [LÊN/XUỐNG] +-1p, [TRÁI/PHẢI] +-5p");
@@ -6050,17 +6064,17 @@ namespace TestDisplay {
       }
 
       for (int i = 0; i < 3; i++) {
-        int ry = 72 + i * 62;
+        int ry = 70 + i * 58;
         bool sel = (i == s40AlarmCursor);
         uint16_t cardBg = sel ? 0x1949 : C_CARD_BG;
-        tft->fillRoundRect(8, ry, W - 16, 54, 6, cardBg);
-        tft->drawRoundRect(8, ry, W - 16, 54, 6, sel ? (s40AlarmEditField > 0 ? C_YELLOW : C_NEON_CYAN) : C_CARD_BORDER);
+        tft->fillRoundRect(8, ry, W - 16, 52, 6, cardBg);
+        tft->drawRoundRect(8, ry, W - 16, 52, 6, sel ? (s40AlarmEditField > 0 ? C_YELLOW : C_NEON_CYAN) : C_CARD_BORDER);
 
         // Vẽ khung nổi bật quanh phần Giờ hoặc Phút nếu đang chỉnh trực tiếp
         if (sel && s40AlarmEditField == 1) {
-          tft->fillRoundRect(15, ry + 9, 28, 22, 4, C_NEON_PINK);
+          tft->fillRoundRect(15, ry + 8, 28, 22, 4, C_NEON_PINK);
         } else if (sel && s40AlarmEditField == 2) {
-          tft->fillRoundRect(51, ry + 9, 28, 22, 4, C_NEON_PINK);
+          tft->fillRoundRect(51, ry + 8, 28, 22, 4, C_NEON_PINK);
         }
 
         char hStr[6], mStr[6];
@@ -6071,21 +6085,21 @@ namespace TestDisplay {
         uint16_t baseTimeCol = s40AlarmEnable[i] ? C_YELLOW : C_SLATE;
         tft->setTextColor((sel && s40AlarmEditField == 1) ? C_WHITE : baseTimeCol,
                           (sel && s40AlarmEditField == 1) ? C_NEON_PINK : cardBg);
-        tft->setCursor(18, ry + 12);
+        tft->setCursor(18, ry + 11);
         tft->print(hStr);
 
         tft->setTextColor(baseTimeCol, cardBg);
-        tft->setCursor(42, ry + 12);
+        tft->setCursor(42, ry + 11);
         tft->print(":");
 
         tft->setTextColor((sel && s40AlarmEditField == 2) ? C_WHITE : baseTimeCol,
                           (sel && s40AlarmEditField == 2) ? C_NEON_PINK : cardBg);
-        tft->setCursor(54, ry + 12);
+        tft->setCursor(54, ry + 11);
         tft->print(mStr);
 
         tft->setTextSize(1);
         tft->setTextColor(C_WHITE, cardBg);
-        tft->setCursor(18, ry + 36);
+        tft->setCursor(18, ry + 35);
         if (sel && s40AlarmEditField == 1) {
           tft->print(">> Đang sửa GIỜ (Bấm OK sang Phút)");
         } else if (sel && s40AlarmEditField == 2) {
@@ -6096,14 +6110,37 @@ namespace TestDisplay {
 
         // Nút gạt BẬT/TẮT
         uint16_t badgeCol = s40AlarmEnable[i] ? C_NEON_GREEN : 0x2124;
-        tft->fillRoundRect(W - 72, ry + 15, 52, 24, 5, badgeCol);
-        tft->drawRoundRect(W - 72, ry + 15, 52, 24, 5, C_WHITE);
+        tft->fillRoundRect(W - 72, ry + 14, 52, 24, 5, badgeCol);
+        tft->drawRoundRect(W - 72, ry + 14, 52, 24, 5, C_WHITE);
         tft->setTextColor(s40AlarmEnable[i] ? C_BLACK : C_SLATE, badgeCol);
-        tft->setCursor(W - 58, ry + 23);
+        tft->setCursor(W - 58, ry + 22);
         tft->print(s40AlarmEnable[i] ? "BẬT" : "TẮT");
       }
+
+      // 4. Mục chọn Nhạc chuông Báo thức (Alarm Ringtone)
+      int ryTune = 250;
+      bool selTune = (s40AlarmCursor == 3);
+      uint16_t tuneBg = selTune ? 0x1949 : C_CARD_BG;
+      tft->fillRoundRect(8, ryTune, W - 16, 40, 5, tuneBg);
+      tft->drawRoundRect(8, ryTune, W - 16, 40, 5, selTune ? C_NEON_CYAN : C_CARD_BORDER);
+
+      tft->setTextSize(1);
+      tft->setTextColor(selTune ? C_YELLOW : C_SLATE, tuneBg);
+      tft->setCursor(14, ryTune + 6);
+      tft->print("Nhạc chuông báo thức:");
+
+      tft->setTextColor(selTune ? C_NEON_GREEN : C_NEON_CYAN, tuneBg);
+      tft->setCursor(14, ryTune + 22);
+      tft->printf("< %s >", TestAudio::getAlarmTuneName(s40AlarmTuneIdx));
+
+      tft->fillRoundRect(W - 68, ryTune + 8, 54, 24, 4, selTune ? C_NEON_PINK : 0x2124);
+      tft->setTextColor(C_WHITE, selTune ? C_NEON_PINK : 0x2124);
+      tft->setCursor(W - 58, ryTune + 16);
+      tft->print("Nghe");
+
       drawSymbianSoftkeys("[MENU:Tab]",
-                          s40AlarmEditField == 0 ? "[OK:ChỉnhGiờ]" : (s40AlarmEditField == 1 ? "[OK:SangPhút]" : "[OK:Lưu&Bật]"),
+                          s40AlarmCursor == 3 ? "[OK:NgheThử]" :
+                          (s40AlarmEditField == 0 ? "[OK:ChỉnhGiờ]" : (s40AlarmEditField == 1 ? "[OK:SangPhút]" : "[OK:Lưu&Bật]")),
                           s40AlarmEditField > 0 ? "[EXIT:Xong]" : "[EXIT:Menu]");
     } else if (s40ClockTab == 1) {
       // --- TAB 1: BẤM GIỜ THỂ THAO (STOPWATCH) ---
@@ -7271,23 +7308,33 @@ namespace TestDisplay {
       showSymbianToast(aodStNames[aodClockStyle]);
     } else if (row == 4) {
       TestAudio::setSpeakerVolumePct(TestAudio::getSpeakerVolumePct() + dir * 5);
+      TestAudio::playKeyBeep();
     } else if (row == 5) {
       keyBeepEnabled = !keyBeepEnabled;
       saveSystemSettingsPrefs();
+      if (keyBeepEnabled) TestAudio::playOkChime();
+      else TestAudio::playDeleteChime();
+      showSymbianToast(keyBeepEnabled ? "ĐÃ BẬT ÂM PHÍM BẤM" : "ĐÃ TẮT ÂM PHÍM BẤM");
     } else if (row == 6) {
+      loadClockSuitePrefsIfNeeded();
+      s40AlarmTuneIdx = (s40AlarmTuneIdx + dir + 4) % 4;
+      saveClockSuitePrefs();
+      TestAudio::playAlarmTuneStep(s40AlarmTuneIdx, 0);
+      showSymbianToast(String("CHUÔNG: ") + TestAudio::getAlarmTuneName(s40AlarmTuneIdx));
+    } else if (row == 7) {
       micSensitivityMode = (micSensitivityMode + dir + 3) % 3;
       TestAudio::setMicSensitivityMode(micSensitivityMode);
       saveSystemSettingsPrefs();
       const char* mNames[3] = { "Mic: THẤP (1.8x)", "Mic: TIÊU CHUẨN (3.5x)", "Mic: CAO (5.5x)" };
       showSymbianToast(mNames[micSensitivityMode]);
-    } else if (row == 7) {
+    } else if (row == 8) {
       eyeState = (eyeState + dir + 12) % 12;
       lastExternalEmojiSync = millis();
-    } else if (row == 8) {
+    } else if (row == 9) {
       currentMode = 3;
       refreshActiveScreen();
       return;
-    } else if (row == 9) {
+    } else if (row == 10) {
       int m = (TestWindmill::getMode() + dir + 5) % 5;
       TestWindmill::setMode(m);
       saveSystemSettingsPrefs();
@@ -7310,6 +7357,7 @@ namespace TestDisplay {
       setBacklightBrightness(screenBrightnessPct);
       if (keyIndex == 0) {
         // Phím OK: Tắt chuông hoàn toàn
+        TestAudio::playOkChime();
         if (s40PushAlertType == 1) {
           s40SnoozeActive = false;
           showSymbianToast("ĐÃ TẮT CHUÔNG BÁO THỨC!");
@@ -7319,6 +7367,7 @@ namespace TestDisplay {
         }
       } else {
         // Các phím khác (TRÁI / PHẢI / EXIT / LÊN / XUỐNG / MENU): Hoãn +5 Phút (Snooze) hoặc Đếm thêm +1 Phút
+        TestAudio::playDeleteChime();
         if (s40PushAlertType == 1) {
           int hr, mn, sc, wd, dy, mo, yr;
           getCurrentDateTime(hr, mn, sc, wd, dy, mo, yr);
@@ -7348,6 +7397,11 @@ namespace TestDisplay {
       Serial.println("💡 [WAKEUP] Đã đánh thức màn hình từ chế độ AOD / Sleep bằng phím bấm!");
       refreshActiveScreen();
       return;
+    }
+
+    // Phát âm bíp bàn phím mono siêu ngắn dứt khoát nếu tính năng Âm bàn phím đang bật (trừ khi đang chơi game để tránh trễ)
+    if (keyBeepEnabled && (currentMode != 15 || s40GameActiveId == 0)) {
+      TestAudio::playKeyBeep();
     }
 
     // Nếu đang ở Trung tâm Trò chơi (Mode 15): chuyển toàn bộ sự kiện phím (bao gồm cả MENU) cho Game xử lý!
@@ -7533,10 +7587,10 @@ namespace TestDisplay {
       }
     } else if (currentMode == 6) {
       if (keyIndex == 1) {
-        s40SettingsCursor = (s40SettingsCursor + 9) % 10;
+        s40SettingsCursor = (s40SettingsCursor + 10) % 11;
         drawSettingsAppScreen(false);
       } else if (keyIndex == 2) {
-        s40SettingsCursor = (s40SettingsCursor + 1) % 10;
+        s40SettingsCursor = (s40SettingsCursor + 1) % 11;
         drawSettingsAppScreen(false);
       } else if (keyIndex == 3) {
         adjustSettingsAppItem(s40SettingsCursor, -1);
@@ -7561,6 +7615,7 @@ namespace TestDisplay {
           stCfg.bgImage = files[idx];
           stCfg.bgMode = "image";
           saveConfigToFile();
+          TestAudio::playOkChime();
           showSymbianToast("ĐÃ ĐẶT LÀM HÌNH NỀN!");
           drawGalleryAppScreen(false);
         }
@@ -7870,7 +7925,7 @@ namespace TestDisplay {
                 stCfg.bgMode = "image";
                 saveConfigToFile();
                 showSymbianToast("ĐÃ ĐẶT LÀM HÌNH NỀN!");
-                TestAudio::playTone(1975, 60, 75);
+                TestAudio::playOkChime();
                 s40MemSubState = 1;
               } else if (s40MemPopupCursor == 2) {
                 s40MemSubState = 4; // Chi tiết tệp
@@ -8066,7 +8121,7 @@ namespace TestDisplay {
             stCfg.bgMode = "image";
             saveConfigToFile();
             showSymbianToast("ĐÃ ĐẶT LÀM HÌNH NỀN!");
-            TestAudio::playTone(1975, 60, 75);
+            TestAudio::playOkChime();
             drawMemoryManagerAppScreen();
           }
         } else if (keyIndex == 6) { // EXIT: Thoát khỏi chế độ tràn viền về danh sách tệp
@@ -8282,7 +8337,11 @@ namespace TestDisplay {
       loadClockSuitePrefsIfNeeded();
       if (keyIndex == 3) { // LEFT
         if (s40ClockTab == 0) {
-          if (s40AlarmEditField == 1) {
+          if (s40AlarmCursor == 3) {
+            s40AlarmTuneIdx = (s40AlarmTuneIdx + 3) % 4;
+            saveClockSuitePrefs();
+            TestAudio::playAlarmTuneStep(s40AlarmTuneIdx, 0);
+          } else if (s40AlarmEditField == 1) {
             // Đang sửa GIỜ: Giảm 1 giờ
             s40AlarmHour[s40AlarmCursor] = (s40AlarmHour[s40AlarmCursor] + 23) % 24;
             saveClockSuitePrefs();
@@ -8311,7 +8370,11 @@ namespace TestDisplay {
         }
       } else if (keyIndex == 4) { // RIGHT
         if (s40ClockTab == 0) {
-          if (s40AlarmEditField == 1) {
+          if (s40AlarmCursor == 3) {
+            s40AlarmTuneIdx = (s40AlarmTuneIdx + 1) % 4;
+            saveClockSuitePrefs();
+            TestAudio::playAlarmTuneStep(s40AlarmTuneIdx, 0);
+          } else if (s40AlarmEditField == 1) {
             // Đang sửa GIỜ: Tăng 1 giờ
             s40AlarmHour[s40AlarmCursor] = (s40AlarmHour[s40AlarmCursor] + 1) % 24;
             saveClockSuitePrefs();
@@ -8346,7 +8409,7 @@ namespace TestDisplay {
             s40AlarmMin[s40AlarmCursor] = (s40AlarmMin[s40AlarmCursor] + 1) % 60;
             saveClockSuitePrefs();
           } else {
-            s40AlarmCursor = (s40AlarmCursor + 2) % 3;
+            s40AlarmCursor = (s40AlarmCursor + 3) % 4;
           }
           drawClockSuiteAppScreen(false);
         } else if (s40ClockTab == 1) {
@@ -8385,7 +8448,7 @@ namespace TestDisplay {
             s40AlarmMin[s40AlarmCursor] = (s40AlarmMin[s40AlarmCursor] + 59) % 60;
             saveClockSuitePrefs();
           } else {
-            s40AlarmCursor = (s40AlarmCursor + 1) % 3;
+            s40AlarmCursor = (s40AlarmCursor + 1) % 4;
           }
           drawClockSuiteAppScreen(false);
         } else if (s40ClockTab == 1) {
@@ -8412,17 +8475,23 @@ namespace TestDisplay {
         }
       } else if (keyIndex == 0) { // OK
         if (s40ClockTab == 0) {
-          // Chu trình OK trên dòng báo thức: 0 (Chọn dòng) -> 1 (Chỉnh Giờ) -> 2 (Chỉnh Phút) -> Lưu & Bật!
-          if (s40AlarmEditField == 0) {
-            s40AlarmEditField = 1;
-          } else if (s40AlarmEditField == 1) {
-            s40AlarmEditField = 2;
+          if (s40AlarmCursor == 3) {
+            TestAudio::playAlarmTuneStep(s40AlarmTuneIdx, 0);
+            showSymbianToast(String("ĐÃ CHỌN: ") + TestAudio::getAlarmTuneName(s40AlarmTuneIdx));
           } else {
-            s40AlarmEditField = 0;
-            s40AlarmEnable[s40AlarmCursor] = true;
-            s40LastAlarmTrigMin = -1;
-            saveClockSuitePrefs();
-            showSymbianToast("ĐÃ LƯU & BẬT BÁO THỨC!");
+            // Chu trình OK trên dòng báo thức: 0 (Chọn dòng) -> 1 (Chỉnh Giờ) -> 2 (Chỉnh Phút) -> Lưu & Bật!
+            if (s40AlarmEditField == 0) {
+              s40AlarmEditField = 1;
+            } else if (s40AlarmEditField == 1) {
+              s40AlarmEditField = 2;
+            } else {
+              s40AlarmEditField = 0;
+              s40AlarmEnable[s40AlarmCursor] = true;
+              s40LastAlarmTrigMin = -1;
+              saveClockSuitePrefs();
+              TestAudio::playOkChime();
+              showSymbianToast("ĐÃ LƯU & BẬT BÁO THỨC!");
+            }
           }
           drawClockSuiteAppScreen(false);
         } else if (s40ClockTab == 1) {
@@ -8790,11 +8859,11 @@ namespace TestDisplay {
         s40PushAlertAnimPhase++;
         drawPushAlertModal(false);
       }
-      // Phát chuông báo kép mỗi 750ms trong 60 giây đầu tiên
-      if ((now - s40PushAlertStartMs < 60000UL) && (now - s40PushAlertLastBeepMs >= 750)) {
+      // Phát chuông báo theo giai điệu S40 đã chọn (Nokia Tune, Standard Beeps, SMS Morse, 4 Nốt)
+      unsigned long stepInterval = (s40PushAlertType == 1 && s40AlarmTuneIdx == 1) ? 1400UL : 750UL;
+      if ((now - s40PushAlertStartMs < 60000UL) && (now - s40PushAlertLastBeepMs >= stepInterval)) {
         s40PushAlertLastBeepMs = now;
-        TestAudio::playTone(s40PushAlertType == 1 ? 1760 : 1480, 65, 80);
-        TestAudio::playTone(s40PushAlertType == 1 ? 2349 : 1975, 85, 80);
+        TestAudio::playAlarmTuneStep(s40PushAlertType == 1 ? s40AlarmTuneIdx : 0, s40PushAlertAnimPhase);
       }
       return;
     }
