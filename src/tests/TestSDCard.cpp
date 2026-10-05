@@ -459,7 +459,10 @@ namespace TestSDCard {
     return true;
   }
 
+  static bool sdInitialized = false;
   bool init() {
+    if (sdInitialized) return sdMounted;
+    sdInitialized = true;
     runFullElectricalAndSpiProbe();
     lastAutoProbeMs = millis();
     return sdMounted;

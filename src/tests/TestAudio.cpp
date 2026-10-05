@@ -155,7 +155,11 @@ namespace TestAudio {
     playPwmTone(1568, 140, pin);
   }
 
+  static bool audioInitialized = false;
   void init() {
+    if (audioInitialized) return;
+    audioInitialized = true;
+
     Serial.println("\n-------------------------------------------------------");
     Serial.println("🔊 [AUDIO I2S 32-BIT & PWM SPK GPIO 15] HỆ THỐNG ÂM THANH");
     Serial.printf("   + BCLK (SCK chung) : GPIO %d\n", PIN_I2S_BCLK);
@@ -168,9 +172,6 @@ namespace TestAudio {
     if (installMicRx()) {
       Serial.println("✅ [INMP441] Đã mở luồng thu âm 32-bit I2S tại GPIO 6! Bấm 'm' để xem Sóng Âm, 'p' để nghe lại Loa PWM.");
     }
-
-    // Phát giai điệu chào mừng kiểm tra Loa nối tạm ngay khi ESP32 khởi động!
-    playStartupPwmChime(PIN_I2S_SPK_DIN);
   }
 
   static void playToneOnPin(uint8_t doutPin, uint16_t freqHz, uint16_t durationMs, uint8_t volumePct) {

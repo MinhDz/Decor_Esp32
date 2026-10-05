@@ -111,7 +111,11 @@ namespace TestButtons {
     Serial.println("================================================================================");
   }
 
+  static bool buttonsInitialized = false;
   void init() {
+    if (buttonsInitialized) return;
+    buttonsInitialized = true;
+
     analogReadResolution(12);
     analogSetPinAttenuation(activeAdcPin, ADC_11db); // Đọc toàn dải 0.00V .. 3.30V
     pinMode(activeAdcPin, INPUT);

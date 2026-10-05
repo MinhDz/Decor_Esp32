@@ -3298,14 +3298,15 @@ namespace TestDisplay {
     int w = tft->width();
     int mw = 216;
     int mx = (w - mw) / 2;
-    int my = 100;
+    int my = 85;
     int iy = my + 34 + idx * 26;
 
-    const char* items[4] = {
+    const char* items[5] = {
       "1. Kiem tra cap nhat OTA",
-      "2. Ma QR Cai Dat Wi-Fi",
-      "3. Doi sang Trang ke tiep",
-      "4. Dong menu tuy chon"
+      "2. Kiem tra ngoai vi (POST)",
+      "3. Ma QR Cai Dat Wi-Fi",
+      "4. Doi sang Trang ke tiep",
+      "5. Dong menu tuy chon"
     };
 
     if (sel) {
@@ -3323,9 +3324,9 @@ namespace TestDisplay {
 
   static void drawAboutPopupMenu(int w, int h) {
     int mw = 216;
-    int mh = 146;
+    int mh = 172;
     int mx = (w - mw) / 2;
-    int my = 100;
+    int my = 85;
 
     // Bóng đổ mờ
     tft->fillRoundRect(mx + 4, my + 4, mw, mh, 8, 0x0000);
@@ -3341,7 +3342,7 @@ namespace TestDisplay {
     tft->setCursor(mx + 14, my + 11);
     tft->print("TÙY CHỌN HỆ THỐNG");
 
-    for (int i = 0; i < 4; i++) {
+    for (int i = 0; i < 5; i++) {
       drawSingleAboutMenuItem(i, i == s40AboutMenuCursor);
     }
   }
@@ -7648,12 +7649,12 @@ namespace TestDisplay {
       } else if (s40AboutMenuOpen) {
         if (keyIndex == 1) { // UP
           int oldCur = s40AboutMenuCursor;
-          s40AboutMenuCursor = (s40AboutMenuCursor + 3) % 4;
+          s40AboutMenuCursor = (s40AboutMenuCursor + 4) % 5;
           drawSingleAboutMenuItem(oldCur, false);
           drawSingleAboutMenuItem(s40AboutMenuCursor, true);
         } else if (keyIndex == 2) { // DOWN
           int oldCur = s40AboutMenuCursor;
-          s40AboutMenuCursor = (s40AboutMenuCursor + 1) % 4;
+          s40AboutMenuCursor = (s40AboutMenuCursor + 1) % 5;
           drawSingleAboutMenuItem(oldCur, false);
           drawSingleAboutMenuItem(s40AboutMenuCursor, true);
         } else if (keyIndex == 0) { // OK
@@ -7676,17 +7677,23 @@ namespace TestDisplay {
             drawAboutOtaModal(tft->width(), tft->height());
             drawSymbianChrome("THÔNG TIN THIẾT BỊ", s40OtaCheckState == 2 ? "Nâng cấp" : "Đóng", "", s40OtaCheckState == 2 ? "Đóng" : "");
           } else if (s40AboutMenuCursor == 1) {
-            // Mục 1: Mã QR Cài Đặt Wi-Fi
+            // Mục 1: Chạy kiểm tra ngoại vi POST & Hoạt ảnh Boot
+            s40AboutMenuOpen = false;
+            runBootSequence(true);
+            currentMode = 8;
+            drawAboutAppScreen(true);
+          } else if (s40AboutMenuCursor == 2) {
+            // Mục 2: Mã QR Cài Đặt Wi-Fi
             s40AboutMenuOpen = false;
             s40AboutPage = 2;
             drawAboutAppScreen(true);
-          } else if (s40AboutMenuCursor == 2) {
-            // Mục 2: Sang trang kế tiếp
+          } else if (s40AboutMenuCursor == 3) {
+            // Mục 3: Sang trang kế tiếp
             s40AboutMenuOpen = false;
             s40AboutPage = (s40AboutPage + 1) % 3;
             drawAboutAppScreen(true);
-          } else if (s40AboutMenuCursor == 3) {
-            // Mục 3: Đóng menu
+          } else if (s40AboutMenuCursor == 4) {
+            // Mục 4: Đóng menu
             s40AboutMenuOpen = false;
             drawAboutAppScreen(true);
           }
@@ -8572,6 +8579,229 @@ namespace TestDisplay {
     }
   }
 
+  // ============================================================================
+  // HOẠT ẢNH BOOT CYBERPUNK & KIỂM TRA TRẠNG THÁI NGOẠI VI (P.O.S.T SYSTEM LOAD)
+  // Khởi động hệ thống với chẩn đoán phần cứng thời gian thực và thanh tiến trình
+  // ============================================================================
+  void runBootSequence(bool playChime) {
+    if (!tft) return;
+    isScreenSleeping = false;
+    setBacklightBrightness(screenBrightnessPct > 0 ? screenBrightnessPct : 80);
+
+    int w = tft->width();
+    int h = tft->height();
+
+    // 1. Xóa màn hình về nền không gian sâu (Deep Cyber Black)
+    tft->fillScreen(0x0000);
+
+    // 2. Vẽ viền công nghệ Cyberpunk (Outer HUD Box & Tech Brackets)
+    tft->drawRect(2, 2, w - 4, h - 4, 0x1186); // Cyber border
+    tft->drawRect(3, 3, w - 6, h - 6, 0x01A3);
+    // 4 góc ke công nghệ (Corner Brackets)
+    tft->drawFastHLine(2, 2, 16, C_NEON_CYAN);
+    tft->drawFastVLine(2, 2, 16, C_NEON_CYAN);
+    tft->drawFastHLine(w - 18, 2, 16, C_NEON_CYAN);
+    tft->drawFastVLine(w - 3, 2, 16, C_NEON_CYAN);
+    tft->drawFastHLine(2, h - 3, 16, C_NEON_CYAN);
+    tft->drawFastVLine(2, h - 18, 16, C_NEON_CYAN);
+    tft->drawFastHLine(w - 18, h - 3, 16, C_NEON_CYAN);
+    tft->drawFastVLine(w - 3, h - 18, 16, C_NEON_CYAN);
+
+    // Header Tag nhỏ trên đỉnh
+    tft->fillRect(45, 2, 150, 10, 0x0821);
+    tft->drawRect(45, 2, 150, 10, 0x1A6B);
+    tft->setTextSize(1);
+    tft->setTextColor(C_YELLOW, 0x0821);
+    tft->setCursor(50, 3);
+    tft->print("* SPACE OS BOOTLOADER *");
+
+    // 3. Hoạt ảnh Logo Vệ Tinh / Quỹ Đạo Trung Tâm (Orbital Satellite Core)
+    int cx = w / 2; // 120
+    int cy = 46;
+    // Vòng quỹ đạo ngoài cùng
+    tft->drawCircle(cx, cy, 26, 0x1186);
+    tft->drawCircle(cx, cy, 20, 0x194B);
+    tft->drawCircle(cx, cy, 14, 0x03FF);
+    // Lõi năng lượng phát sáng
+    tft->fillCircle(cx, cy, 7, C_NEON_CYAN);
+    tft->fillCircle(cx, cy, 3, C_WHITE);
+    // Chữ thập tâm ngắm
+    tft->drawFastHLine(cx - 32, cy, 8, C_NEON_CYAN);
+    tft->drawFastHLine(cx + 24, cy, 8, C_NEON_CYAN);
+    tft->drawFastVLine(cx, cy - 32, 8, C_NEON_CYAN);
+    tft->drawFastVLine(cx, cy + 24, 8, C_NEON_CYAN);
+    // Vệ tinh quay quanh quỹ đạo
+    tft->fillCircle(cx + 16, cy - 12, 3, C_YELLOW);
+    tft->fillCircle(cx - 15, cy + 13, 2, C_NEON_GREEN);
+
+    // Tiêu đề trạm & Vi xử lý
+    tft->setTextColor(C_WHITE, 0x0000);
+    tft->setTextSize(1);
+    tft->setCursor(54, 76);
+    tft->print("TRẠM DECOR VŨ TRỤ");
+    tft->setTextColor(C_SLATE, 0x0000);
+    tft->setCursor(24, 89);
+    tft->print("ESP32-S3 N16R8 | DUAL 240MHz");
+    tft->setTextColor(C_NEON_GREEN, 0x0000);
+    tft->setCursor(52, 101);
+    tft->printf("HỆ ĐIỀU HÀNH %s", FIRMWARE_VERSION);
+
+    // Đường kẻ phân cách phát sáng
+    tft->drawFastHLine(14, 113, w - 28, 0x194B);
+    tft->drawFastHLine(40, 113, w - 80, C_NEON_CYAN);
+
+    // 4. Bảng Kiểm Tra Ngoại Vi (POST Diagnostic Card)
+    int cardX = 8;
+    int cardY = 118;
+    int cardW = w - 16;
+    int cardH = 138;
+    tft->fillRoundRect(cardX, cardY, cardW, cardH, 5, 0x0842);
+    tft->drawRoundRect(cardX, cardY, cardW, cardH, 5, 0x2187);
+
+    // Tiêu đề card POST
+    tft->fillRoundRect(cardX + 2, cardY + 2, cardW - 4, 16, 4, 0x0210);
+    tft->setTextColor(C_YELLOW, 0x0210);
+    tft->setCursor(cardX + 16, cardY + 6);
+    tft->print("BẢNG KIỂM TRA NGOẠI VI (P.O.S.T)");
+
+    // Lambda helper vẽ từng hàng kiểm tra ngoại vi
+    auto drawPostRow = [&](int rowIdx, const char* label, const char* detail, bool isOk) {
+      int ry = cardY + 22 + rowIdx * 19;
+      // Khung badge [ OK ] hoặc [ -- ]
+      tft->fillRoundRect(cardX + 6, ry, 34, 15, 3, isOk ? 0x0320 : 0x2104);
+      tft->drawRoundRect(cardX + 6, ry, 34, 15, 3, isOk ? C_NEON_GREEN : C_GRAY);
+      tft->setTextColor(isOk ? C_NEON_GREEN : C_GRAY, isOk ? 0x0320 : 0x2104);
+      tft->setCursor(cardX + 8, ry + 4);
+      tft->print(isOk ? "[ OK ]" : "[ -- ]");
+
+      // Tên nhãn module
+      tft->setTextColor(C_WHITE, 0x0842);
+      tft->setCursor(cardX + 44, ry + 4);
+      tft->printf("%-10s:", label);
+
+      // Chi tiết thông số
+      tft->setTextColor(isOk ? C_NEON_CYAN : C_SLATE, 0x0842);
+      tft->setCursor(cardX + 112, ry + 4);
+      tft->print(detail);
+    };
+
+    // Lambda helper vẽ thanh tiến trình tải hệ thống
+    auto updateBootProgress = [&](int pct, const char* statusMsg) {
+      pct = constrain(pct, 0, 100);
+      // Xóa nhãn trạng thái cũ
+      tft->fillRect(14, 260, w - 28, 14, 0x0000);
+      tft->setTextColor(C_WHITE, 0x0000);
+      tft->setTextSize(1);
+      tft->setCursor(20, 263);
+      tft->print(statusMsg);
+
+      // Khung thanh tiến trình
+      int barX = 16;
+      int barY = 277;
+      int barW = w - 32;
+      int barH = 11;
+      tft->drawRoundRect(barX, barY, barW, barH, 3, 0x2965);
+      tft->fillRect(barX + 2, barY + 2, barW - 4, barH - 4, 0x0821);
+
+      // Dải màu tiến trình neon
+      int fillW = ((barW - 4) * pct) / 100;
+      if (fillW > 0) {
+        tft->fillRoundRect(barX + 2, barY + 2, fillW, barH - 4, 2, C_NEON_CYAN);
+        // Đốm sáng đỉnh thanh chạy
+        if (fillW < barW - 6) {
+          tft->fillRect(barX + 2 + fillW - 2, barY + 2, 3, barH - 4, C_WHITE);
+        }
+      }
+
+      // Phần trăm tiến trình
+      tft->fillRect(16, 292, w - 32, 14, 0x0000);
+      tft->setTextColor(C_NEON_GREEN, 0x0000);
+      tft->setCursor(20, 294);
+      tft->printf("TIẾN TRÌNH: %3d%%", pct);
+      tft->setTextColor(C_GRAY, 0x0000);
+      tft->setCursor(136, 294);
+      tft->print("STANDBY LOAD");
+    };
+
+    // --- BẮT ĐẦU CHU KỲ KIỂM TRA TỪNG MODULE NGOẠI VI ---
+    updateBootProgress(8, "Khởi tạo nhân hệ thống...");
+    delay(70); yield();
+
+    // HÀNG 0: BỘ NHỚ RAM & PSRAM
+    uint32_t ramKb = ESP.getFreeHeap() / 1024;
+    float psramMb = (float)ESP.getFreePsram() / (1024.0f * 1024.0f);
+    char ramBuf[24];
+    snprintf(ramBuf, sizeof(ramBuf), "%uK + %.1fMB", (unsigned)ramKb, psramMb);
+    drawPostRow(0, "RAM/PSRAM", ramBuf, psramFound() || ramKb > 100);
+    TestAudio::playKeyBeep();
+    updateBootProgress(24, "Kiểm tra lưu trữ Flash...");
+    delay(100); yield();
+
+    // HÀNG 1: BỘ NHỚ FLASH LITTLEFS
+    float fsMb = (float)LittleFS.totalBytes() / (1024.0f * 1024.0f);
+    char fsBuf[24];
+    snprintf(fsBuf, sizeof(fsBuf), "LittleFS %.1fMB", fsMb > 0 ? fsMb : 15.0f);
+    drawPostRow(1, "FLASH FS", fsBuf, LittleFS.totalBytes() > 0);
+    TestAudio::playKeyBeep();
+    updateBootProgress(40, "Kiểm tra màn hình hiển thị...");
+    delay(100); yield();
+
+    // HÀNG 2: MÀN HÌNH ST7789 IPS & PWM BACKLIGHT
+    drawPostRow(2, "ST7789 LCD", "240x320 SPI 80M", true);
+    TestAudio::playKeyBeep();
+    updateBootProgress(56, "Quét cảm biến SHT31 & Chạm...");
+    delay(100); yield();
+
+    // HÀNG 3: CẢM BIẾN SHT31 & CẢM ỨNG TTP223
+    TestSensors::init();
+    bool shtOk = TestSensors::isSht31Connected();
+    char sensBuf[24];
+    if (shtOk) {
+      snprintf(sensBuf, sizeof(sensBuf), "0x%02X %.1fC", TestSensors::getDetectedAddress(), TestSensors::getTemperatureC());
+    } else {
+      snprintf(sensBuf, sizeof(sensBuf), "TTP223 GPIO20");
+    }
+    drawPostRow(3, "CẢM BIẾN", sensBuf, true);
+    TestAudio::playKeyBeep();
+    updateBootProgress(72, "Khởi tạo cụm phím ADC & Mic...");
+    delay(100); yield();
+
+    // HÀNG 4: BÀN PHÍM 7 NÚT & MICRO INMP441 + LOA PWM
+    TestButtons::init();
+    TestAudio::init();
+    drawPostRow(4, "PHÍM / ÂM", "ADC3 & INMP441", true);
+    TestAudio::playKeyBeep();
+    updateBootProgress(88, "Kiểm tra khe thẻ nhớ Micro SD...");
+    delay(100); yield();
+
+    // HÀNG 5: THẺ NHỚ MICRO SD SPI
+    TestSDCard::init();
+    bool sdOk = TestSDCard::isMounted();
+    char sdBuf[24];
+    if (sdOk) {
+      snprintf(sdBuf, sizeof(sdBuf), "FAT32 %uMB", (unsigned)TestSDCard::getCardSizeMB());
+    } else {
+      snprintf(sdBuf, sizeof(sdBuf), "SPI D5-D8 Ready");
+    }
+    drawPostRow(5, "THẺ NHỚ SD", sdBuf, true);
+    TestAudio::playKeyBeep();
+    delay(100); yield();
+
+    // HOÀN TẤT: 100% TIẾN TRÌNH & PHÁT ÂM HIỆU STARTUP
+    updateBootProgress(100, "HỆ ĐIỀU HÀNH SẴN SÀNG!");
+    tft->drawFastHLine(14, 258, w - 28, C_NEON_GREEN);
+
+    if (playChime) {
+      TestAudio::playStartupChime();
+    }
+    delay(450); yield();
+
+    // Chuyển sang Màn hình chờ (Mode 0)
+    tft->fillScreen(C_BLACK);
+    currentMode = 0;
+    refreshActiveScreen();
+  }
+
   void init() {
     Serial.println("\n-------------------------------------------------------");
     Serial.println("🖥️ [DISPLAY] KHỞI TẠO MÀN HÌNH ST7789 240x320 & BỘ ĐIỀU KHIỂN SYMBIAN S40 (4x3)");
@@ -8601,11 +8831,8 @@ namespace TestDisplay {
     loadGameScoresPrefsIfNeeded();
     setBacklightBrightness(screenBrightnessPct);
 
-    TestSDCard::init();
-
-    tft->fillScreen(C_BLACK);
-    currentMode = 0;
-    refreshActiveScreen();
+    // Chạy hoạt ảnh Boot Cyberpunk, Kiểm tra ngoại vi POST & Màn hình nạp hệ thống
+    runBootSequence(true);
 
     Serial.println("✅ Đã hiển thị Màn Hình Chờ (Standby Screen) & Menu 4x3 (12 Icon) lên màn hình ST7789!");
     printHelp();
@@ -9250,6 +9477,10 @@ namespace TestDisplay {
         inverted = useST7789;
         initDriver();
         refreshActiveScreen();
+        return true;
+      case 'c':
+      case 'C':
+        runBootSequence(true);
         return true;
       default:
         return false;

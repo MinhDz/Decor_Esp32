@@ -56,6 +56,9 @@ namespace TestDisplay {
   // In bảng hướng dẫn các phím điều khiển màn hình
   void printHelp();
 
+  // Chạy hoạt ảnh Boot Cyberpunk & Bảng kiểm tra ngoại vi POST (Power-On Self-Test)
+  void runBootSequence(bool playChime = true);
+
   // Hiển thị tiến trình cập nhật phần mềm từ xa tối giản (OTA Progress Screen)
   void drawOtaProgressScreen(const char* status, int pct);
 }

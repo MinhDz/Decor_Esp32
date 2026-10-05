@@ -159,7 +159,11 @@ namespace TestSensors {
     Serial.println("===================================================================");
   }
 
+  static bool sensorsInitialized = false;
   void init() {
+    if (sensorsInitialized) return;
+    sensorsInitialized = true;
+
     Serial.println("\n-------------------------------------------------------");
     Serial.println("🌡️ [SENSORS] KHỞI TẠO CẢM BIẾN SHT31 (I2C) & CHẠM TTP223");
     Serial.printf("   + SHT31 I2C : Tự động dò (SDA=8, SCL=9) & (SDA=9, SCL=8)\n");

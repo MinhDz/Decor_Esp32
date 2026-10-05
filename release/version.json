@@ -1,9 +1,9 @@
 {
-  "version": "v3.1.2",
+  "version": "v3.1.3",
   "name": "Space OS",
   "build_date": "2026-10-05",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
-  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.1.2/firmware.bin",
-  "size": 1523024,
-  "changelog": "🚀 Space OS v3.1.2 Bản Cập Nhật Âm Báo Mono S40:\n- Tích hợp bộ âm thanh mono cổ điển Nokia Symbian S40: tiếng bíp bàn phím dứt khoát (16ms), âm xác nhận OK (E6-B6), âm xóa tệp Delete (G5-D5).\n- Bổ sung 4 giai điệu chuông báo thức có thể chọn tùy ý trong Đồng hồ (Mode 13) và Cài đặt (Mode 6): Nokia Tune kinh điển, Bíp dồn dập Standard, Tin nhắn SMS Morse, Chuông 4 nốt C5-C6.\n- Hỗ trợ nghe thử trực tiếp âm thanh khi chọn chuông hoặc điều chỉnh âm lượng.\n- Bổ sung REST API /api/audio/play_tune và phím tắt Serial ('n', 'o', 'd', 'r') để phát thử âm báo từ xa."
+  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.1.3/firmware.bin",
+  "size": 1526096,
+  "changelog": "🚀 Space OS v3.1.3 Bản Cập Nhật Hoạt Ảnh Boot & Kiểm Tra Ngoại Vi (POST):\n- Khôi phục hoạt ảnh Boot Cyberpunk: biểu tượng Vệ tinh Quỹ đạo (Orbital Core) và viền công nghệ Neon sắc nét.\n- Tích hợp Bảng kiểm tra ngoại vi POST (Power-On Self-Test) thời gian thực: kiểm tra RAM & 8MB Octal PSRAM, Flash LittleFS, Màn hình IPS ST7789, Cảm biến SHT31/TTP223, Micro INMP441, Loa PWM GPIO 15, Bàn phím 7 nút ADC và Thẻ nhớ Micro SD SPI.\n- Màn hình nạp hệ thống mượt mà với thanh tiến trình tải (Progress Bar 0% -> 100%) và âm thanh xác nhận từng phần cứng.\n- Phát nhạc hiệu khởi động mừng hoàn tất (Startup Chime) trước khi chuyển mượt mà vào Màn hình chờ (Standby Screen).\n- Bổ sung tùy chọn 'Kiểm tra ngoại vi (POST)' trong Menu Tùy chọn của ứng dụng Thiết bị (Mode 8) và phím tắt Serial 'c' để kiểm tra lại phần cứng bất cứ lúc nào."
 }
