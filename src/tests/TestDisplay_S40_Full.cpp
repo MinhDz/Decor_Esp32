@@ -3858,9 +3858,15 @@ namespace TestDisplay {
     tft->setTextColor(C_SLATE, C_CARD_BG);
     tft->setCursor(12, 182);
     if (WiFi.status() == WL_CONNECTED) {
-      tft->print("STT: Google vi-VN + XiaoZhi AI");
+      if (XiaoZhiClient::isWebSocketConnected()) {
+        tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+        tft->print("HUB: ONLINE | WS CONNECTED");
+      } else {
+        tft->setTextColor(C_YELLOW, C_CARD_BG);
+        tft->print("HUB: DANG DONG BO WEBSOCKET...");
+      }
     } else {
-      tft->print("CANH BAO: Can WiFi de nhan dien STT");
+      tft->print("CANH BAO: Can WiFi de ket noi");
     }
   }
 
@@ -4048,13 +4054,13 @@ namespace TestDisplay {
     String rawUtf8 = "";
     String recognizedAscii = XiaoZhiClient::transcribeMicAudioPcm16(pcm, sampleCount, TestAudio::getRecordSampleRate(), rawUtf8);
 
-    // Nếu Google STT không nghe rõ từ nào -> Báo rõ kết quả thu âm (Tuyệt đối KHÔNG dùng câu mẫu giả!)
+    // Nếu chưa nhận diện được STT (ví dụ key Google cũ đã hết hạn, hoặc chưa cấu hình wit_token)
     if (recognizedAscii.length() == 0) {
       s40AiEmotionTag = "CONFUSED";
       eyeState = 8;
       s40AiReplyText = "[KET QUA THU AM MIC INMP441]\nDa thu: " + String(recSec, 1) +
                        " giay (" + String((unsigned)((sampleCount * 2) / 1024)) + " KB PCM) | Max VU: " + String(maxVu) +
-                       "%.\nGoogle STT chua nghe ro. Bam [TRAI] de nghe lai qua Trinh phat nhac, hoac bam [OK] thu lai!";
+                       "%.\nMic thu am tot! Khoa Google STT cu da het han (403). Ban hay them 'wit_token' vao config.json hoac chat qua Web UI!";
       s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
       s40AiScrollLine = 0;
       s40AiAutoScroll = true;

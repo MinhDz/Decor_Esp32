@@ -1667,6 +1667,8 @@ static void handleSystemStatus() {
   doc["humidity_pct"] = (int)roundf(TestSensors::getHumidityPct());
   doc["touch_pressed"] = TestSensors::isTouchPressed();
   doc["last_button"] = TestButtons::getLastButtonName();
+  doc["xiaozhi_bound"] = XiaoZhiClient::isDeviceBound();
+  doc["xiaozhi_ws_connected"] = XiaoZhiClient::isWebSocketConnected();
 
   String res;
   serializeJson(doc, res);

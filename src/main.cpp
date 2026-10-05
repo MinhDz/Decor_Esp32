@@ -51,6 +51,9 @@ void loop() {
   WifiManager::loop();
   WebRoutes::handleClient();
 
+  // 2B. Duy trì kết nối WebSocket nền tới XiaoZhi Cloud (giữ Online trên Hub)
+  XiaoZhiClient::loopWebSocket();
+
   // 3. Nhấp nháy đèn LED RGB chỉ báo trạng thái kết nối
   HardwareManager::updateLedStatus();
 

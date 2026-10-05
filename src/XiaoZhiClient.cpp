@@ -5,9 +5,14 @@
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <LittleFS.h>
+#include "esp_websocket_client.h"
 
 static Preferences sysPrefs;
 static String s_lastAuthCode = "";
+static esp_websocket_client_handle_t s_wsClient = nullptr;
+static bool s_wsConnected = false;
+static String s_wsUri = "";
+static String s_wsHeaders = "";
 
 
 String XiaoZhiClient::getOrCreateDeviceUuid() {
@@ -60,24 +65,64 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
   if (httpCode == HTTP_CODE_OK || httpCode == 200) {
     payload = http.getString();
 
-    if (printToSerial) {
-      Serial.println("\n==================================================================");
-      Serial.println("🚀 [XIAOZHI OTA] PHẢN HỒI TỪ MÁY CHỦ XIAOZHI (HTTP 200 OK)");
-      Serial.println("==================================================================");
-      Serial.printf("📡 Device Hardware MAC : %s\n", mac.c_str());
-      Serial.printf("🆔 Device Client UUID  : %s\n", uuid.c_str());
-      Serial.println("------------------------------------------------------------------");
+    JsonDocument resDoc;
+    DeserializationError err = deserializeJson(resDoc, payload);
+    if (!err) {
+      // 1. Kiểm tra mã kích hoạt
+      bool isPendingActivation = false;
+      const char* code = nullptr;
+      const char* msg = "";
+      if (resDoc["activation"]["code"].is<const char*>()) {
+        code = resDoc["activation"]["code"];
+        msg = resDoc["activation"]["message"] | "";
+        s_lastAuthCode = String(code);
+        isPendingActivation = true;
+      } else {
+        s_lastAuthCode = "";
+      }
 
-      JsonDocument resDoc;
-      DeserializationError err = deserializeJson(resDoc, payload);
-      if (!err) {
-        // 1. Kiểm tra mã kích hoạt
-        bool isPendingActivation = false;
-        if (resDoc["activation"]["code"].is<const char*>()) {
-          const char* code = resDoc["activation"]["code"];
-          const char* msg = resDoc["activation"]["message"] | "";
-          s_lastAuthCode = String(code);
-          isPendingActivation = true;
+      // 2. Cập nhật cấu hình vào LittleFS
+      JsonDocument cfgDoc;
+      if (LittleFS.exists(FILE_CONFIG)) {
+        File f = LittleFS.open(FILE_CONFIG, "r");
+        deserializeJson(cfgDoc, f);
+        f.close();
+      }
+
+      if (resDoc["websocket"]["url"].is<const char*>()) {
+        cfgDoc["endpoint"] = resDoc["websocket"]["url"].as<const char*>();
+      }
+      cfgDoc["mac"] = mac;
+      cfgDoc["uuid"] = uuid;
+
+      if (isPendingActivation) {
+        cfgDoc["bound"] = false;
+        cfgDoc["token"] = "";
+      } else {
+        cfgDoc["bound"] = true;
+        const char* token = resDoc["websocket"]["token"] | "test-token";
+        cfgDoc["token"] = token;
+      }
+
+      File f = LittleFS.open(FILE_CONFIG, "w");
+      if (f) {
+        serializeJson(cfgDoc, f);
+        f.close();
+      }
+
+      // Nếu thiết bị đã liên kết và chưa kết nối WebSocket, tự động khởi chạy WebSocket nền
+      if (!isPendingActivation && s_wsClient == nullptr) {
+        startWebSocket();
+      }
+
+      if (printToSerial) {
+        Serial.println("\n==================================================================");
+        Serial.println("🚀 [XIAOZHI OTA] PHẢN HỒI TỪ MÁY CHỦ XIAOZHI (HTTP 200 OK)");
+        Serial.println("==================================================================");
+        Serial.printf("📡 Device Hardware MAC : %s\n", mac.c_str());
+        Serial.printf("🆔 Device Client UUID  : %s\n", uuid.c_str());
+        Serial.println("------------------------------------------------------------------");
+        if (isPendingActivation) {
           Serial.println("🔑 TRẠNG THÁI: CHƯA LIÊN KẾT (CẦN THÊM THIẾT BỊ TRÊN XIAOZHI.ME)");
           Serial.printf("👉 MÃ XÁC THỰC (AUTH CODE) : >>>  %s  <<<\n", code);
           if (strlen(msg) > 0) {
@@ -85,66 +130,33 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
           }
           Serial.printf("🌐 Hãy mở https://xiaozhi.me -> Thêm thiết bị -> Nhập MAC [%s] và Mã [%s]\n", mac.c_str(), code);
         } else {
-          s_lastAuthCode = "";
           Serial.println("🎉 TRẠNG THÁI: THIẾT BỊ ĐÃ LIÊN KẾT THÀNH CÔNG VỚI TÀI KHOẢN XIAOZHI!");
-        }
-
-        Serial.println("------------------------------------------------------------------");
-
-        // 2. Cập nhật cấu hình vào LittleFS
-        JsonDocument cfgDoc;
-        if (LittleFS.exists(FILE_CONFIG)) {
-          File f = LittleFS.open(FILE_CONFIG, "r");
-          deserializeJson(cfgDoc, f);
-          f.close();
-        }
-
-        if (resDoc["websocket"]["url"].is<const char*>()) {
-          cfgDoc["endpoint"] = resDoc["websocket"]["url"].as<const char*>();
-          Serial.printf("🌐 WebSocket Server Endpoint : %s\n", resDoc["websocket"]["url"].as<const char*>());
-        }
-        cfgDoc["mac"] = mac;
-        cfgDoc["uuid"] = uuid;
-
-        if (isPendingActivation) {
-          cfgDoc["bound"] = false;
-          cfgDoc["token"] = "";
-        } else {
-          cfgDoc["bound"] = true;
-          const char* token = resDoc["websocket"]["token"] | "test-token";
-          cfgDoc["token"] = token;
-          Serial.printf("🔑 Token                     : %s\n", token);
+          Serial.printf("🔑 Token                     : %s\n", (const char*)(resDoc["websocket"]["token"] | "test-token"));
           Serial.println("💾 Đã tự động cập nhật cờ ĐÃ LIÊN KẾT (bound=true) vào /config.json!");
         }
-
-        File f = LittleFS.open(FILE_CONFIG, "w");
-        if (f) {
-          serializeJson(cfgDoc, f);
-          f.close();
+        if (resDoc["websocket"]["url"].is<const char*>()) {
+          Serial.printf("🌐 WebSocket Server Endpoint : %s\n", resDoc["websocket"]["url"].as<const char*>());
         }
-
-        // 3. Thông tin MQTT
         if (resDoc["mqtt"]["endpoint"].is<const char*>()) {
           Serial.printf("⚡ MQTT Broker               : %s\n", resDoc["mqtt"]["endpoint"].as<const char*>());
           Serial.printf("📦 MQTT Client ID            : %s\n", resDoc["mqtt"]["client_id"].as<const char*>());
         }
-
-        // 4. Server Time
         if (resDoc["server_time"]["timestamp"].is<long long>()) {
           Serial.printf("⏰ Server Timestamp          : %lld (Timezone Offset: %d phút)\n",
                         resDoc["server_time"]["timestamp"].as<long long>(),
                         resDoc["server_time"]["timezone_offset"].as<int>());
         }
+        Serial.println("------------------------------------------------------------------");
+        Serial.println("📄 [NỘI DUNG RAW JSON TỪ XIAOZHI]:");
+        Serial.println(payload);
+        Serial.println("==================================================================\n");
       }
-
-      Serial.println("------------------------------------------------------------------");
-      Serial.println("📄 [NỘI DUNG RAW JSON TỪ XIAOZHI]:");
-      Serial.println(payload);
-      Serial.println("==================================================================\n");
     }
   } else {
     String errPayload = http.getString();
-    Serial.printf("❌ [XIAOZHI OTA] Lỗi gọi API (HTTP %d): %s\n", httpCode, errPayload.c_str());
+    if (printToSerial) {
+      Serial.printf("❌ [XIAOZHI OTA] Lỗi gọi API (HTTP %d): %s\n", httpCode, errPayload.c_str());
+    }
   }
 
   http.end();
@@ -444,42 +456,256 @@ String XiaoZhiClient::transcribeMicAudioPcm16(const int16_t* pcmSamples, size_t 
     sumAbs += av;
   }
   uint32_t avgAbs = (uint32_t)(sumAbs / sampleCount);
-  Serial.printf("🎙️ [STT] Bắt đầu gửi %u mẫu PCM (%u byte @ %u Hz) | Peak=%u, Avg=%u\n",
+  Serial.printf("🎙️ [STT] Bắt đầu xử lý %u mẫu PCM (%u byte @ %u Hz) | Peak=%u, Avg=%u\n",
                 (unsigned)sampleCount, (unsigned)(sampleCount * 2), (unsigned)sampleRate,
                 (unsigned)peak, (unsigned)avgAbs);
 
-  // Public Chromium Speech API Key cho Google Speech-to-Text v2 (nhận diện trực tiếp PCM 16-bit signed little-endian)
-  const char* sttUrl = "http://www.google.com/speech-api/v2/recognize?output=json&lang=vi-VN&key=AIzaSyBo8_3E6-G1_n7T4C2P9p_hE-sW9Y4n_X0";
-  HTTPClient http;
-  http.begin(sttUrl);
-  http.setTimeout(7500);
-  String contentType = "audio/l16; rate=" + String(sampleRate) + "; channels=1";
-  http.addHeader("Content-Type", contentType);
+  // Đọc cấu hình token STT từ /config.json (Hỗ trợ Wit.ai và Google Speech API)
+  String witToken = "";
+  String googleKey = "";
+  if (LittleFS.exists(FILE_CONFIG)) {
+    File f = LittleFS.open(FILE_CONFIG, "r");
+    if (f) {
+      JsonDocument doc;
+      if (!deserializeJson(doc, f)) {
+        if (doc["wit_token"].is<const char*>()) {
+          witToken = doc["wit_token"].as<String>();
+        } else if (doc["stt_key"].is<const char*>()) {
+          witToken = doc["stt_key"].as<String>();
+        }
+        if (doc["google_stt_key"].is<const char*>()) {
+          googleKey = doc["google_stt_key"].as<String>();
+        }
+      }
+      f.close();
+    }
+  }
 
-  int code = http.POST((uint8_t*)pcmSamples, sampleCount * sizeof(int16_t));
-  String resp = (code > 0) ? http.getString() : "";
-  http.end();
-
-  Serial.printf("🎙️ [STT] HTTP Code=%d, Response=%s\n", code, resp.c_str());
-
-  if (code == 200 && resp.length() > 0) {
-    int idx = resp.indexOf("\"transcript\":\"");
-    if (idx >= 0) {
-      idx += 14;
-      int endIdx = resp.indexOf("\"", idx);
-      if (endIdx > idx) {
-        outUtf8Transcript = resp.substring(idx, endIdx);
-        outUtf8Transcript.trim();
-        String asciiText = stripVietnameseToAscii(outUtf8Transcript);
-        Serial.printf("✅ [STT THÀNH CÔNG] UTF-8: \"%s\" -> ASCII: \"%s\"\n",
-                      outUtf8Transcript.c_str(), asciiText.c_str());
-        return asciiText;
+  // 1. Ưu tiên Wit.ai Speech API nếu có token (Hỗ trợ tiếng Việt xuất sắc, miễn phí, nhận diện trực tiếp PCM 16kHz Little-Endian)
+  if (witToken.length() > 0) {
+    Serial.println("🎙️ [STT] Đang gửi PCM lên Wit.ai Speech-to-Text API...");
+    WiFiClientSecure witClient;
+    witClient.setInsecure();
+    witClient.setTimeout(8000);
+    HTTPClient httpWit;
+    if (httpWit.begin(witClient, "https://api.wit.ai/speech?v=20230215")) {
+      httpWit.addHeader("Authorization", "Bearer " + witToken);
+      httpWit.addHeader("Content-Type", "audio/raw; encoding=signed-integer; bits=16; rate=" + String(sampleRate) + "; endian=little");
+      int code = httpWit.POST((uint8_t*)pcmSamples, sampleCount * sizeof(int16_t));
+      if (code == 200) {
+        String resp = httpWit.getString();
+        httpWit.end();
+        Serial.printf("✅ [STT WIT.AI]: %s\n", resp.c_str());
+        JsonDocument witDoc;
+        if (!deserializeJson(witDoc, resp)) {
+          const char* txt = witDoc["text"] | "";
+          if (strlen(txt) > 0) {
+            outUtf8Transcript = String(txt);
+            outUtf8Transcript.trim();
+            String asciiText = stripVietnameseToAscii(outUtf8Transcript);
+            Serial.printf("✅ [STT THÀNH CÔNG] UTF-8: \"%s\" -> ASCII: \"%s\"\n",
+                          outUtf8Transcript.c_str(), asciiText.c_str());
+            return asciiText;
+          }
+        }
+      } else {
+        Serial.printf("⚠️ [STT WIT.AI] HTTP %d: %s\n", code, httpWit.getString().c_str());
+        httpWit.end();
       }
     }
   }
 
+  // 2. Google Speech API v2 nếu có custom key
+  if (googleKey.length() > 0) {
+    String sttUrl = "http://www.google.com/speech-api/v2/recognize?output=json&lang=vi-VN&key=" + googleKey;
+    HTTPClient http;
+    http.begin(sttUrl);
+    http.setTimeout(7500);
+    String contentType = "audio/l16; rate=" + String(sampleRate) + "; channels=1";
+    http.addHeader("Content-Type", contentType);
+
+    int code = http.POST((uint8_t*)pcmSamples, sampleCount * sizeof(int16_t));
+    String resp = (code > 0) ? http.getString() : "";
+    http.end();
+
+    Serial.printf("🎙️ [STT] HTTP Code=%d\n", code);
+    if (code == 200 && resp.length() > 0) {
+      int idx = resp.indexOf("\"transcript\":\"");
+      if (idx >= 0) {
+        idx += 14;
+        int endIdx = resp.indexOf("\"", idx);
+        if (endIdx > idx) {
+          outUtf8Transcript = resp.substring(idx, endIdx);
+          outUtf8Transcript.trim();
+          String asciiText = stripVietnameseToAscii(outUtf8Transcript);
+          Serial.printf("✅ [STT THÀNH CÔNG] UTF-8: \"%s\" -> ASCII: \"%s\"\n",
+                        outUtf8Transcript.c_str(), asciiText.c_str());
+          return asciiText;
+        }
+      }
+    }
+  } else if (witToken.length() == 0) {
+    Serial.println("ℹ️ [STT] Khóa Google STT mặc định đã hết hạn (Google trả về 403 Forbidden).");
+    Serial.println("💡 Để dùng STT từ Mic INMP441, hãy thêm \"wit_token\" (Wit.ai miễn phí) hoặc \"google_stt_key\" vào /config.json");
+  }
+
   return "";
 }
+
+// -------------------------------------------------------------
+// Triển khai WebSocket Client nền kết nối XiaoZhi Cloud
+// -------------------------------------------------------------
+
+static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data) {
+  esp_websocket_event_data_t *data = (esp_websocket_event_data_t *)event_data;
+  switch (event_id) {
+    case WEBSOCKET_EVENT_CONNECTED: {
+      s_wsConnected = true;
+      Serial.println("\n=======================================================");
+      Serial.println("🟢 [XIAOZHI WS] ĐÃ KẾT NỐI THÀNH CÔNG VỚI XIAOZHI CLOUD!");
+      Serial.println("🌐 [XIAOZHI HUB] Thiết bị hiện đang ONLINE trên Hub (xiaozhi.me)!");
+      Serial.println("=======================================================");
+      // Gửi bản tin hello theo chuẩn giao thức XiaoZhi Cloud v2
+      const char* hello = "{\"type\":\"hello\",\"version\":2,\"transport\":\"websocket\",\"audio_params\":{\"format\":\"pcm\",\"sample_rate\":16000,\"channels\":1}}";
+      esp_websocket_client_send_text(s_wsClient, hello, strlen(hello), portMAX_DELAY);
+      break;
+    }
+    case WEBSOCKET_EVENT_DISCONNECTED:
+      s_wsConnected = false;
+      Serial.println("🟡 [XIAOZHI WS] Mất kết nối WebSocket tới XiaoZhi Cloud. Đang tự động kết nối lại...");
+      break;
+    case WEBSOCKET_EVENT_DATA:
+      if (data && data->data_len > 0) {
+        if (data->op_code == 0x01) { // Text frame
+          String msg = String(data->data_ptr).substring(0, data->data_len);
+          Serial.printf("📩 [XIAOZHI WS RCV]: %s\n", msg.c_str());
+        }
+      }
+      break;
+    case WEBSOCKET_EVENT_ERROR:
+      Serial.println("⚠️ [XIAOZHI WS] Sự kiện lỗi WebSocket.");
+      break;
+    default:
+      break;
+  }
+}
+
+void XiaoZhiClient::startWebSocket() {
+  if (s_wsClient != nullptr) {
+    return;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    return;
+  }
+  if (!isDeviceBound()) {
+    return;
+  }
+
+  String endpoint = getStoredEndpoint();
+  if (endpoint.length() == 0 || !endpoint.startsWith("ws")) {
+    endpoint = XIAOZHI_DEFAULT_ENDPOINT;
+  }
+  String token = getStoredToken();
+  if (token.length() == 0) {
+    token = "test-token";
+  }
+  String mac = getStoredMac();
+  String uuid = getOrCreateDeviceUuid();
+
+  s_wsUri = endpoint;
+  s_wsHeaders = "Authorization: Bearer " + token + "\r\n"
+              + "Device-Id: " + mac + "\r\n"
+              + "Client-Id: " + uuid + "\r\n"
+              + "Protocol-Version: 2\r\n";
+
+  // DigiCert Global Root G2 CA PEM (xác thực chứng chỉ SSL api.tenclass.net)
+  static const char XIAOZHI_CA_PEM[] =
+    "-----BEGIN CERTIFICATE-----\n"
+    "MIIDjjCCAnagAwIBAgIQAzrx5qcRqaC7KGSxHQn65TANBgkqhkiG9w0BAQsFADBh\n"
+    "MQswCQYDVQQGEwJVUzEVMBMGA1UEChMMRGlnaUNlcnQgSW5jMRkwFwYDVQQLExB3\n"
+    "d3cuZGlnaWNlcnQuY29tMSAwHgYDVQQDExdEaWdpQ2VydCBHbG9iYWwgUm9vdCBH\n"
+    "MjAeFw0xMzA4MDExMjAwMDBaFw0zODAxMTUxMjAwMDBaMGExCzAJBgNVBAYTAlVT\n"
+    "MRUwEwYDVQQKEwxEaWdpQ2VydCBJbmMxGTAXBgNVBAsTEHd3dy5kaWdpY2VydC5j\n"
+    "b20xIDAeBgNVBAMTF0RpZ2lDZXJ0IEdsb2JhbCBSb290IEcyMIIBIjANBgkqhkiG\n"
+    "9w0BAQEFAAOCAQ8AMIIBCgKCAQEAuzfNNNx7a8myaJCtSnX/RrohCgiN9RlUyfuI\n"
+    "2/Ou8jqJkTx65qsGGmvPrC3oXgkkRLpimn7Wo6h+4FR1IAWsULecYxpsMNzaHxmx\n"
+    "1x7e/dfgy5SDN67sH0NO3Xss0r0upS/kqbitOtSZpLYl6ZtrAGCSYP9PIUkY92eQ\n"
+    "q2EGnI/yuum06ZIya7XzV+hdG82MHauVBJVJ8zUtluNJbd134/tJS7SsVQepj5Wz\n"
+    "tCO7TG1F8PapspUwtP1MVYwnSlcUfIKdzXOS0xZKBgyMUNGPHgm+F6HmIcr9g+UQ\n"
+    "vIOlCsRnKPZzFBQ9RnbDhxSJITRNrw9FDKZJobq7nMWxM4MphQIDAQABo0IwQDAP\n"
+    "BgNVHRMBAf8EBTADAQH/MA4GA1UdDwEB/wQEAwIBhjAdBgNVHQ4EFgQUTiJUIBiV\n"
+    "5uNu5g/6+rkS7QYXjzkwDQYJKoZIhvcNAQELBQADggEBAGBnKJRvDkhj6zHd6mcY\n"
+    "1Yl9PMWLSn/pvtsrF9+wX3N3KjITOYFnQoQj8kVnNeyIv/iPsGEMNKSuIEyExtv4\n"
+    "NeF22d+mQrvHRAiGfzZ0JFrabA0UWTW98kndth/Jsw1HKj2ZL7tcu7XUIOGZX1NG\n"
+    "Fdtom/DzMNU+MeKNhJ7jitralj41E6Vf8PlwUHBHQRFXGU7Aj64GxJUTFy8bJZ91\n"
+    "8rGOmaFvE7FBcf6IKshPECBV1/MUReXgRPTqh5Uykw7+U0b6LJ3/iyK5S9kJRaTe\n"
+    "pLiaWN0bfVKfjllDiIGknibVb63dDcY3fe0Dkhvld1927jyNxF1WW6LZZm6zNTfl\n"
+    "MrY=\n"
+    "-----END CERTIFICATE-----\n";
+
+  esp_websocket_client_config_t ws_cfg = {};
+  ws_cfg.uri = s_wsUri.c_str();
+  ws_cfg.headers = s_wsHeaders.c_str();
+  ws_cfg.user_agent = XIAOZHI_USER_AGENT;
+  ws_cfg.cert_pem = XIAOZHI_CA_PEM;
+  ws_cfg.skip_cert_common_name_check = true;
+  ws_cfg.ping_interval_sec = 10;
+  ws_cfg.pingpong_timeout_sec = 10;
+  ws_cfg.task_stack = 6144;
+  ws_cfg.buffer_size = 2048;
+
+  Serial.println("\n🚀 [XIAOZHI WS] Đang mở kết nối nền WebSocket tới XiaoZhi Cloud...");
+  Serial.printf("🌐 Endpoint : %s\n", s_wsUri.c_str());
+  Serial.printf("📡 Device-Id: %s\n", mac.c_str());
+
+  s_wsClient = esp_websocket_client_init(&ws_cfg);
+  if (!s_wsClient) {
+    Serial.println("❌ [XIAOZHI WS] Không thể khởi tạo esp_websocket_client!");
+    return;
+  }
+
+  esp_websocket_register_events(s_wsClient, WEBSOCKET_EVENT_ANY, ws_event_handler, (void*)s_wsClient);
+
+  esp_err_t err = esp_websocket_client_start(s_wsClient);
+  if (err != ESP_OK) {
+    Serial.printf("❌ [XIAOZHI WS] Lỗi khởi động WebSocket (0x%x)\n", err);
+    esp_websocket_client_destroy(s_wsClient);
+    s_wsClient = nullptr;
+    s_wsConnected = false;
+  }
+}
+
+void XiaoZhiClient::stopWebSocket() {
+  if (s_wsClient != nullptr) {
+    Serial.println("⏹️ [XIAOZHI WS] Đang đóng kết nối WebSocket...");
+    esp_websocket_client_stop(s_wsClient);
+    esp_websocket_client_destroy(s_wsClient);
+    s_wsClient = nullptr;
+    s_wsConnected = false;
+  }
+}
+
+bool XiaoZhiClient::isWebSocketConnected() {
+  return (s_wsClient != nullptr && s_wsConnected);
+}
+
+void XiaoZhiClient::loopWebSocket() {
+  static uint32_t s_lastWsCheck = 0;
+  uint32_t now = millis();
+  if (now - s_lastWsCheck < 3000) return;
+  s_lastWsCheck = now;
+
+  if (WiFi.status() == WL_CONNECTED && isDeviceBound()) {
+    if (!s_wsClient) {
+      startWebSocket();
+    }
+  } else {
+    if (s_wsClient) {
+      stopWebSocket();
+    }
+  }
+}
+
 
 
 

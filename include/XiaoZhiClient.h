@@ -22,6 +22,12 @@ public:
   // Giao tiếp hội thoại trực tiếp từ ESP32-S3 lên Trợ lý XiaoZhi AI (Trả về Text + Emotion cho màn hình ST7789, không cần DAC)
   static String askXiaoZhiAI(const String& userText, String& outEmotion, float tempC = 28.0f, float humPct = 65.0f);
   static String getLastAuthCode();
+
+  // Quản lý kết nối nền WebSocket trực tiếp tới XiaoZhi Cloud (Duy trì Online trên Hub)
+  static void startWebSocket();
+  static void stopWebSocket();
+  static bool isWebSocketConnected();
+  static void loopWebSocket();
 };
 
 
