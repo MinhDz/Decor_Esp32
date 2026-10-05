@@ -1,5 +1,5 @@
 {
-  "endpoint": "wss://api.xiaozhi.me/mcp/",
+  "endpoint": "wss://api.tenclass.net/xiaozhi/v1/",
   "token": "",
   "mac": ""
 }

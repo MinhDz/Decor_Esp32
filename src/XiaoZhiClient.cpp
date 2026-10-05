@@ -253,12 +253,20 @@ void XiaoZhiClient::unbindDevice() {
     f.close();
   }
   doc["token"] = "";
+  doc["mac"] = "";
   File f = LittleFS.open(FILE_CONFIG, "w");
   if (f) {
     serializeJson(doc, f);
     f.close();
-    Serial.println("🗑️ [XIAOZHI] Đã xóa Token khỏi /config.json (Chuyển sang trạng thái Chưa liên kết).");
+    Serial.println("🗑️ [XIAOZHI] Đã xóa Token và MAC khỏi /config.json (Chuyển sang trạng thái Chưa liên kết).");
   }
+
+  // Xóa UUID cũ để máy chủ XiaoZhi OTA nhận diện đây là yêu cầu cấp mã OTP mới
+  sysPrefs.begin("sys", false);
+  sysPrefs.remove("uuid");
+  sysPrefs.end();
+  Serial.println("✨ [XIAOZHI] Đã làm mới UUID thiết bị.");
+
   s_lastAuthCode = "";
 }
 

@@ -3922,10 +3922,13 @@ namespace TestDisplay {
     drawSymbianSoftkeys("Kiem tra(OK)", "xiaozhi.me", "Thoat(Exit)");
   }
 
-  static void enterXiaoZhiAssistantMode() {
+  static void enterXiaoZhiAssistantMode(bool forceBinding = false) {
     currentMode = 11;
     s40AiMacStr = WiFi.macAddress();
-    if (XiaoZhiClient::isDeviceBound()) {
+    if (forceBinding) {
+      XiaoZhiClient::unbindDevice();
+    }
+    if (!forceBinding && XiaoZhiClient::isDeviceBound()) {
       s40AiState = AI_STATE_IDLE;
     } else {
       s40AiState = AI_STATE_BINDING;
@@ -3935,8 +3938,9 @@ namespace TestDisplay {
       } else {
         s40AiBindStatus = "Dang lay ma OTP tu XiaoZhi Cloud...";
         s40AiOtpCode = "...";
+        drawXiaoZhiBindingScreen();
         String otaPayload = XiaoZhiClient::queryOTA(true);
-        if (XiaoZhiClient::isDeviceBound()) {
+        if (!forceBinding && XiaoZhiClient::isDeviceBound()) {
           s40AiState = AI_STATE_IDLE;
           s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de hoi thoai.";
         } else {
@@ -3969,7 +3973,7 @@ namespace TestDisplay {
       drawXiaoZhiConversationBoxOnly();
 
       if (s40AiState == AI_STATE_IDLE) {
-        drawSymbianSoftkeys("Thu am(OK)", "Phat lai(Trai)", "Thoat");
+        drawSymbianSoftkeys("Thu am(OK)", "Lien ket(Menu)", "Thoat");
       } else if (s40AiState == AI_STATE_LISTENING) {
         drawSymbianSoftkeys("Gui(OK)", "Dang thu...", "Huy(Exit)");
       } else if (s40AiState == AI_STATE_THINKING) {
@@ -7661,7 +7665,7 @@ namespace TestDisplay {
         else if (s40MenuCursor == 2) currentMode = 2;  // 3. Máy tính (PC)
         else if (s40MenuCursor == 3) currentMode = 7;  // 4. Thư viện ảnh
         else if (s40MenuCursor == 4) { s40MemSubState = 0; currentMode = 10; } // 5. Bộ nhớ SD
-        else if (s40MenuCursor == 5) { enterXiaoZhiAssistantMode(); } // 6. Trợ lý AI (Tự động kiểm tra liên kết / OTP)
+        else if (s40MenuCursor == 5) { enterXiaoZhiAssistantMode(false); } // 6. Trợ lý AI (Tự động kiểm tra liên kết / OTP)
         else if (s40MenuCursor == 6) { s40MediaSubState = 0; refreshMediaPlaylist(); currentMode = 12; } // 7. Âm nhạc
         else if (s40MenuCursor == 7) { currentMode = 13; } // 8. Đồng hồ
         else if (s40MenuCursor == 8) { currentMode = 14; } // 9. Lịch vạn niên
@@ -7671,6 +7675,13 @@ namespace TestDisplay {
         else if (s40MenuCursor == 12) { s40GameActiveId = 0; currentMode = 15; } // 13. Trung tâm Trò chơi (3 Game)
         else if (s40MenuCursor == 13) { currentMode = 16; } // 14. Mã QR Cài Đặt Wi-Fi
         refreshActiveScreen();
+      } else if (keyIndex == 5) { // MENU -> Nếu đang ở icon Trợ lý AI: Buộc lấy mã OTP mới!
+        if (s40MenuCursor == 5) {
+          TestAudio::playKeyBeep();
+          showSymbianToast("DANG LAY MA OTP MOI...");
+          enterXiaoZhiAssistantMode(true);
+          refreshActiveScreen();
+        }
       } else if (keyIndex == 6) { // EXIT -> Về Màn Hình Chờ (Mode 0)
         currentMode = 0;
         refreshActiveScreen();
@@ -8328,6 +8339,11 @@ namespace TestDisplay {
       } else if (keyIndex == 4) { // PHẢI (RIGHT): Phát thử tiếng bíp test Loa PWM GPIO 15
         showSymbianToast("TEST BIP LOA PWM...");
         TestAudio::playStartupPwmChime(PIN_I2S_SPK_DIN);
+      } else if (keyIndex == 5) { // MENU: Buộc hủy liên kết cũ & Lấy mã OTP mới từ XiaoZhi Hub!
+        TestAudio::playKeyBeep();
+        showSymbianToast("DANG LAY MA OTP MOI...");
+        enterXiaoZhiAssistantMode(true);
+        drawXiaoZhiAssistantScreen(true);
       } else if (keyIndex == 6) {
         if (s40AiState == AI_STATE_LISTENING) {
           TestAudio::stopVoiceRecording();
@@ -9614,14 +9630,15 @@ namespace TestDisplay {
       case '6':
       case 'z':
       case 'Z':
-        enterXiaoZhiAssistantMode();
+        enterXiaoZhiAssistantMode(false);
+        refreshActiveScreen();
         return true;
       case 'u':
       case 'U':
-        Serial.println("🗑️ [SERIAL] Đã nhận lệnh Hủy liên kết XiaoZhi (Unbind)!");
-        XiaoZhiClient::unbindDevice();
-        enterXiaoZhiAssistantMode();
-        showSymbianToast("DA HUY LIEN KET XIAOZHI");
+        Serial.println("🗑️ [SERIAL] Đã nhận lệnh Hủy liên kết XiaoZhi (Unbind & Lấy OTP mới)!");
+        showSymbianToast("DANG LAY MA OTP MOI...");
+        enterXiaoZhiAssistantMode(true);
+        refreshActiveScreen();
         return true;
       case 'q':
       case 'Q':
