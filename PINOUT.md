@@ -1,179 +1,223 @@
-# SƠ ĐỒ ĐẤU NỐI CHÂN PHẦN CỨNG (HARDWARE PINOUT & SCHEMATIC)
-## Dự án: Trạm Decor Bàn Làm Việc Thông Minh (ESP32-S3 Freeform Circuit)
+# SƠ ĐỒ ĐẤU NỐI CHÂN PHẦN CỨNG CHÍNH THỨC (HARDWARE PINOUT & SCHEMATIC)
+## Dự án: Trạm Decor Bàn Làm Việc Thông Minh (ESP32-S3 Freeform Copper Sculpture)
+**Phiên bản cấu hình:** Space OS v3.2.0 (Official Hardware Pinout)  
+**Ngày cập nhật:** 05/10/2026
 
 ---
 
-## 1. Danh sách linh kiện phần cứng
+## 1. Danh sách linh kiện phần cứng tổng thể
 
-1. **Vi điều khiển**: ESP32-S3 DevKitC-1 (Bản N16R8: 16MB Flash, 8MB Octal PSRAM).
-2. **Màn hình & Thẻ nhớ**: Module 2.4" TFT SPI 240x320 V1.3 (ST7789VW) tích hợp khe thẻ MicroSD ở mặt sau.
-3. **Bộ khuếch đại âm thanh (I2S DAC)**: MAX98357A.
-4. **Loa**: 8Ω 2W (Down-firing hoặc gắn trong ống đồng decor).
-5. **Microphone (I2S Mic)**: INMP441 (Micro kỹ thuật số cho XiaoZhi Voice Chat).
-6. **Cảm biến môi trường**: SHT31 (Đo nhiệt độ và độ ẩm không khí qua chuẩn I2C).
-7. **Cảm biến chạm**: TTP223 (Cảm biến điện dung qua nút đồng / chạm vỏ).
-
----
-
-## 2. Phương án đấu nối: Dùng chung bus SPI (Shared SPI Bus)
-
-Vì nhu cầu hiển thị là hình nền decor tĩnh, đồng hồ neon và hoạt ảnh mắt XiaoZhi (không phát video băng thông cao), giải pháp **dùng chung đường truyền SPI giữa Màn hình và Thẻ nhớ SD** là tối ưu nhất:
-- Tiết kiệm chân GPIO cho ESP32-S3.
-- Đường dây đồng thau chạy đối xứng ở cả 2 mép màn hình (mép trái đỡ LCD, mép phải đỡ khe thẻ SD) tạo thành khung giàn chịu lực cực kỳ vững chãi và cân đối.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│  [HÀNG 14 CHÂN BÊN TRÁI]               [HÀNG 4 CHÂN BÊN PHẢI]│
-│  (Màn hình LCD ST7789VW)                 (Khe Thẻ Nhớ SD)   │
-│                                                             │
-│  • T_IRQ, T_DO, T_DIN, T_CS, T_CLK       o SD_SCK ───┐      │
-│    (5 chân Touch điện trở, KHÔNG DÙNG)   o SD_MISO   │      │
-│                                          o SD_MOSI ──┼─┐    │
-│  • SDO(MISO) ─ (KHÔNG DÙNG)              o SD_CS     │ │    │
-│  • LED       ─ Đèn nền LCD                           │ │    │
-│  • SCK       ─ Xung Clock LCD ───────────────────────┘ │    │
-│  • SDI(MOSI) ─ Data In LCD ────────────────────────────┘    │
-│  • DC        ─ Data / Command                               │
-│  • RESET     ─ Reset LCD                                    │
-│  • CS        ─ Chip Select LCD                              │
-│  • GND       ─ Mass                                         │
-│  • VCC       ─ Nguồn 3.3V hoặc 5V                           │
-└─────────────────────────────────────────────────────────────┘
-```
+1. **Vi điều khiển chính**: ESP32-S3 DevKitC-1 (Phiên bản N16R8: 16MB Flash, 8MB Octal PSRAM).
+2. **Màn hình hiển thị**: Màn hình 2.4" TFT IPS SPI 240x320 (ST7789VW) chạy bus SPI tốc độ cao.
+3. **Module Thẻ nhớ Micro SD**: Wemos D1 Mini SD Shield cắm áp lưng sau bo mạch ESP32.
+4. **Loa Khuếch Đại I2S DAC**: Module MAX98357A (Cổng I2S1 độc lập hoàn toàn, công suất 3W).
+5. **Micro Kỹ Thuật Số I2S**: Module INMP441 (Cổng I2S0 độc lập chuyên thu âm AI & XiaoZhi).
+6. **Cối xay gió Cyberpunk**: Động cơ giảm tốc N20 và vòng LED cánh cối xay đấu song song qua mạch cầu H L298N Mini / MX1508.
+7. **Đèn ống năng lượng sườn trạm**: 2 ống LED Edison filament dẻo 30x6mm ở 2 bên sườn (khung sườn cao 7.7cm), nối tiếp trở hạn dòng $47\,\Omega$, chung GND.
+8. **Đèn dải tín hiệu mặt lưng**: 2 thanh LED nước chảy sao băng COB 3V tích hợp IC quét tự động, gắn đối xứng 2 bên dưới module SD, nối trực tiếp vào ESP32.
+9. **Cảm biến môi trường**: Module SHT31 (Đo nhiệt độ và độ ẩm qua bus phần cứng I2C).
+10. **Cảm biến chạm**: Module điện dung TTP223 (Chạm vào nút đồng / kết cấu kim loại decor).
+11. **Bo nguồn & Bàn phím**: Keypad_Power_Shield (7 phím điều hướng thang trở 1 dây, IC sạc pin TP4056 và mạch tăng áp 5V nuôi hệ thống).
+12. **Đèn RGB Onboard**: WS2812 NeoPixel có sẵn trên kit ESP32-S3 (GPIO 48).
 
 ---
-
-## 3. Bảng phân bổ chân GPIO tổng thể (ESP32-S3 N16R8)
 
 > [!CAUTION]
 > **LƯU Ý ĐẶC BIỆT VỀ CHIP ESP32-S3 N16R8:**
-> Tuyệt đối **KHÔNG SỬ DỤNG** các chân từ **GPIO 26 đến GPIO 37**! Các chân này được kết nối nội bộ cho 8MB Octal PSRAM và 16MB SPI Flash.
-
-### A. Cụm Màn hình 2.4" ST7789VW & Thẻ nhớ MicroSD (Shared SPI Bus)
-
-| Tên chân trên Bo Màn Hình | Vị trí trên Bo | Nối về ESP32-S3 | Chức năng chi tiết |
-| :--- | :--- | :--- | :--- |
-| **VCC** | Hàng trái (chân 14) | **5V (hoặc 3.3V)** | Cấp nguồn cho bo màn hình |
-| **GND** | Hàng trái (chân 13) | **GND** | Nguồn âm (Mass chung) |
-| **CS** | Hàng trái (chân 12) | **GPIO 10** | Chip Select LCD (Kích hoạt màn hình) |
-| **RESET** | Hàng trái (chân 11) | **GPIO 14** | Reset phần cứng màn hình |
-| **DC** | Hàng trái (chân 10) | **GPIO 9** | Data / Command (Phân biệt lệnh và dữ liệu) |
-| **SDI (MOSI)** | Hàng trái (chân 9) | **GPIO 11** | **SPI MOSI CHUNG** (Dữ liệu ra LCD & Thẻ SD) |
-| **SCK** | Hàng trái (chân 8) | **GPIO 12** | **SPI SCK CHUNG** (Xung nhịp Clock LCD & Thẻ SD) |
-| **LED** | Hàng trái (chân 7) | **GPIO 21** (hoặc 3.3V) | Đèn nền màn hình (có thể băm xung PWM đổi độ sáng) |
-| **SDO (MISO)** | Hàng trái (chân 6) | *BỎ TRỐNG (NC)* | Màn hình chỉ nhận dữ liệu, không cần gửi về |
-| *5 chân Touch điện trở* | Hàng trái (chân 1-5)| *BỎ TRỐNG (NC)* | T_CLK, T_CS, T_DIN, T_DO, T_IRQ không dùng |
-| **SD_SCK** | Hàng 4 chân phải | **GPIO 12** | **Nối chung với SCK màn hình** |
-| **SD_MOSI** | Hàng 4 chân phải | **GPIO 11** | **Nối chung với SDI (MOSI) màn hình** |
-| **SD_MISO** | Hàng 4 chân phải | **GPIO 13** | Dữ liệu đọc từ Thẻ SD về ESP32 |
-| **SD_CS** | Hàng 4 chân phải | **GPIO 15** | Chip Select Thẻ nhớ MicroSD |
+> Tuyệt đối **KHÔNG SỬ DỤNG** các chân từ **GPIO 26 đến GPIO 37**! Các chân này được kết nối nội bộ cho 8MB Octal PSRAM và 16MB SPI Flash. Chân **GPIO 46** là chân *Input-Only* (chỉ nhận tín hiệu vào, không thể xuất HIGH/LOW).
 
 ---
 
-### B. Cụm Âm thanh I2S (Phát loa MAX98357A & Thu âm Mic INMP441)
+## 2. Bảng phân bổ chân theo 2 hàng cắm vật lý (ESP32-S3 DevKitC-1)
 
-| Tên Module | Chân Module | Nối về ESP32-S3 | Ghi chú cấu hình |
-| :--- | :--- | :--- | :--- |
-| **MAX98357A**<br>*(I2S DAC phát loa)* | **VIN** | **5V (VBUS)** | Cấp nguồn 5V cho âm thanh to và khoẻ |
-| | **GND** | **GND** | Nối mass chung |
-| | **LRC** | **GPIO 16** | Xung chọn kênh (Word Select - I2S Out) |
-| | **BCLK** | **GPIO 17** | Xung nhịp bit (Bit Clock - I2S Out) |
-| | **DIN** | **GPIO 7** | Dữ liệu âm thanh số ra loa |
-| | **GAIN** | **GND** | Mức khuếch đại chuẩn 9dB (âm trong, không méo) |
-| | **SD** | *Bỏ trống hoặc 3.3V* | Mặc định mở kênh (Stereo Mix) |
-| **INMP441**<br>*(I2S Mic thu âm)* | **VDD** | **3.3V** | Cấp nguồn 3.3V sạch cho Mic |
-| | **GND** | **GND** | Nối mass chung |
-| | **WS** | **GPIO 42** | Xung chọn kênh (Word Select - I2S In) |
-| | **SCK** | **GPIO 41** | Xung nhịp bit (Bit Clock - I2S In) |
-| | **SD** | **GPIO 2** | Dữ liệu âm thanh giọng nói gửi về ESP32 |
-| | **L/R** | **GND** | Kênh Trái (Left Channel) |
+Sơ đồ nhìn từ mặt trước khi cổng USB hướng lên trên:
+
+### Hàng chân bên TRÁI (Header J1)
+
+| Thứ tự | Ký hiệu Pin | GPIO | Kết nối ngoại vi | Chức năng chi tiết |
+| :---: | :--- | :---: | :--- | :--- |
+| 1 | 3V3 | - | Nguồn 3.3V | Cấp nguồn cho SHT31, TTP223, Mic INMP441 |
+| 2 | 3V3 | - | Nguồn 3.3V | Dự phòng cấp nguồn |
+| 3 | EN / RST | - | Nút Reset MCU | Nối nút reset cứng nếu cần |
+| 4 | GPIO 4 | **4** | **Mic INMP441 SCK** | Xung nhịp bit thu âm (I2S0 BCLK) |
+| 5 | GPIO 5 | **5** | **Mic INMP441 WS** | Xung chọn kênh thu âm (I2S0 WS / LRC) |
+| 6 | GPIO 6 | **6** | **Mic INMP441 SD** | Dữ liệu giọng nói gửi về ESP32 (I2S0 Data IN) |
+| 7 | GPIO 7 | **7** | **Màn hình ST7789 BLK** | Đèn nền LCD (Điều chỉnh độ sáng PWM 0..100%) |
+| 8 | GPIO 15 | **15** | **Loa MAX98357A DIN** | **Dữ liệu âm thanh số ra loa (I2S1 Data OUT)** |
+| 9 | GPIO 16 | **16** | **Loa MAX98357A BCLK** | **Xung nhịp bit phát loa (I2S1 Bit Clock)** |
+| 10 | GPIO 17 | **17** | **Loa MAX98357A LRC** | **Xung chọn kênh phát loa (I2S1 Word Select)** |
+| 11 | GPIO 18 | **18** | **LED Nước Chảy Trái (L)** | **Cực (+) Thanh LED sao băng bên trái mặt lưng (ESP32)** |
+| 12 | GPIO 8 | **8** | **Cảm biến SHT31 SDA** | Dữ liệu I2C Data |
+| 13 | GPIO 19 | 19 | USB D- | Dành riêng Native USB (Tránh dùng) |
+| 14 | GPIO 20 | **20** | **Cảm biến Chạm TTP223** | Tín hiệu chạm Digital SIG (Active HIGH) |
+| 15 | GPIO 3 | **3** | **Bàn phím KEY_ADC** | Đọc cụm thang điện trở 7 nút (ADC1_CH2) |
+| 16 | GPIO 46 | **46** | **Bo Sạc CHG_STAT** | Đọc cờ trạng thái sạc pin TP4056 (Input-Only) |
+| 17 | GPIO 9 | **9** | **Cảm biến SHT31 SCL** | Xung nhịp I2C Clock |
+| 18 | GPIO 10 | **10** | **Màn hình ST7789 RST** | Reset phần cứng LCD |
+| 19 | GPIO 11 | **11** | **Màn hình ST7789 MOSI** | SPI Data Out (SDA / SDI) |
+| 20 | GPIO 12 | **12** | **Màn hình ST7789 SCK** | SPI Clock (SCL) |
+| 21 | GPIO 13 | **13** | **Màn hình ST7789 DC** | SPI Data / Command |
+| 22 | GPIO 14 | **14** | **Màn hình ST7789 CS** | SPI Chip Select LCD |
 
 ---
 
-### C. Cụm Cảm biến môi trường SHT31 (I2C) & Cảm biến chạm TTP223
+### Hàng chân bên PHẢI (Header J3)
 
-| Linh kiện | Chân Linh Kiện | Nối về ESP32-S3 | Ghi chú |
-| :--- | :--- | :--- | :--- |
-| **SHT31**<br>*(Nhiệt độ & Độ ẩm)* | **VIN** | **3.3V** | Nguồn 3.3V |
-| | **GND** | **GND** | Mass chung |
-| | **SDA** | **GPIO 4** | Dữ liệu I2C Data |
-| | **SCL** | **GPIO 5** | Xung nhịp I2C Clock |
-| **TTP223**<br>*(Cảm biến chạm)* | **VCC** | **3.3V** | Nguồn 3.3V |
-| | **GND** | **GND** | Mass chung |
-| | **OUT** | **GPIO 20** | Tín hiệu chạm Digital (Mức HIGH khi chạm) |
+| Thứ tự | Ký hiệu Pin | GPIO | Kết nối ngoại vi | Chức năng chi tiết |
+| :---: | :--- | :---: | :--- | :--- |
+| 1 | GND | - | Mass chung | Khung sườn đồng 1.2mm |
+| 2 | GPIO 43 | 43 | UART0 TXD | Serial Monitor / Nạp code (CH343) |
+| 3 | GPIO 44 | 44 | UART0 RXD | Serial Monitor / Nạp code (CH343) |
+| 4 | GPIO 1 | **1** | **Cối Xay Gió IN1** | PWM điều tốc Motor N20 & Vành đèn cánh cối xay |
+| 5 | GPIO 2 | **2** | **2 LED Ống Edison Sườn** | Cực (+) 2 ống LED Edison 30mm qua trở $47\,\Omega$ (hoặc L298N IN3) |
+| 6 | GPIO 42 | **42** | **Thẻ Micro SD SCK** | SPI Clock thẻ nhớ SD |
+| 7 | GPIO 41 | **41** | **Thẻ Micro SD MISO** | SPI Data In từ thẻ nhớ SD về ESP32 |
+| 8 | GPIO 40 | **40** | **Thẻ Micro SD MOSI** | SPI Data Out từ ESP32 ghi vào thẻ nhớ SD |
+| 9 | GPIO 39 | **39** | **Thẻ Micro SD CS** | Chip Select thẻ nhớ SD |
+| 10 | GPIO 38 | **38** | **LED Nước Chảy Phải (R)** | **Cực (+) Thanh LED sao băng bên phải mặt lưng (ESP32)** |
+| 11-13 | GPIO 35-37 | - | *BỎ TRỐNG* | **CẤM DÙNG** (Nội bộ Octal PSRAM / SPI Flash) |
+| 14 | GPIO 0 | 0 | Boot Pin | Để hở / Nút BOOT |
+| 15 | GPIO 45 | 45 | Dự phòng | Chân I/O tự do |
+| 16 | GPIO 48 | **48** | **RGB WS2812 Onboard** | Đèn LED đa sắc RGB tích hợp sẵn trên mạch |
+| 17 | GPIO 47 | 47 | Dự phòng | Chân I/O tự do |
+| 18 | GPIO 21 | 21 | Dự phòng / BAT_ADC 2 | Dự phòng đọc điện áp pin hoặc LED phụ |
+| 19 | NC / GND | - | Mass chung | - |
+| 20 | GND | - | Mass chung | Nối sườn trạm kiềng đồng |
+| 21 | 5V | - | Nguồn VIN 5V | Nhận nguồn 5V từ cổng Type-C hoặc bo sạc pin |
+| 22 | GND | - | Mass chung | Nối mass chung hệ thống |
 
 ---
 
-## 4. Sơ đồ khối kiến trúc kết nối (System Diagram)
+## 3. Chi tiết các cụm ngoại vi đặc biệt
+
+### A. Hệ thống Âm thanh Kép I2S (MAX98357A & INMP441 Độc Lập)
+Việc tách riêng biệt cụm chân I2S cho Loa và Mic giúp ESP32-S3 chạy **Full Duplex** (vừa thu âm vừa phát loa cùng lúc, sample rate độc lập hoàn toàn):
+- **Cụm Thu Âm Mic INMP441 (I2S0)**:
+  - `BCLK`: GPIO 4
+  - `WS`  : GPIO 5
+  - `SD`  : GPIO 6
+  - `L/R` : Nối GND (Kênh Trái Mono)
+- **Cụm Phát Loa MAX98357A DAC (I2S1)**:
+  - `DIN` : GPIO 15
+  - `BCLK`: GPIO 16
+  - `LRC` : GPIO 17
+  - `GAIN`: Nối GND (Mức khuếch đại chuẩn 9dB, âm trong trẻo, không vỡ tiếng)
+  - `SD_MODE`: Thả nổi hoặc nối 3.3V (Kích hoạt stereo mix)
+  - *Ưu điểm layout*: Ba chân **15 - 16 - 17** nằm liên tiếp nhau trên hàng chân trái, cắm jumper thẳng 1 hàng không bị chéo dây.
+
+---
+
+### B. Cụm Đèn Decor Trạm Không Gian
+1. **2 Ống LED Edison $30\,\text{mm}$ ở 2 mặt bên sườn ($7.7\,\text{cm}$)**:
+   - Nối chung GND vào khung sườn đồng.
+   - Cực dương (+) mỗi ống nối qua 1 điện trở hạn dòng $47\,\Omega$.
+   - Điều khiển băm xung PWM mượt mà trên **`GPIO 2`** (dòng chỉ $\approx 10.6\,\text{mA}$ mỗi ống, an toàn tuyệt đối khi nuôi trực tiếp từ ESP32 hoặc qua kênh L298N IN3).
+   - Dây cấp cực (+) sử dụng dây đồng tráng men cách điện $0.1\,\text{mm}$ dán ẩn sau thanh đồng $1.2\,\text{mm}$.
+2. **2 Thanh LED nước chảy sao băng mặt lưng (COB 3V tích hợp IC quét)**:
+   - Vị trí: Đặt đối xứng hai bên bên dưới khe thẻ Micro SD ở mặt lưng trạm.
+   - Nối chung GND vào khung đồng.
+   - Thanh bên Trái: Cực (+) nối trực tiếp vào **`GPIO 18`** (khoảng cách chỉ $1-2\,\text{cm}$).
+   - Thanh bên Phải: Cực (+) nối trực tiếp vào **`GPIO 38`** (khoảng cách chỉ $1-2\,\text{cm}$).
+   - Không cần kéo dây xuống L298N ở chân tháp cối xay, loại bỏ hoàn toàn tình trạng rối dây!
+
+---
+
+### C. Cối xay gió Cyberpunk N20
+- Động cơ N20 và vành đèn LED trên cánh cối xay đã được đấu song song vào ngõ ra OUT1 của module L298N Mini / MX1508.
+- Chân điều khiển: Duy nhất **`GPIO 1`** nối vào IN1 (PWM tần số cao 5000Hz).
+- Toàn bộ dây từ ESP32 xuống mạch cối xay ở chân tháp chỉ còn duy nhất **1 đường tín hiệu GPIO 1** và đường nguồn.
+
+---
+
+### D. Bo Nguồn & Bàn Phím Keypad_Power_Shield
+- **`GPIO 3` (KEY_ADC)**: Đọc thang điện trở 7 phím bấm (Up, Down, Left, Right, OK, Menu, Exit) với 1 dây tín hiệu duy nhất kết hợp trở kéo lên $10\,\text{k}\Omega$ lên 3.3V.
+- **`GPIO 46` (CHG_STAT)**: Đọc trạng thái sạc pin từ chân STAT của IC TP4056 (mức LOW khi đang sạc, HIGH/thả nổi khi sạc đầy). Chân GPIO 46 là chân Input-Only chuyên dụng nên cực kỳ phù hợp.
+- **`GPIO 2` / `GPIO 21` (BAT_ADC)**: Dự phòng đọc điện áp pin Lithium 18650 qua cầu phân áp $100\,\text{k}\Omega / 100\,\text{k}\Omega$.
+
+---
+
+## 4. Sơ đồ khối kiến trúc phần cứng (Hardware Architecture)
 
 ```mermaid
-flowchart LR
-    subgraph MCU["ESP32-S3 DevKitC-1 (N16R8)"]
+flowchart TD
+    subgraph ESP32["ESP32-S3 DevKitC-1 (N16R8)"]
         direction TB
-        subgraph SPI_BUS["SPI Bus (Shared)"]
-            SCK["GPIO 12 (SCK)"]
-            MOSI["GPIO 11 (MOSI)"]
-            LCD_CS["GPIO 10 (LCD CS)"]
-            SD_CS["GPIO 15 (SD CS)"]
-            SD_MISO["GPIO 13 (SD MISO)"]
-            DC["GPIO 9 (DC)"]
-            RST["GPIO 14 (RST)"]
-            BLK["GPIO 21 (Backlight)"]
+
+        subgraph SPI_LCD["Màn Hình SPI ST7789 (2.4 inch)"]
+            TFT_MOSI["GPIO 11 (MOSI)"]
+            TFT_SCK["GPIO 12 (SCK)"]
+            TFT_DC["GPIO 13 (DC)"]
+            TFT_CS["GPIO 14 (CS)"]
+            TFT_RST["GPIO 10 (RST)"]
+            TFT_BL["GPIO 7 (PWM Backlight)"]
         end
 
-        subgraph AUDIO_I2S["Audio I2S Interface"]
-            I2S_DAC["I2S Out: GPIO 7 (DIN), 16 (LRC), 17 (BCLK)"]
-            I2S_MIC["I2S In: GPIO 2 (SD), 41 (SCK), 42 (WS)"]
+        subgraph SPI_SD["Thẻ Nhớ Micro SD (Shield Mặt Sau)"]
+            SD_MOSI["GPIO 40 (MOSI)"]
+            SD_MISO["GPIO 41 (MISO)"]
+            SD_SCK["GPIO 42 (SCK)"]
+            SD_CS["GPIO 39 (CS)"]
         end
 
-        subgraph SENSORS["Sensors & Input"]
-            I2C_ENV["I2C: GPIO 4 (SDA), GPIO 5 (SCL)"]
-            TOUCH_IN["Touch: GPIO 20"]
+        subgraph AUDIO_DUAL["Âm Thanh Kép Độc Lập"]
+            I2S1_LOA["I2S1 Loa MAX98357A:\nDIN (15), BCLK (16), LRC (17)"]
+            I2S0_MIC["I2S0 Mic INMP441:\nSCK (4), WS (5), SD (6)"]
+        end
+
+        subgraph DECOR_LIGHTS["Cối Xay & Đèn Decor"]
+            WINDMILL["GPIO 1 (PWM): Motor N20 & Vành LED (L298N IN1)"]
+            EDISON["GPIO 2 (PWM): 2 LED Ống Edison Sườn 30mm (Trở 47Ω)"]
+            FLOW_L["GPIO 18: Thanh LED Nước Chảy Lưng Trái"]
+            FLOW_R["GPIO 38: Thanh LED Nước Chảy Lưng Phải"]
+        end
+
+        subgraph SENSORS_INPUT["Cảm Biến & Bàn Phím"]
+            I2C_SHT["GPIO 8 (SDA), GPIO 9 (SCL): Cảm Biến SHT31"]
+            TOUCH_PAD["GPIO 20: Cảm Biến Chạm Điện Dung TTP223"]
+            KEYPAD_IN["GPIO 3 (ADC1_CH2): Bàn Phím 7 Nút 1 Dây"]
+            CHG_IN["GPIO 46 (Input-Only): Báo Trạng Thái Sạc Pin TP4056"]
+            RGB_ON["GPIO 48: WS2812 RGB Onboard"]
         end
     end
 
-    subgraph HardwareModules["Các Module Ngoại Vi"]
-        direction TB
-        TFT["Màn Hình 2.4 ST7789VW (240x320)"]
-        SD_CARD["Khe Cắm Thẻ Nhớ MicroSD"]
-        AMP["Mạch MAX98357A I2S DAC"]
-        SPK["Loa 8Ω 2W"]
-        MIC["Micro I2S INMP441"]
-        SHT["Cảm Biến Nhiệt/Ẩm SHT31"]
-        TTP["Cảm Biến Chạm TTP223"]
+    subgraph HARDWARE_MODULES["Khối Linh Kiện Ngoại Vi"]
+        ST7789["Màn hình 2.4 IPS ST7789"]
+        MICRO_SD["Thẻ Micro SD FAT32"]
+        MAX98357["Loa 3W qua MAX98357A DAC"]
+        INMP441_DEV["Micro số INMP441"]
+        L298N_DEV["Module Cầu H L298N / MX1508"]
+        MOTOR_FAN["Động cơ Cối Xay N20 + LED Vòng"]
+        TUBE_EDISON["2 Ống LED Edison 30mm (Sườn 7.7cm)"]
+        FLOW_STRIPS["2 Thanh LED Nước Chảy Sao Băng (Mặt Lưng)"]
+        SHT31_DEV["Cảm Biến Nhiệt/Ẩm SHT31"]
+        TTP223_DEV["Phím Chạm TTP223 Vỏ Đồng"]
+        KEY_BOARD["Bo Keypad 7 Phím & Pin 18650"]
     end
 
-    SCK ===> TFT
-    SCK ===> SD_CARD
-    MOSI ===> TFT
-    MOSI ===> SD_CARD
-    LCD_CS --> TFT
-    DC --> TFT
-    RST --> TFT
-    BLK --> TFT
-
-    SD_CS --> SD_CARD
-    SD_CARD --> SD_MISO
-
-    I2S_DAC --> AMP --> SPK
-    MIC --> I2S_MIC
-    I2C_ENV <===> SHT
-    TTP --> TOUCH_IN
+    SPI_LCD ==> ST7789
+    SPI_SD ==> MICRO_SD
+    I2S1_LOA --> MAX98357
+    INMP441_DEV --> I2S0_MIC
+    WINDMILL --> L298N_DEV --> MOTOR_FAN
+    EDISON --> TUBE_EDISON
+    FLOW_L --> FLOW_STRIPS
+    FLOW_R --> FLOW_STRIPS
+    I2C_SHT <===> SHT31_DEV
+    TTP223_DEV --> TOUCH_PAD
+    KEY_BOARD --> KEYPAD_IN
+    KEY_BOARD --> CHG_IN
 ```
 
 ---
 
 ## 5. Kinh nghiệm thi công mạch Freeform Circuit Sculpture
 
-1. **Dây dẫn đồng thau (Brass Wire)**:
-   - Dùng thanh đồng thau đường kính **0.8mm hoặc 1.0mm**.
-   - Dùng kìm mỏ nhọn uốn các góc vuông 90° sắc cạnh.
-2. **Cấu trúc khung đỡ màn hình**:
-   - Bên mép trái màn hình: Cụm dây `VCC, GND, CS, RESET, DC, MOSI, SCK, LED` đi xuống hàng chân trái của ESP32.
-   - Bên mép phải màn hình: Cụm 4 dây `SD_SCK, SD_MOSI, SD_MISO, SD_CS` đi xuống hàng chân phải của ESP32.
-   - Thế đỡ 2 bên này giúp màn hình 2.4 inch tự đứng vững chãi trên đế gỗ mà không cần keo dán hay ốc vít.
-3. **Chống nhiễu tín hiệu âm thanh**:
-   - Dây GND cho bo âm thanh MAX98357A và INMP441 nên đi một thanh đồng riêng dày dặn trực tiếp về chân GND của nguồn cấp để loại bỏ tiếng xì (hiss) và tiếng rít khi Wi-Fi truyền tải dữ liệu.
-4. **Vị trí cảm biến SHT31**:
-   - Tránh đặt SHT31 ngay phía trên hoặc sát lưng chip ESP32/màn hình vì nhiệt độ tỏa ra từ phần cứng sẽ làm chỉ số nhiệt độ môi trường bị sai lệch (+2°C đến +4°C). Nên gắn SHT31 trên một trụ cao hoặc nhô ra ngoài đế gỗ.
-
+1. **Khung sườn chịu lực và đường Mass (GND)**:
+   - Dùng thanh đồng nguyên khối đường kính **$1.2\,\text{mm}$**.
+   - Toàn bộ cực âm (GND) của màn hình, thẻ nhớ, LED Edison, LED nước chảy, cảm biến và module âm thanh đều được hàn trực tiếp vào khung sườn đồng này để tạo mặt phẳng tiếp địa vững chắc và giải nhiệt cho linh kiện.
+2. **Kỹ thuật giấu dây tàng hình**:
+   - Dùng dây đồng tráng men cách điện đường kính siêu nhỏ **$0.1\,\text{mm}$** (dây quấn biến áp).
+   - Luồn hoặc dán áp sát sợi dây $0.1\,\text{mm}$ vào mặt sau của thanh đồng $1.2\,\text{mm}$. Dưới góc nhìn trực diện, người xem chỉ thấy các thanh đồng uốn lượn phong cách Cyberpunk mà không hề thấy dây điện.
+3. **Chống nhiễu I2S & nguồn sụt áp**:
+   - Chân nguồn 5V của MAX98357A nên lấy từ chân VBUS/5V của ESP32 và có tụ hóa $100\,\mu\text{F} - 220\,\mu\text{F}$ lọc nguồn tại chỗ để âm bass căng và không gây sập cổng USB.
+   - Ba dây I2S của MAX98357A (GPIO 15, 16, 17) và ba dây Mic INMP441 (GPIO 4, 5, 6) chạy theo 2 hướng khác nhau, tránh song song sát nhau để tránh hiện tượng dội âm (acoustic echo).

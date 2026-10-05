@@ -9,9 +9,9 @@ namespace TestSpeakerMAX98357A {
   static const uint32_t SAMPLE_RATE = 44100; // 44.1kHz -> BCLK = 1.4112 MHz (~1.64V DC trên VOM)
 
   static bool driverInstalled = false;
-  static uint8_t activeBclkPin = PIN_I2S_BCLK; // Mặc định GPIO 4
-  static uint8_t activeWsPin   = PIN_I2S_WS;   // Mặc định GPIO 5
-  static uint8_t activeDinPin  = PIN_I2S_DOUT; // Mặc định GPIO 15
+  static uint8_t activeBclkPin = PIN_I2S_SPK_BCLK; // Mặc định GPIO 16 (I2S1 BCLK)
+  static uint8_t activeWsPin   = PIN_I2S_SPK_LRC;  // Mặc định GPIO 17 (I2S1 LRC/WS)
+  static uint8_t activeDinPin  = PIN_I2S_SPK_DIN;  // Mặc định GPIO 15 (I2S1 DIN/DOUT)
   // QUAN TRỌNG: Khi nuôi MAX98357A + Loa 3W (4 Ohm) bằng chân 3.3V từ cổng USB máy tính (giới hạn 500mA),
   // để âm lượng 18% giúp dòng tiêu thụ của loa chỉ ~45mA (kêu vừa đủ nghe rõ mà KHÔNG gây sụt áp 3.3V hay sập cổng USB PC!)
   static int currentVolumePct  = 18;           // Mặc định 18% (Chế độ an toàn chống sụt áp 3.3V USB)

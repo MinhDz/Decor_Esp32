@@ -15,6 +15,14 @@ namespace TestWindmill {
   void setLedBrightness(uint8_t brightPct, bool breathing = false);
   uint8_t getLedBrightness();
 
+  // Điều khiển 2 LED ống Edison 30mm sườn trạm (GPIO 2 - PWM)
+  void setEdisonBrightness(uint8_t brightPct);
+  uint8_t getEdisonBrightness();
+
+  // Điều khiển 2 thanh LED nước chảy sao băng mặt lưng (GPIO 18 & GPIO 38)
+  void setFlowingLeds(bool enable);
+  bool getFlowingLeds();
+
   // Đặt chế độ công suất chung (0: Tắt, 1: 35%, 2: 60%, 3: 85%, 4: Nhịp thở)
   void setMode(uint8_t modeIdx);
   uint8_t getMode();

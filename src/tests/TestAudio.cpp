@@ -68,8 +68,8 @@ namespace TestAudio {
     };
 
     i2s_pin_config_t pin_config = {
-      .bck_io_num = PIN_I2S_BCLK,
-      .ws_io_num = PIN_I2S_WS,
+      .bck_io_num = PIN_I2S_SPK_BCLK,
+      .ws_io_num = PIN_I2S_SPK_LRC,
       .data_out_num = doutPin,
       .data_in_num = I2S_PIN_NO_CHANGE
     };
@@ -109,8 +109,8 @@ namespace TestAudio {
     };
 
     i2s_pin_config_t pin_config = {
-      .bck_io_num = PIN_I2S_BCLK,
-      .ws_io_num = PIN_I2S_WS,
+      .bck_io_num = PIN_I2S_MIC_BCLK,
+      .ws_io_num = PIN_I2S_MIC_WS,
       .data_out_num = I2S_PIN_NO_CHANGE,
       .data_in_num = PIN_I2S_MIC_SD
     };
@@ -162,10 +162,8 @@ namespace TestAudio {
 
     Serial.println("\n-------------------------------------------------------");
     Serial.println("🔊 [AUDIO I2S 32-BIT & PWM SPK GPIO 15] HỆ THỐNG ÂM THANH");
-    Serial.printf("   + BCLK (SCK chung) : GPIO %d\n", PIN_I2S_BCLK);
-    Serial.printf("   + WS   (LRC chung) : GPIO %d\n", PIN_I2S_WS);
-    Serial.printf("   + MIC  (INMP441 SD): GPIO %d (32-bit 64-SCK Frame)\n", PIN_I2S_MIC_SD);
-    Serial.printf("   + LOA NỐI TẠM GPIO : GPIO %d (Đã sẵn sàng PWM qua Tụ 4.7uF & Trở)\n", PIN_I2S_SPK_DIN);
+    Serial.printf("   + MIC (INMP441 I2S0) : BCLK=GPIO %d | WS=GPIO %d | SD=GPIO %d\n", PIN_I2S_MIC_BCLK, PIN_I2S_MIC_WS, PIN_I2S_MIC_SD);
+    Serial.printf("   + LOA (MAX98357A I2S1): BCLK=GPIO %d | LRC=GPIO %d | DIN=GPIO %d\n", PIN_I2S_SPK_BCLK, PIN_I2S_SPK_LRC, PIN_I2S_SPK_DIN);
     Serial.println("-------------------------------------------------------");
 
     // Khởi động mặc định ở chế độ đọc Mic INMP441 để có sẵn dữ liệu sóng âm
