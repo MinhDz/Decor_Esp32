@@ -270,6 +270,7 @@ String XiaoZhiClient::getStoredEndpoint() {
 }
 
 void XiaoZhiClient::unbindDevice() {
+  stopWebSocket();
   JsonDocument doc;
   if (LittleFS.exists(FILE_CONFIG)) {
     File f = LittleFS.open(FILE_CONFIG, "r");
@@ -283,7 +284,7 @@ void XiaoZhiClient::unbindDevice() {
   if (f) {
     serializeJson(doc, f);
     f.close();
-    Serial.println("🗑️ [XIAOZHI] Đã xóa Token và cờ liên kết khỏi /config.json!");
+    Serial.println("🗑️ [XIAOZHI] Đã ngắt kết nối WebSocket và xóa Token, cờ liên kết khỏi /config.json!");
   }
 
   // Xóa UUID cũ để máy chủ XiaoZhi OTA nhận diện đây là yêu cầu cấp mã OTP mới

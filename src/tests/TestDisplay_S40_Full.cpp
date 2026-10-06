@@ -3928,39 +3928,42 @@ namespace TestDisplay {
     drawSymbianSoftkeys("Kiem tra(OK)", "xiaozhi.me", "Thoat(Exit)");
   }
 
+  static void drawXiaoZhiAssistantScreen(bool fullRedraw);
+
   static void enterXiaoZhiAssistantMode(bool forceBinding = false) {
     currentMode = 11;
     s40AiMacStr = WiFi.macAddress();
     if (forceBinding) {
       XiaoZhiClient::unbindDevice();
     }
+
+    if (WiFi.status() == WL_CONNECTED) {
+      s40AiBindStatus = "Dang dong bo voi XiaoZhi Hub...";
+      s40AiOtpCode = "...";
+      drawXiaoZhiBindingScreen();
+      XiaoZhiClient::queryOTA(true);
+    }
+
     if (!forceBinding && XiaoZhiClient::isDeviceBound()) {
       s40AiState = AI_STATE_IDLE;
+      s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de hoi thoai.";
+      drawXiaoZhiAssistantScreen(true);
     } else {
       s40AiState = AI_STATE_BINDING;
       if (WiFi.status() != WL_CONNECTED) {
         s40AiBindStatus = "Chua co Wi-Fi! Hay ket noi Wi-Fi truoc.";
         s40AiOtpCode = "NO WIFI";
       } else {
-        s40AiBindStatus = "Dang lay ma OTP tu XiaoZhi Cloud...";
-        s40AiOtpCode = "...";
-        drawXiaoZhiBindingScreen();
-        String otaPayload = XiaoZhiClient::queryOTA(true);
-        if (!forceBinding && XiaoZhiClient::isDeviceBound()) {
-          s40AiState = AI_STATE_IDLE;
-          s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de hoi thoai.";
+        String authCode = XiaoZhiClient::getLastAuthCode();
+        if (authCode.length() > 0) {
+          s40AiOtpCode = authCode;
+          s40AiBindStatus = "Da co ma OTP! Vui long nhap tren Hub.";
         } else {
-          String authCode = XiaoZhiClient::getLastAuthCode();
-          if (authCode.length() > 0) {
-            s40AiOtpCode = authCode;
-            s40AiBindStatus = "Da co ma OTP! Vui long nhap tren Hub.";
-          } else {
-            s40AiOtpCode = "CHO OTP";
-            s40AiBindStatus = "Dang cho phan hoi tu may chu XiaoZhi...";
-          }
-          drawXiaoZhiBindingScreen();
+          s40AiOtpCode = "CHO OTP";
+          s40AiBindStatus = "Dang cho phan hoi tu may chu XiaoZhi...";
         }
       }
+      drawXiaoZhiBindingScreen();
     }
   }
 
@@ -9372,8 +9375,8 @@ namespace TestDisplay {
       updateActiveGameLoop(now);
     } else if (currentMode == 11) {
       if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
-        // Tự động kiểm tra trạng thái liên kết với XiaoZhi Cloud mỗi 7 giây nếu có Wi-Fi
-        if (now - s40AiLastOtpPollMs >= 7000) {
+        // Tự động kiểm tra trạng thái liên kết với XiaoZhi Cloud mỗi 3.5 giây nếu có Wi-Fi
+        if (now - s40AiLastOtpPollMs >= 3500) {
           s40AiLastOtpPollMs = now;
           if (WiFi.status() == WL_CONNECTED) {
             XiaoZhiClient::queryOTA(false);

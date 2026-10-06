@@ -1880,6 +1880,21 @@ static void handleXiaoZhiOTA() {
   }
 }
 
+static void handleXiaoZhiUnbind() {
+  XiaoZhiClient::unbindDevice();
+  if (WifiManager::isConnected()) {
+    XiaoZhiClient::queryOTA(true);
+  }
+  JsonDocument res;
+  res["status"] = "ok";
+  res["bound"] = XiaoZhiClient::isDeviceBound();
+  res["mac"] = WiFi.macAddress();
+  res["otp"] = XiaoZhiClient::getLastAuthCode();
+  String out;
+  serializeJson(res, out);
+  server.send(200, "application/json", out);
+}
+
 // ---------------- REST APIS THÔNG SỐ PC HUD ----------------
 
 static void handlePcMetricsGet() {
@@ -2273,6 +2288,8 @@ void WebRoutes::begin() {
   server.on("/api/config/ai", HTTP_POST, handleSaveAIConfig);
   server.on("/api/xiaozhi/ota", HTTP_GET, handleXiaoZhiOTA);
   server.on("/api/xiaozhi/ota", HTTP_POST, handleXiaoZhiOTA);
+  server.on("/api/xiaozhi/unbind", HTTP_GET, handleXiaoZhiUnbind);
+  server.on("/api/xiaozhi/unbind", HTTP_POST, handleXiaoZhiUnbind);
 
   // 6. Các REST API Thông số PC (PC Status HUD)
   server.on("/api/pc/metrics", HTTP_GET, handlePcMetricsGet);
