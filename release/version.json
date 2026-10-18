@@ -1,9 +1,9 @@
 {
-  "version": "v3.1.5",
+  "version": "v3.1.6",
   "name": "Space OS",
   "build_date": "2026-10-18",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
-  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.1.5/firmware.bin",
-  "size": 1860560,
-  "changelog": "🚀 Space OS v3.1.5 - Nâng Cấp Quản Lý Wi-Fi Thông Minh & Biểu Tượng Vòng Tròn Sóng Chuẩn Quốc Tế:\n- Ứng dụng 'Kết nối' (Wi-Fi Manager) trong Menu S40: Liệt kê danh sách tất cả mạng Wi-Fi đã lưu trên trạm, hiển thị mức sóng trực quan, trạng thái [✓ ĐANG DÙNG], địa chỉ IP và cho phép bấm OK để chuyển đổi kết nối giữa các mạng nhanh chóng.\n- Cơ chế quét ngầm & tự động kết nối lại như Smartphone (Auto-Reconnect in AP Mode): Khi mất sóng hoặc ở chế độ AP Hotspot, thiết bị tự động quét sóng ngầm mỗi 18s (non-blocking, không gây đơ hệ thống) và tự kết nối lại ngay khi mạng quen thuộc xuất hiện.\n- Biểu tượng quạt sóng Wi-Fi hình tròn (Circular Wi-Fi Arc Icon): Thay thế toàn bộ cột sóng dọc dạng sóng di động thành biểu tượng Wi-Fi vòng tròn đồng tâm chuẩn mực (gồm chấm phát sóng đáy và 3 cung tròn đồng tâm theo RSSI thực tế) trên Chrome Menu S40, Top Bar màn hình chờ Standby, trang Thông tin thiết bị và Web Simulator."
+  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.1.6/firmware.bin",
+  "size": 1864016,
+  "changelog": "🚀 Space OS v3.1.6 - Lưu Trữ NVS Flash Cho Cụm Đèn Edison & Chế Độ Nhịp Nhạc VU Meter, Giọng Nói AI, Tự Động Thông Minh:\n- Lưu trữ bộ nhớ Flash NVS vĩnh viễn (Non-Volatile Storage): Khắc phục triệt để tình trạng mất trạng thái đèn Edison và motor cối xay khi ngắt điện hoàn toàn. Cấu hình chế độ, độ sáng và công suất được lưu tự động và phục hồi chính xác ngay khi khởi động lại.\n- Chế độ 11: Nhịp nhạc VU Meter (Stereo Spectrum): Ống sườn Trái nhịp theo dải âm trầm Bass/Kick (0..5), ống sườn Phải nhịp theo dải âm trung/cao Vocals/Treble (6..15) với bộ lọc vật lý bốc nhanh (<15ms) và tản nhiệt êm (~120ms) mô phỏng sợi đốt bóng đèn chân không thực tế, giữ ánh sáng êm khi dừng bài.\n- Chế độ 12: Giọng nói AI (XiaoZhi Voice Reactive): Sóng ánh sáng rung động đồng bộ trực tiếp theo năng lượng và nhịp tiết giọng nói TTS của trợ lý ảo XiaoZhi, tự động chuyển về nhịp thở lắng nghe êm dịu khi trợ lý chờ lệnh.\n- Chế độ 13: Tự động thông minh (Smart Fusion): Tự động biến đổi hiệu ứng theo ngữ cảnh - Nhịp theo giọng nói khi XiaoZhi AI phản hồi -> Chuyển sang nhịp nhạc VU Meter khi mở nhạc -> Trở về nhịp thở Lò phản ứng trạm không gian khi ở màn hình chờ.\n- Đồng bộ toàn diện: Bổ sung 3 chế độ mới và preset 1 chạm trên giao diện Web Dashboard, Menu Cài đặt Symbian S40 và cảm biến chạm TTP223."
 }

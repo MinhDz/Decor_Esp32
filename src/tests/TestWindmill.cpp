@@ -1,9 +1,11 @@
 #include "tests/TestWindmill.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestSensors.h"
+#include "tests/TestAudio.h"
 #include "CobLedController.h"
 #include "Config.h"
 #include "PcStatsManager.h"
+#include <Preferences.h>
 #include <math.h>
 #include "driver/gpio.h"
 
@@ -20,13 +22,20 @@ namespace TestWindmill {
   static uint8_t powerPct = 0;
   static bool breathingActive = false;
 
-  // 11 Chế độ cho từng cặp LED Ống Edison
+  // 14 Chế độ cho từng cặp LED Ống Edison
   static uint8_t edisonModeL = 5; // Mặc định: 5 (Lò phản ứng & PC HUD Sync)
   static uint8_t edisonModeR = 5; // Mặc định: 5 (Lò phản ứng & PC HUD Sync)
   static uint8_t edisonPctL  = 70;
   static uint8_t edisonPctR  = 70;
 
   static bool flowingLedsActive = false;
+
+  // Caching trạng thái để tối ưu không ghi Flash NVS liên tục khi kéo thanh trượt
+  static uint8_t s_savedModeL = 255;
+  static uint8_t s_savedModeR = 255;
+  static uint8_t s_savedPctL  = 255;
+  static uint8_t s_savedPctR  = 255;
+  static uint8_t s_savedMotor = 255;
 
   // Chuỗi hiệu ứng khởi động lò phản ứng (Reactor Ignition Sequence)
   static unsigned long s_startupStartMs = 0;
@@ -49,7 +58,7 @@ namespace TestWindmill {
     "Nhịp thở (Breathing)"
   };
 
-  static const char* EDISON_MODE_NAMES[11] = {
+  static const char* EDISON_MODE_NAMES[14] = {
     "Tắt (0%)",
     "Dịu nhẹ (25%)",
     "Vừa phải (50%)",
@@ -60,8 +69,56 @@ namespace TestWindmill {
     "Nhịp đập Cyberpunk (Cyber Heartbeat)",
     "Sấm sét hồ quang (Electric Lightning)",
     "Thở đối xứng lệch pha (Alternating Breath)",
-    "Dòng năng lượng sạc (Power Flow Pulse)"
+    "Dòng năng lượng sạc (Power Flow Pulse)",
+    "Nhịp nhạc VU Meter (Stereo Spectrum)",
+    "Giọng nói AI (XiaoZhi Voice Reactive)",
+    "Tự động thông minh (Smart Fusion)"
   };
+
+  void saveEdisonPrefs() {
+    if (edisonModeL == s_savedModeL && edisonModeR == s_savedModeR &&
+        edisonPctL == s_savedPctL && edisonPctR == s_savedPctR &&
+        currentModeIdx == s_savedMotor) {
+      return;
+    }
+    Preferences p;
+    if (p.begin("edison_cfg", false)) {
+      p.putUChar("mode_l", edisonModeL);
+      p.putUChar("mode_r", edisonModeR);
+      p.putUChar("pct_l", edisonPctL);
+      p.putUChar("pct_r", edisonPctR);
+      p.putUChar("motor_m", currentModeIdx);
+      p.end();
+      s_savedModeL = edisonModeL;
+      s_savedModeR = edisonModeR;
+      s_savedPctL  = edisonPctL;
+      s_savedPctR  = edisonPctR;
+      s_savedMotor = currentModeIdx;
+      Serial.printf("💾 [EDISON NVS] Đã lưu cấu hình: Trái=%d(%s), Phải=%d(%s), Motor=%d\n",
+                    edisonModeL, EDISON_MODE_NAMES[edisonModeL % 14],
+                    edisonModeR, EDISON_MODE_NAMES[edisonModeR % 14], currentModeIdx);
+    }
+  }
+
+  void loadEdisonPrefs() {
+    Preferences p;
+    if (p.begin("edison_cfg", true)) {
+      edisonModeL    = p.getUChar("mode_l", 5) % 14;
+      edisonModeR    = p.getUChar("mode_r", 5) % 14;
+      edisonPctL     = constrain((int)p.getUChar("pct_l", 70), 0, 100);
+      edisonPctR     = constrain((int)p.getUChar("pct_r", 70), 0, 100);
+      currentModeIdx = p.getUChar("motor_m", 0) % 5;
+      p.end();
+      s_savedModeL = edisonModeL;
+      s_savedModeR = edisonModeR;
+      s_savedPctL  = edisonPctL;
+      s_savedPctR  = edisonPctR;
+      s_savedMotor = currentModeIdx;
+      Serial.printf("📖 [EDISON NVS] Đã nạp cấu hình: Trái=%d(%s, %d%%), Phải=%d(%s, %d%%), Motor=%d\n",
+                    edisonModeL, EDISON_MODE_NAMES[edisonModeL % 14], edisonPctL,
+                    edisonModeR, EDISON_MODE_NAMES[edisonModeR % 14], edisonPctR, currentModeIdx);
+    }
+  }
 
   void init() {
     if (initialized) return;
@@ -80,14 +137,14 @@ namespace TestWindmill {
     ledcAttachPin(PIN_L298N_IN1_MOTOR, PWM_CH_MOTOR);
     ledcWrite(PWM_CH_MOTOR, 0);
 
-    // 2. Khởi tạo PWM cho cặp LED ống Edison Sườn Trái (GPIO 2)
+    // 2. Khởi tạo PWM cho cặp LED ống Edison Sườn Trái (GPIO 47)
     pinMode(PIN_EDISON_TUBE_L, OUTPUT);
     digitalWrite(PIN_EDISON_TUBE_L, LOW);
     ledcSetup(PWM_CH_EDISON_L, PWM_FREQ, PWM_RES);
     ledcAttachPin(PIN_EDISON_TUBE_L, PWM_CH_EDISON_L);
     ledcWrite(PWM_CH_EDISON_L, 0);
 
-    // 3. Khởi tạo PWM cho cặp LED ống Edison Sườn Phải (GPIO 47)
+    // 3. Khởi tạo PWM cho cặp LED ống Edison Sườn Phải (GPIO 21)
     pinMode(PIN_EDISON_TUBE_R, OUTPUT);
     digitalWrite(PIN_EDISON_TUBE_R, LOW);
     ledcSetup(PWM_CH_EDISON_R, PWM_FREQ, PWM_RES);
@@ -96,6 +153,9 @@ namespace TestWindmill {
 
     // 4. Khởi tạo 2 thanh LED nước chảy sao băng qua CobLeds (GPIO 38 & 18 - Digital HIGH)
     CobLeds::init(true);
+
+    // Nạp trạng thái đã lưu từ Flash NVS để không bao giờ bị mất khi tắt nguồn
+    loadEdisonPrefs();
 
     triggerStartupEffect();
     initialized = true;
@@ -124,6 +184,7 @@ namespace TestWindmill {
       ledcWrite(PWM_CH_MOTOR, targetDuty);
     }
 
+    saveEdisonPrefs();
     Serial.printf("🎡 [CỐI XAY - GPIO %d] Công suất Motor & Vành Đèn: %u%% (Duty: %u/255)\n",
                   PIN_L298N_IN1_MOTOR, powerPct, targetDuty);
   }
@@ -162,6 +223,7 @@ namespace TestWindmill {
     } else if (currentModeIdx == 4) {
       setLedBrightness(75, true);
     }
+    saveEdisonPrefs();
   }
 
   uint8_t getMode() {
@@ -181,7 +243,7 @@ namespace TestWindmill {
   // ============================================================================
   void setEdisonLeftMode(uint8_t modeIdx) {
     if (!initialized) init();
-    edisonModeL = modeIdx % 11;
+    edisonModeL = modeIdx % 14;
     if (edisonModeL == 0) {
       edisonPctL = 0;
       ledcWrite(PWM_CH_EDISON_L, 0);
@@ -201,6 +263,7 @@ namespace TestWindmill {
       edisonPctL = 70;
       // Hiệu ứng động được băm xung mượt trong loop()
     }
+    saveEdisonPrefs();
     Serial.printf("💡 [EDISON TRÁI - GPIO %d] Chế độ: %s\n", PIN_EDISON_TUBE_L, getEdisonLeftModeName());
   }
 
@@ -209,7 +272,7 @@ namespace TestWindmill {
   }
 
   const char* getEdisonLeftModeName() {
-    return EDISON_MODE_NAMES[edisonModeL % 11];
+    return EDISON_MODE_NAMES[edisonModeL % 14];
   }
 
   void setEdisonLeftBrightness(uint8_t brightPct, bool breathing) {
@@ -239,7 +302,7 @@ namespace TestWindmill {
   // ============================================================================
   void setEdisonRightMode(uint8_t modeIdx) {
     if (!initialized) init();
-    edisonModeR = modeIdx % 11;
+    edisonModeR = modeIdx % 14;
     if (edisonModeR == 0) {
       edisonPctR = 0;
       ledcWrite(PWM_CH_EDISON_R, 0);
@@ -259,6 +322,7 @@ namespace TestWindmill {
       edisonPctR = 70;
       // Hiệu ứng động được băm xung mượt trong loop()
     }
+    saveEdisonPrefs();
     Serial.printf("💡 [EDISON PHẢI - GPIO %d] Chế độ: %s\n", PIN_EDISON_TUBE_R, getEdisonRightModeName());
   }
 
@@ -267,7 +331,7 @@ namespace TestWindmill {
   }
 
   const char* getEdisonRightModeName() {
-    return EDISON_MODE_NAMES[edisonModeR % 11];
+    return EDISON_MODE_NAMES[edisonModeR % 14];
   }
 
   void setEdisonRightBrightness(uint8_t brightPct, bool breathing) {
@@ -310,11 +374,11 @@ namespace TestWindmill {
   }
 
   uint8_t getEdisonModeCount() {
-    return 11;
+    return 14;
   }
 
   const char* getEdisonModeNameByIdx(uint8_t modeIdx) {
-    return EDISON_MODE_NAMES[modeIdx % 11];
+    return EDISON_MODE_NAMES[modeIdx % 14];
   }
 
   void applyEffectPreset(const String& preset) {
@@ -333,6 +397,12 @@ namespace TestWindmill {
       setEdisonBothMode(9);
     } else if (p == "charging" || p == "power") {
       setEdisonBothMode(10);
+    } else if (p == "vumeter" || p == "vu" || p == "music") {
+      setEdisonBothMode(11);
+    } else if (p == "voice" || p == "ai" || p == "speech" || p == "xiaozhi") {
+      setEdisonBothMode(12);
+    } else if (p == "smart" || p == "auto" || p == "fusion") {
+      setEdisonBothMode(13);
     } else if (p == "max" || p == "100") {
       setEdisonBothMode(4);
     } else if (p == "off" || p == "0") {
@@ -492,6 +562,71 @@ namespace TestWindmill {
       return (uint8_t)(30 + pulse * 220);
     }
 
+    // Mode 11: Nhịp nhạc VU Meter (Stereo Spectrum: Trái = Bass, Phải = Treble)
+    if (mode == 11) {
+      uint8_t bass = 0, treble = 0;
+      TestAudio::getAudioSpectrumLevels(bass, treble);
+      uint8_t level = isLeft ? bass : treble;
+
+      float targetDuty = 0.0f;
+      if (level <= 3) {
+        // Khi không có tiếng nhạc hoặc đoạn nghỉ giữa bài: Đèn thở nhẹ dịu (warm filament idle glow)
+        float idleWave = (sinf((float)now * 0.0022f + (isLeft ? 0.0f : 1.6f)) + 1.0f) * 0.5f;
+        targetDuty = 20.0f + idleWave * 26.0f;
+      } else {
+        // Có nhạc: Giữ ánh sáng đáy 24 + công suất bùng nổ theo nhịp Bass/Treble
+        targetDuty = 24.0f + (level / 100.0f) * 231.0f;
+      }
+
+      // Mô phỏng quán tính sợi đốt bóng đèn chân không cổ điển (Fast Attack / Smooth Thermal Decay)
+      static float s_smoothDutyL = 25.0f;
+      static float s_smoothDutyR = 25.0f;
+      float& smooth = isLeft ? s_smoothDutyL : s_smoothDutyR;
+      if (targetDuty > smooth) {
+        smooth = smooth * 0.22f + targetDuty * 0.78f; // Nhịp bốc nhanh tức thì (<15ms)
+      } else {
+        smooth = smooth * 0.86f + targetDuty * 0.14f; // Sợi đốt tản nhiệt êm (~120ms)
+      }
+      return (uint8_t)constrain(smooth, 0.0f, 255.0f);
+    }
+
+    // Mode 12: Giọng nói AI (XiaoZhi Voice Reactive: Đồng bộ nhịp phát âm TTS)
+    if (mode == 12) {
+      if (TestAudio::isVoiceStreamActive()) {
+        uint8_t energy = TestAudio::getVoiceStreamEnergy();
+        float baseVoice = (float)energy / 100.0f;
+        // Hiệu ứng vi sóng rung âm tiết tiếng nói (Syllable ripple Flutter ~10Hz)
+        float flutter = sinf((float)now * 0.048f + (isLeft ? 0.0f : 0.85f)) * 0.18f;
+        float combined = constrain(baseVoice + flutter, 0.0f, 1.0f);
+        float targetDuty = 28.0f + combined * 227.0f;
+
+        static float s_voiceSmoothL = 28.0f;
+        static float s_voiceSmoothR = 28.0f;
+        float& vSmooth = isLeft ? s_voiceSmoothL : s_voiceSmoothR;
+        if (targetDuty > vSmooth) {
+          vSmooth = vSmooth * 0.30f + targetDuty * 0.70f;
+        } else {
+          vSmooth = vSmooth * 0.82f + targetDuty * 0.18f;
+        }
+        return (uint8_t)constrain(vSmooth, 0.0f, 255.0f);
+      } else {
+        // Trạng thái AI đang lắng nghe / chờ: Nhịp thở ấm êm dịu
+        float pulse = (sinf((float)now * 0.0028f + (isLeft ? 0.0f : 0.75f)) + 1.0f) * 0.5f;
+        return (uint8_t)(25.0f + pulse * 45.0f);
+      }
+    }
+
+    // Mode 13: Tự động thông minh (Smart Fusion: Tự đổi theo AI / Nhạc / Chờ)
+    if (mode == 13) {
+      if (TestAudio::isVoiceStreamActive()) {
+        return computeDynamicEdisonDuty(12, isLeft, now);
+      } else if (TestAudio::isMusicPlaying()) {
+        return computeDynamicEdisonDuty(11, isLeft, now);
+      } else {
+        return computeDynamicEdisonDuty(5, isLeft, now); // Lò phản ứng & Trạm không gian
+      }
+    }
+
     return 70;
   }
 
@@ -564,12 +699,12 @@ namespace TestWindmill {
       Serial.printf("👉 [DECOR] Cối xay: %s\n", getModeName());
       return true;
     } else if (cmd == 'e' || cmd == 'E') {
-      edisonModeL = (edisonModeL + 1) % 11;
+      edisonModeL = (edisonModeL + 1) % 14;
       setEdisonLeftMode(edisonModeL);
       Serial.printf("👉 [DECOR] Edison Trái (GPIO %d): %s\n", PIN_EDISON_TUBE_L, getEdisonLeftModeName());
       return true;
     } else if (cmd == 'r' || cmd == 'R') {
-      edisonModeR = (edisonModeR + 1) % 11;
+      edisonModeR = (edisonModeR + 1) % 14;
       setEdisonRightMode(edisonModeR);
       Serial.printf("👉 [DECOR] Edison Phải (GPIO %d): %s\n", PIN_EDISON_TUBE_R, getEdisonRightModeName());
       return true;

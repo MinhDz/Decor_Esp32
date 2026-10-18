@@ -486,6 +486,37 @@ namespace TestAudio {
     }
   }
 
+  // Theo dõi hoạt động luồng âm thanh thời gian thực (TTS XiaoZhi & Nhạc)
+  static volatile unsigned long s_lastStreamPcmMs = 0;
+  static volatile uint8_t s_streamVoiceEnergy = 0;
+
+  bool isVoiceStreamActive() {
+    return (s_lastStreamPcmMs > 0 && (millis() - s_lastStreamPcmMs < 600));
+  }
+
+  uint8_t getVoiceStreamEnergy() {
+    if (!isVoiceStreamActive()) return 0;
+    return s_streamVoiceEnergy;
+  }
+
+  bool isMusicPlaying() {
+    return audioPlayRunning || (millis() - lastExtSpecMs < 1200 && !isVoiceStreamActive());
+  }
+
+  void getAudioSpectrumLevels(uint8_t& bass, uint8_t& treble) {
+    const uint8_t* spec = getMicSpectrum16();
+    int bMax = 0;
+    for (int i = 0; i < 6; i++) {
+      if (spec[i] > bMax) bMax = spec[i];
+    }
+    int tMax = 0;
+    for (int i = 6; i < 16; i++) {
+      if (spec[i] > tMax) tMax = spec[i];
+    }
+    bass = (uint8_t)constrain(bMax, 0, 100);
+    treble = (uint8_t)constrain(tMax, 0, 100);
+  }
+
   // ============================================================================
   // BỘ THU ÂM GIỌNG NÓI THỰC TẾ TỪ MIC INMP441 (8,000 Hz, 16-bit Signed Mono PCM)
   // ============================================================================
@@ -1212,6 +1243,8 @@ namespace TestAudio {
 
   // --- PHÁT DỮ LIỆU ÂM THANH THEO LUỒNG THỜI GIAN THỰC (TTS XIAOZHI) ---
   void resetStreamPcm() {
+    s_lastStreamPcmMs = 0;
+    s_streamVoiceEnergy = 0;
     if (spkDriverInstalled) {
       i2s_zero_dma_buffer(I2S_PORT_SPK);
     }
@@ -1219,6 +1252,20 @@ namespace TestAudio {
 
   void playStreamPcm(const int16_t* samples, size_t sampleCount) {
     if (!samples || sampleCount == 0) return;
+    s_lastStreamPcmMs = millis();
+    {
+      int64_t sumAmp = 0;
+      size_t step = max((size_t)1, sampleCount / 32);
+      size_t count = 0;
+      for (size_t k = 0; k < sampleCount; k += step) {
+        int32_t val = samples[k];
+        if (val < 0) val = -val;
+        sumAmp += val;
+        count++;
+      }
+      int avgAmp = (count > 0) ? (int)(sumAmp / count) : 0;
+      s_streamVoiceEnergy = (uint8_t)constrain(avgAmp / 110, 0, 100);
+    }
     if (!spkDriverInstalled) {
       if (!installSpeakerTx(16000)) return;
     } else {

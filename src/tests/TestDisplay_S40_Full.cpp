@@ -652,8 +652,8 @@ namespace TestDisplay {
       TestAudio::setMicSensitivityMode(micSensitivityMode);
       int wmMod              = p.getInt("wm_mod", 0) % 5;
       TestWindmill::setMode(wmMod);
-      int edL                = p.getInt("ed_l", 2) % 6; // Mặc định 50%
-      int edR                = p.getInt("ed_r", 2) % 6; // Mặc định 50%
+      int edL                = p.getInt("ed_l", TestWindmill::getEdisonLeftMode()) % TestWindmill::getEdisonModeCount();
+      int edR                = p.getInt("ed_r", TestWindmill::getEdisonRightMode()) % TestWindmill::getEdisonModeCount();
       TestWindmill::setEdisonLeftMode(edL);
       TestWindmill::setEdisonRightMode(edR);
       bool fl                = p.getBool("fl_en", true);
@@ -8041,12 +8041,14 @@ namespace TestDisplay {
       saveSystemSettingsPrefs();
       showSymbianToast(String("CỐI XAY: ") + TestWindmill::getModeName());
     } else if (row == 11) {
-      int m = (TestWindmill::getEdisonLeftMode() + dir + 11) % 11;
+      int cnt = TestWindmill::getEdisonModeCount();
+      int m = (TestWindmill::getEdisonLeftMode() + dir + cnt) % cnt;
       TestWindmill::setEdisonLeftMode(m);
       saveSystemSettingsPrefs();
       showSymbianToast(String("EDISON TRÁI: ") + TestWindmill::getEdisonLeftModeName());
     } else if (row == 12) {
-      int m = (TestWindmill::getEdisonRightMode() + dir + 11) % 11;
+      int cnt = TestWindmill::getEdisonModeCount();
+      int m = (TestWindmill::getEdisonRightMode() + dir + cnt) % cnt;
       TestWindmill::setEdisonRightMode(m);
       saveSystemSettingsPrefs();
       showSymbianToast(String("EDISON PHẢI: ") + TestWindmill::getEdisonRightModeName());

@@ -3473,6 +3473,9 @@ static const char DECOR_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
         <div style="font-size:0.76rem;color:#94a3b8;margin-bottom:8px;">Preset 1 Chạm (Áp dụng nhanh cho 2 ống Edison):</div>
         <div class="decor-preset-grid">
           <button class="btn-decor-preset" onclick="window.applyDecorPreset('reactor')">⚡ Lò Phản Ứng</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('vumeter')">🎵 Nhịp Nhạc VU</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('voice')">🤖 Giọng Nói AI</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('smart')">✨ Tự Động Auto</button>
           <button class="btn-decor-preset" onclick="window.applyDecorPreset('candle')">🕯️ Ngọn Nến</button>
           <button class="btn-decor-preset" onclick="window.applyDecorPreset('heartbeat')">💓 Nhịp Tim</button>
           <button class="btn-decor-preset" onclick="window.applyDecorPreset('lightning')">🌩️ Sấm Sét</button>
@@ -3502,6 +3505,9 @@ static const char DECOR_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
               <option value="8">8: Sấm sét hồ quang (Lightning)</option>
               <option value="9">9: Thở đối xứng lệch pha (Dual Breath)</option>
               <option value="10">10: Dòng năng lượng sạc (Power Flow)</option>
+              <option value="11">11: Nhịp nhạc VU Meter (Stereo Spectrum)</option>
+              <option value="12">12: Giọng nói AI (XiaoZhi Voice Reactive)</option>
+              <option value="13">13: Tự động thông minh (Smart Fusion)</option>
             </select>
             <div class="decor-slider-row">
               <span style="font-size:0.72rem;color:#64748b;">0%</span>
@@ -3529,6 +3535,9 @@ static const char DECOR_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
               <option value="8">8: Sấm sét hồ quang (Lightning)</option>
               <option value="9">9: Thở đối xứng lệch pha (Dual Breath)</option>
               <option value="10">10: Dòng năng lượng sạc (Power Flow)</option>
+              <option value="11">11: Nhịp nhạc VU Meter (Stereo Spectrum)</option>
+              <option value="12">12: Giọng nói AI (XiaoZhi Voice Reactive)</option>
+              <option value="13">13: Tự động thông minh (Smart Fusion)</option>
             </select>
             <div class="decor-slider-row">
               <span style="font-size:0.72rem;color:#64748b;">0%</span>
@@ -5526,7 +5535,7 @@ static void handleKeypadPress() {
     else if (keyStr == "exit" || keyStr == "ex" || keyStr == "back") keyIdx = 6;
     else if (keyStr == "touch") {
       // Giả lập chạm cảm biến TTP223 (đổi hiệu ứng bóng đèn Edison hoặc đánh thức màn hình)
-      TestWindmill::setEdisonBothMode((TestWindmill::getEdisonLeftMode() + 1) % 11);
+      TestWindmill::setEdisonBothMode((TestWindmill::getEdisonLeftMode() + 1) % TestWindmill::getEdisonModeCount());
       JsonDocument res;
       res["success"] = true;
       res["action"] = "touch";

@@ -22,7 +22,7 @@ namespace TestWindmill {
   bool isBreathing();
 
   // 3. Điều khiển cặp LED Ống Edison Sườn Trái (GPIO 47 - PWM Kênh 4)
-  // Các chế độ: 
+  // Các chế độ (14 chế độ): 
   //   0: Tắt, 1: 25%, 2: 50%, 3: 75%, 4: 100%, 
   //   5: Lò phản ứng & Đồng bộ PC (Reactor & PC HUD Sync)
   //   6: Ngọn nến lung linh (Candle Flicker)
@@ -30,6 +30,9 @@ namespace TestWindmill {
   //   8: Sấm sét hồ quang (Electric Lightning)
   //   9: Thở đối xứng lệch pha (Alternating Dual Breath)
   //   10: Dòng năng lượng sạc (Power Flow Pulse)
+  //   11: Nhịp nhạc VU Meter (Stereo Spectrum: Trái = Bass, Phải = Treble)
+  //   12: Giọng nói AI (XiaoZhi Voice Reactive: Đồng bộ nhịp nói TTS)
+  //   13: Tự động thông minh (Smart Fusion: Tự đổi theo AI / Nhạc / Chờ)
   void setEdisonLeftMode(uint8_t modeIdx);
   uint8_t getEdisonLeftMode();
   const char* getEdisonLeftModeName();
@@ -54,6 +57,10 @@ namespace TestWindmill {
   uint8_t getEdisonModeCount();
   const char* getEdisonModeNameByIdx(uint8_t modeIdx);
   void applyEffectPreset(const String& preset);
+
+  // Lưu và nạp trạng thái đèn & motor vào Flash NVS (không bao giờ mất khi rút nguồn)
+  void saveEdisonPrefs();
+  void loadEdisonPrefs();
 
   // 6. Điều khiển 2 thanh LED nước chảy sao băng mặt lưng (GPIO 38 & GPIO 18)
   void setFlowingLeds(bool enable);
