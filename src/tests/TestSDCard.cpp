@@ -186,10 +186,16 @@ namespace TestSDCard {
     sdSpi->begin(sck, miso, mosi, cs);
     delay(5);
 
-    if (!SD.begin(cs, *sdSpi, 1000000)) {
+    if (!SD.begin(cs, *sdSpi, 20000000)) {
       SD.end();
-      if (!SD.begin(cs, *sdSpi, 400000)) {
-        return false;
+      if (!SD.begin(cs, *sdSpi, 10000000)) {
+        SD.end();
+        if (!SD.begin(cs, *sdSpi, 4000000)) {
+          SD.end();
+          if (!SD.begin(cs, *sdSpi, 1000000)) {
+            return false;
+          }
+        }
       }
     }
 

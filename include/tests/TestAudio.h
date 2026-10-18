@@ -18,6 +18,16 @@ namespace TestAudio {
   int getSpeakerVolumePct();
   void setSpeakerVolumePct(int pct);
 
+  // Quản lý âm lượng chuyên biệt 3 phân hệ: Thông báo, Phát nhạc, Trợ lý XiaoZhi AI
+  int getNotifyVolumePct();
+  void setNotifyVolumePct(int pct);
+  int getMusicVolumePct();
+  void setMusicVolumePct(int pct);
+  int getXiaoZhiVolumePct();
+  void setXiaoZhiVolumePct(int pct);
+  void saveVolumePrefs();
+  void loadVolumePrefs();
+
   // --- BỘ ÂM BÁO & NHẠC CHUÔNG MONO CỔ ĐIỂN NOKIA SYMBIAN S40 ---
   void playKeyBeep();                         // Tiếng bíp bàn phím mono dứt khoát (~16ms, 2093Hz)
   void playOkChime();                          // Âm xác nhận OK / Lưu thành công (E6 -> B6)
@@ -58,7 +68,12 @@ namespace TestAudio {
   int getRecordedMaxVuPct();
   void setMicSensitivityMode(int mode); // 0: Thấp (1.8x), 1: Tiêu chuẩn (3.5x), 2: Cao (5.5x)
 
-  // --- PHÁT ÂM THANH MÔ PHỎNG QUA PWM (GPIO 15 - KHÔNG CẦN DAC MAX98357A) ---
+  // --- PHÁT ÂM THANH QUA I2S DAC MAX98357A (DIN=15, BCLK=16, LRC=17 TRÊN I2S_NUM_1) ---
+  void playRecordedVoice(uint8_t volumePct = 65);
+  void playStreamPcm(const int16_t* samples, size_t sampleCount);
+  void resetStreamPcm();
+
+  // --- HÀM TƯƠNG THÍCH NGƯỢC (TỰ ĐỘNG CHUYỂN SANG I2S DAC MAX98357A) ---
   void playPwmTone(uint16_t freqHz, uint16_t durationMs, uint8_t pin = 15);
   void playStartupPwmChime(uint8_t pin = 15);
   void playRecordedVoicePwm(uint8_t pin = 15);
@@ -72,7 +87,7 @@ namespace TestAudio {
   bool isVoicePlaybackAsyncRunning();
   uint32_t getVoicePlaybackCurrentSample();
 
-  // Xử lý phím tắt từ Serial Monitor ('m': Bật/Tắt Raw Stream, 'p': Phát lại PWM, 't': Test bíp, 's': Lưu SD)
+  // Xử lý phím tắt từ Serial Monitor ('m': Sóng Âm, 'p': Nghe Lại Loa, 't': Test Bíp, 'a': Chime, 'n': Nokia, '+','-': Vol)
   bool handleSerial(char cmd);
 }
 

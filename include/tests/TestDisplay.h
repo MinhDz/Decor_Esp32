@@ -22,10 +22,22 @@ namespace TestDisplay {
   void setHudStyle(const String& style);
 
   // Lấy trạng thái màn hình hiện tại để đồng bộ ngược về Web UI
-  String getScreenModeName();
-  String getEmojiStateName();
-  String getSubtitle();
-  String getHudStyleName();
+  String  getScreenModeName();
+  uint8_t getCurrentMode();
+  int     getS40MenuCursor();
+  String  getCurrentScreenTitle();
+  String  getEmojiStateName();
+  String  getSubtitle();
+  String  getHudStyleName();
+
+  // Lấy cấu hình Màn Hình Chờ hiện tại (Hình nền, độ mờ, màu đồng hồ, thời tiết) để đồng bộ lên Web Keypad
+  String  getStandbyBgImage();
+  String  getStandbyBgMode();
+  int     getStandbyDimOverlay();
+  String  getStandbyClockColor();
+  String  getStandbyCustomText();
+  float   getStandbyTemp();
+  int     getStandbyHumidity();
 
   // Cập nhật nhiệt độ & độ ẩm thực từ cảm biến SHT31 (GPIO 8, 9) lên Màn Hình Chờ
   void updateLiveWeather(float tempC, float humPct);
@@ -50,6 +62,12 @@ namespace TestDisplay {
   int  getUiThemeIdx();
   void setUiThemeIdx(int idx);
 
+  // --- ĐỒNG BỘ & ĐIỀU KHIỂN TRỢ LÝ XIAOZHI AI (MODE 11 <-> WEB UI) ---
+  void getXiaoZhiChatState(String& stateStr, String& userText, String& aiReply, String& emotion,
+                           uint8_t& eyeState, int& volumePct, int& micLevelPct, uint32_t& turnId);
+  void triggerXiaoZhiListeningFromWeb();
+  void stopXiaoZhiListeningFromWeb();
+
   // Xử lý lệnh điều khiển nhanh từ Serial Monitor ('1', '2', '3', '4', '5', 's', 'i', 'x', 'd')
   bool handleSerial(char cmd);
 
@@ -61,4 +79,18 @@ namespace TestDisplay {
 
   // Hiển thị tiến trình cập nhật phần mềm từ xa tối giản (OTA Progress Screen)
   void drawOtaProgressScreen(const char* status, int pct);
+
+  // --- KẾT XUẤT STREAM VIDEO (CHẾ ĐỘ 17: STREAMING TỪ TRÌNH DUYỆT WEB / URL) ---
+  bool drawStreamJpegFrame(const uint8_t* buf, size_t len);
+  void stopStreamMode();
+  bool isStreamActive();
+
+  // --- HOẠT ẢNH LOADING KẾT NỐI WI-FI (CHẤM XOAY ĐUỔI NHAU) & TOAST THÔNG BÁO ---
+  void showWifiConnectingScreen(const String& ssid);
+  void updateWifiConnectingSpinner(const String& ssid, uint8_t animStep);
+  void onWifiConnectedSuccess(const String& ssid, const String& ip);
+  void onWifiConnectFailed(const String& ssid);
+  void showSymbianToast(const String& msg, unsigned long durationMs = 2500);
+  void refreshActiveScreen();
 }
+

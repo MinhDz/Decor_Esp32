@@ -1616,6 +1616,7 @@
     <div class="status-left">
       <span>IP: <strong id="st-ip" style="color:#38bdf8">Đang kết nối...</strong></span>
       <span>MAC: <strong id="st-mac" style="color:#a855f7; cursor:pointer;" onclick="copyMacAddress()" title="Bấm để sao chép MAC">Đang đọc...</strong></span>
+      <span>Nguồn: <strong id="st-bat-txt" style="color:#10b981;">🔋 --V (--%)</strong></span>
       <span>Trạng thái: <span id="st-badge" class="badge bg-offline">Checking</span></span>
     </div>
     <div style="font-size: 0.75rem; color: #94a3b8;">
@@ -2122,59 +2123,6 @@
 
   <!-- ==================== TAB 2: TRÒ CHUYỆN XIAOZHI AI ==================== -->
   <div id="tab-chat" class="section">
-    <!-- Card Mã Xác Thực Thiết Bị XiaoZhi (Auth / Binding Code) -->
-    <div id="card-xiaozhi-auth" class="designer-panel" style="background: linear-gradient(145deg, #1e1b4b, #0f172a); border: 2px solid #818cf8; margin-bottom: 14px; box-shadow: 0 0 25px rgba(129,140,248,0.25);">
-      <div style="display: flex; justify-content: space-between; align-items: center; cursor: pointer;" onclick="toggleAuthCardCollapse()">
-        <span style="font-weight: 700; color: #a5b4fc; font-size: 0.92rem; display: flex; align-items: center; gap: 6px;">
-          🔑 MÃ XÁC THỰC THÊM THIẾT BỊ (XIAOZHI AUTH CODE) <span id="auth-card-arrow" style="font-size:0.75rem; color:#94a3b8;">▼</span>
-        </span>
-        <div style="display:flex; gap:6px; align-items:center;">
-          <span id="auth-code-status" class="badge" style="background:#4338ca; color:#e0e7ff;">Chờ kết nối</span>
-        </div>
-      </div>
-      
-      <div id="auth-card-content">
-        <p style="font-size: 0.78rem; color: #cbd5e1; margin-top: 8px; margin-bottom: 10px; line-height: 1.45;">
-          Dùng <strong>Mã Xác Thực</strong> này và <strong>Địa chỉ MAC</strong> của bạn để thêm thiết bị trên trang chủ <a href="https://xiaozhi.me" target="_blank" style="color:#38bdf8; font-weight:bold; text-decoration:underline;">xiaozhi.me</a>.
-        </p>
-
-        <!-- Khung hiển thị Mã Auth lớn dạng Digital OTP -->
-        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; margin: 10px 0;">
-          <div id="auth-code-display" style="font-family: 'Courier New', monospace; font-size: 2.2rem; font-weight: 900; letter-spacing: 6px; color: #38bdf8; background: #0b0f19; padding: 10px 24px; border-radius: 10px; border: 2px dashed #818cf8; text-shadow: 0 0 15px #38bdf8; min-width: 200px; text-align: center;">
-            ------
-          </div>
-          <span id="auth-code-hint" style="font-size:0.72rem; color:#94a3b8;">Bấm nút "Lấy Mã Từ XiaoZhi" bên dưới để nhận mã từ server</span>
-        </div>
-
-        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn-primary" style="flex: 1.2; padding: 9px 12px; font-size: 0.82rem; background: #4f46e5;" onclick="fetchXiaoZhiAuthCode()">
-            ⚡ Lấy Mã Từ XiaoZhi
-          </button>
-          <button class="btn-secondary" style="flex: 1; padding: 9px 12px; font-size: 0.82rem;" onclick="copyAuthCode()">
-            📋 Sao Chép Mã
-          </button>
-          <button class="btn-secondary" style="flex: 1; padding: 9px 12px; font-size: 0.82rem;" onclick="copyMacAddress()">
-            📋 Sao Chép MAC
-          </button>
-          <button class="btn-secondary" style="padding: 9px 12px; font-size: 0.82rem;" onclick="simulateAuthCodeForDemo()" title="Tạo mã 6 số ngẫu nhiên để thử nghiệm ngay">
-            🎲 Mã Thử Nghiệm
-          </button>
-          <a href="https://xiaozhi.me" target="_blank" class="btn-secondary" style="flex: 1; padding: 9px 12px; font-size: 0.82rem; text-decoration:none; text-align:center; display:flex; align-items:center; justify-content:center; background:#0284c7; color:white;">
-            🌐 xiaozhi.me ↗
-          </a>
-        </div>
-
-        <!-- Nhật ký nhận từ XiaoZhi (WebSocket Logs) -->
-        <div style="margin-top: 10px; border-top: 1px dashed rgba(255,255,255,0.1); padding-top: 8px;">
-          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.72rem; color:#94a3b8; cursor:pointer;" onclick="toggleWsLogs()">
-            <span>📜 Nhật ký phản hồi từ XiaoZhi Server (WebSocket) <span id="ws-log-arrow">▼</span></span>
-            <span id="ws-last-event" style="color:#64748b;">Chưa có dữ liệu</span>
-          </div>
-          <pre id="ws-raw-logs" style="display:none; background:#050811; color:#10b981; padding:8px; border-radius:6px; font-size:0.7rem; max-height:110px; overflow-y:auto; margin-top:6px; border:1px solid #1e293b; white-space:pre-wrap;"></pre>
-        </div>
-      </div>
-    </div>
-
     <!-- Panel Cấu Hình XiaoZhi (Có thể ẩn/hiện) -->
     <div id="panel-ai-config" class="designer-panel" style="display: none; margin-bottom: 14px;">
       <div class="designer-title">
@@ -2559,7 +2507,7 @@
           <div class="control-label-heading">🖥️ CHẾ ĐỘ MÀN HÌNH</div>
           <div class="preview-mode-bar" style="margin-top:2px; margin-bottom:8px; justify-content:flex-start;">
             <button class="mode-btn" onclick="setScreenMode('standby')">⏰ Màn Chờ</button>
-            <button class="mode-btn active" onclick="setScreenMode('emoji')">😊 Biểu Cảm</button>
+            <button class="mode-btn active" onclick="setScreenMode('xiaozhi')">🤖 Trợ Lý AI</button>
             <button class="mode-btn" onclick="setScreenMode('pchud')">📊 PC HUD</button>
           </div>
 
@@ -2635,42 +2583,56 @@
         </div>
       </div>
 
-      <!-- Quick Suggestion Prompts Bar with Scroll Navigation -->
-      <div class="quick-prompts-wrapper">
-        <button class="prompt-scroll-btn" onclick="scrollQuickPrompts(-220)" title="Cuộn gợi ý sang trái">◀</button>
-        <div class="quick-prompts" id="quick-prompts-box">
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi sang biểu cảm Bối Rối @@')">🎭 Đổi biểu cảm @@</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi sang biểu cảm Giận Dữ')">😡 Đổi biểu cảm Giận</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Nhìn ngước lên trên')">👆 Nhìn Lên</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Nhìn cúi xuống dưới')">👇 Nhìn Xuống</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Nháy mắt như thật nhé')">😉 Nháy mắt</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi sang Màn Hình Chờ đồng hồ')">⏰ Mở Màn Hình Chờ</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Kích hoạt màn hình PC HUD')">📊 Xem PC Status HUD</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi HUD sang Đồng Hồ Đo Tốc Độ')">⏱️ HUD Đồng Hồ</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi HUD sang Biểu Đồ Sóng')">📈 HUD Biểu Đồ Sóng</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi HUD sang Thanh Ngang')">📊 HUD Thanh Ngang</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi HUD sang Ma Trận Số')">⚡ HUD Ma Trận Số</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi hình nền Vũ Trụ Nebula')">🌌 Đổi nền Vũ Trụ</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Đổi màu đèn LED sang Xanh Dương')">💡 Đổi màu LED</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Kiểm tra thông số phần cứng ESP32')">ℹ️ Báo cáo RAM & Chip</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Thời tiết hôm nay thế nào?')">🌤️ Thời tiết hôm nay?</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Bây giờ là mấy giờ rồi?')">⏰ Mấy giờ rồi?</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Kể một câu chuyện vui ngắn')">😄 Kể chuyện cười</div>
-          <div class="prompt-pill" onclick="sendQuickPrompt('Giới thiệu về Trạm Decor ESP32')">🛸 Giới thiệu Trạm Decor</div>
+      <!-- Khung Tương Tác Giọng Nói Độc Lập (Voice Interaction Dock) -->
+      <div id="xiaozhi-voice-dock" class="voice-dock">
+        <div class="voice-status-bar">
+          <div class="voice-status-info">
+            <span id="xz-status-icon" class="status-dot"></span>
+            <span id="xz-status-text" class="status-label">SẴN SÀNG</span>
+          </div>
+          <div class="voice-vu-wrap" id="xz-vu-container" style="display:none;">
+            <span class="vu-label">MIC</span>
+            <div class="vu-bar-track">
+              <div id="xz-vu-level" class="vu-bar-fill"></div>
+            </div>
+            <span id="xz-vu-val" class="vu-val">0%</span>
+          </div>
+          <div class="voice-vol-dock">
+            <span title="Âm lượng thoại XiaoZhi AI" style="font-size:0.75rem;">🔊</span>
+            <button class="vol-btn" onclick="window.adjustXiaoZhiVolume(-5)">-</button>
+            <span id="xz-vol-label" class="vol-val">80%</span>
+            <button class="vol-btn" onclick="window.adjustXiaoZhiVolume(5)">+</button>
+          </div>
         </div>
-        <button class="prompt-scroll-btn" onclick="scrollQuickPrompts(220)" title="Cuộn gợi ý sang phải">▶</button>
-      </div>
 
+        <div class="mic-button-zone">
+          <button id="btn-xz-mic-trigger" class="xz-mic-button idle" onclick="window.triggerXiaoZhiMicWeb()">
+            <div class="mic-wave-ring r1"></div>
+            <div class="mic-wave-ring r2"></div>
+            <div class="mic-wave-ring r3"></div>
+            <div class="mic-icon-center">
+              <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </div>
+          </button>
+          <div id="xz-mic-sub-hint" class="mic-sub-hint">Chạm nút để kích hoạt Micro trên ESP32</div>
+        </div>
 
-      <!-- Input Bar với nút Micro mô phỏng -->
-      <div class="chat-input-bar">
-        <button id="btn-mic-listen" class="btn-mic" onclick="toggleMicListening()" title="Bấm để kích hoạt chế độ Lắng nghe trên ESP32">
-          <span id="mic-icon">🎙️</span>
-        </button>
-        <input type="text" id="chat-input-text" placeholder="Nhập câu hỏi hoặc ra lệnh cho ESP32... (Enter để gửi)" onkeydown="if(event.key==='Enter') sendChatMessage()">
-        <button class="btn-send" onclick="sendChatMessage()">
-          <span>Gửi</span> ➤
-        </button>
+        <div class="voice-suggest-bar">
+          <span class="suggest-lead">💡 Câu mẫu nói vào Mic:</span>
+          <div class="suggest-scroll">
+            <span class="suggest-chip">"Phát nhạc đi"</span>
+            <span class="suggest-chip">"Mấy giờ rồi?"</span>
+            <span class="suggest-chip">"Thời tiết hôm nay thế nào?"</span>
+            <span class="suggest-chip">"Giới thiệu về bạn đi"</span>
+            <span class="suggest-chip">"Đổi sang màn hình PC HUD"</span>
+            <span class="suggest-chip">"Kể chuyện cười đi"</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -2915,6 +2877,14 @@
 
       if (data.fs_used_mb !== undefined && data.fs_total_mb !== undefined) {
         document.getElementById('st-fs').innerText = `${data.fs_used_mb.toFixed(1)} / ${data.fs_total_mb.toFixed(1)} MB`;
+      }
+
+      if (data.battery_v !== undefined) {
+        const stBat = document.getElementById('st-bat-txt');
+        if (stBat) {
+          stBat.innerText = (data.is_charging ? '⚡ ' : '🔋 ') + Number(data.battery_v).toFixed(2) + 'V (' + (data.battery_pct || 0) + '%)';
+          stBat.style.color = data.is_charging ? '#38bdf8' : (data.battery_pct > 20 ? '#10b981' : '#ef4444');
+        }
       }
 
       // Cập nhật thẻ trạng thái Tab Wi-Fi
@@ -3997,23 +3967,28 @@
     tabBtns.forEach(b => b.classList.remove('active'));
     document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
     
+    let targetSec = document.getElementById('tab-' + tabName);
+    if (targetSec) {
+      targetSec.classList.add('active');
+    }
+
     let activeBtn = null;
+    tabBtns.forEach(b => {
+      const oc = b.getAttribute('onclick') || '';
+      if (oc.includes("'" + tabName + "'") || b.id === 'tab-btn-' + tabName) {
+        activeBtn = b;
+      }
+    });
+
     if (tabName === 'screen') {
-      activeBtn = tabBtns[0];
-      document.getElementById('tab-screen').classList.add('active');
+      if (!activeBtn && tabBtns.length > 0) activeBtn = tabBtns[0];
       renderWallpaperThumbnails();
     } else if (tabName === 'chat') {
-      activeBtn = tabBtns[1];
-      document.getElementById('tab-chat').classList.add('active');
       setScreenMode(currentScreenMode || 'emoji');
       scrollChatToBottom();
     } else if (tabName === 'images') {
-      activeBtn = tabBtns[2];
-      document.getElementById('tab-images').classList.add('active');
       loadImages();
     } else if (tabName === 'wifi') {
-      activeBtn = tabBtns[3];
-      document.getElementById('tab-wifi').classList.add('active');
       loadSavedWifiList();
       checkStatus();
     }
@@ -5013,48 +4988,46 @@
     }, 450);
   }
 
-  // Nút Micro mô phỏng thu âm trên Web
-  let isMicListening = false;
-  function toggleMicListening() {
-    const micBtn = document.getElementById('btn-mic-listen');
-    if (isMicListening) {
-      isMicListening = false;
-      micBtn.classList.remove('listening');
-      setEmojiState('idle');
-      return;
+  // Điều khiển Micro và Trò chuyện XiaoZhi AI thực tế
+  let xzCurVol = 80;
+  let xzLastState = "";
+
+  async function triggerXiaoZhiMicWeb() {
+    const btn = document.getElementById('btn-xz-mic-trigger');
+    const hint = document.getElementById('xz-mic-sub-hint');
+    if (btn) {
+      if (xzLastState === 'listening') {
+        hint.innerText = "Đang gửi âm thanh tới XiaoZhi...";
+      } else {
+        btn.className = 'xz-mic-button listening';
+        hint.innerText = "🎙️ Đang mở Micro trên ESP32... Hãy nói!";
+      }
     }
+    try {
+      const res = await fetch('/api/xiaozhi/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'listen' })
+      });
+      const data = await res.json();
+      if (typeof updateXiaoZhiChatUI === 'function') updateXiaoZhiChatUI(data);
+    } catch(e) {
+      console.warn("trigger mic err:", e);
+    }
+  }
 
-    isMicListening = true;
-    micBtn.classList.add('listening');
-
-    // Chuyển sang biểu cảm lắng nghe
-    setScreenMode('emoji');
-    setEmojiState('listen');
-    showToast("🎙️ ESP32 đang kích hoạt Microphone lắng nghe giọng nói...");
-
-    // Giả lập nhận diện giọng nói trong 2.2 giây
-    setTimeout(() => {
-      if (!isMicListening) return;
-      isMicListening = false;
-      micBtn.classList.remove('listening');
-
-      const sampleVoiceCommands = [
-        "Đổi biểu cảm sang Bối Rối @@",
-        "Đổi biểu cảm sang Giận Dữ",
-        "Đổi sang Màn Hình Chờ đồng hồ",
-        "Kích hoạt màn hình PC HUD",
-        "Đổi hình nền Vũ Trụ Nebula",
-        "Kiểm tra thông số phần cứng ESP32",
-        "Thời tiết hôm nay thế nào?",
-        "Kể một câu chuyện vui ngắn",
-        "Đổi màu đèn LED sang Xanh Dương"
-      ];
-      const picked = sampleVoiceCommands[Math.floor(Math.random() * sampleVoiceCommands.length)];
-
-      const input = document.getElementById('chat-input-text');
-      input.value = picked;
-      sendChatMessage();
-    }, 2200);
+  async function adjustXiaoZhiVolume(delta) {
+    let nextVol = Math.max(0, Math.min(100, xzCurVol + delta));
+    xzCurVol = nextVol;
+    const lbl = document.getElementById('xz-vol-label');
+    if (lbl) lbl.innerText = nextVol + '%';
+    try {
+      await fetch('/api/xiaozhi/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'volume', volume: nextVol })
+      });
+    } catch(e) {}
   }
 
   // Bộ phản hồi thông minh mô phỏng trợ lý XiaoZhi cho Trạm Decor

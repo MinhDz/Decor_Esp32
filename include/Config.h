@@ -17,15 +17,18 @@
 #define SHT31_I2C_ADDR_1    0x44
 #define SHT31_I2C_ADDR_2    0x45
 
-// 3. Cảm biến Chạm Điện Dung TTP22
-#define PIN_TOUCH_TTP223    20  // SIG (TTP223) -> GPIO 20 (Active HIGH)
+// 3. Cảm biến Chạm Điện Dung TTP223
+#define PIN_TOUCH_TTP223    20  // SIG (TTP223) -> GPIO 20 (Active HIGH, RTC_GPIO20 hỗ trợ đánh thức Deep Sleep)
 
 // 4. Cối Xay Gió & Đèn LED Decor Trạm Không Gian
 #define PIN_L298N_IN1_MOTOR 1   // IN1: Motor cối xay N20 & LED vành cánh (PWM) -> GPIO 1
-#define PIN_EDISON_TUBE_LED 2   // 2 LED ống Edison 30mm sườn trạm (qua trở 47Ω, chung GND) -> GPIO 2 (PWM)
-#define PIN_L298N_IN3_LED   2   // Alias tương thích (nếu kích qua L298N IN3) -> GPIO 2
-#define PIN_FLOWING_LED_L   18  // LED nước chảy sao băng mặt lưng (Thanh Trái) -> GPIO 18 (Nối trực tiếp ESP32)
-#define PIN_FLOWING_LED_R   38  // LED nước chảy sao băng mặt lưng (Thanh Phải) -> GPIO 38 (Nối trực tiếp ESP32)
+#define PIN_EDISON_TUBE_L   47  // Cặp LED ống Edison sườn TRÁI (qua trở 47Ω, chung GND) -> GPIO 47 (PWM)
+#define PIN_EDISON_TUBE_R   21  // Cặp LED ống Edison sườn PHẢI (qua trở 47Ω, chung GND) -> GPIO 21 (PWM)
+#define PIN_EDISON_TUBE_LED PIN_EDISON_TUBE_L // Alias tương thích ngược
+#define PIN_L298N_IN3_LED   PIN_EDISON_TUBE_L // Alias tương thích ngược
+
+#define PIN_FLOWING_LED_L   38  // LED nước chảy sao băng mặt lưng (Thanh Trái) -> GPIO 38
+#define PIN_FLOWING_LED_R   18  // LED nước chảy sao băng mặt lưng (Thanh Phải) -> GPIO 18
 #define PIN_FLOWING_LED_LEFT  PIN_FLOWING_LED_L
 #define PIN_FLOWING_LED_RIGHT PIN_FLOWING_LED_R
 
@@ -61,10 +64,10 @@
 #define PIN_SD_MOSI         40  // D7 (SD_MOSI / DI)  -> GPIO 40
 #define PIN_SD_CS           39  // D8 (SD_CS / SS)    -> GPIO 39
 
-// 8. Cụm Bàn Phím Điều Hướng & Giám Sát Bo Nguồn Keypad_Power_Shield
+// 8. Cụm Bàn Phím Điều Hướng & Giám Sát Bo Nguồn MH-CD42
 #define PIN_ADC_KEYPAD      3   // Chân ADC đọc cụm thang điện trở 7 nút (10k Pull-up lên 3.3V) -> GPIO 3 (ADC1_CH2)
-#define PIN_CHG_STAT        46  // Đọc cờ trạng thái sạc TP4056 từ bo nguồn -> GPIO 46 (Input-Only)
-#define PIN_BAT_ADC         2   // Chân ADC1_CH1 đọc điện áp pin 18650 qua cầu phân áp (Dự phòng) -> GPIO 2
+#define PIN_CHG_STAT        46  // Đọc cờ trạng thái sạc High/Low từ Vin bo sạc MH-CD42 -> GPIO 46 (Input-Only)
+#define PIN_BAT_ADC         2   // Chân ADC1_CH1 đọc điện áp pin 18650 qua cầu phân áp 100k/100k -> GPIO 2 (Không xung đột WiFi)
 #define PIN_BTN_UP          16  // [Dự phòng phím số] LÊN (Up)
 #define PIN_BTN_DOWN        17  // [Dự phòng phím số] XUỐNG (Down)
 #define PIN_BTN_LEFT        18  // [Dự phòng phím số] TRÁI (Left)

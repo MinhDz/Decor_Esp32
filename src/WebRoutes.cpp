@@ -10,7 +10,10 @@
 #include "tests/TestButtons.h"
 #include "tests/TestAudio.h"
 #include "tests/TestSDCard.h"
+#include "tests/TestWindmill.h"
+#include "CobLedController.h"
 #include "OtaManager.h"
+#include "WebStreamManager.h"
 
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -230,7 +233,7 @@ static const char SD_CONVERTER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     const bgModeEl = document.getElementById('cfg-bg-mode');
     if (bgModeEl && bgModeEl.value === 'image' && activeImageName) {
       const resolvedUrl = window.resolveWebImgUrl(activeImageName);
-      ['screen-standby', 'chat-screen-standby'].forEach(id => {
+      ['screen-standby', 'chat-screen-standby', 'sim-view-standby'].forEach(id => {
         const el = document.getElementById(id);
         if (el) el.style.backgroundImage = `url('${resolvedUrl}')`;
       });
@@ -1537,6 +1540,3427 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 </script>
 )rawliteral";
 
+// ---------------- INJECT SCRIPT: ĐỒNG BỘ TRÒ CHUYỆN XIAOZHI AI & NÚT MICRO KÍCH HOẠT PHẦN CỨNG ----------------
+static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
+<style>
+/* VOICE INTERACTION DOCK - TRÒ CHUYỆN XIAOZHI AI */
+.voice-dock {
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.92) 0%, rgba(10, 15, 29, 0.98) 100%);
+  border: 1px solid #1e293b;
+  border-top: 1px solid rgba(56, 189, 248, 0.35);
+  border-radius: 14px;
+  padding: 14px 16px;
+  margin-top: 12px;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.voice-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+}
+.voice-status-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #10b981;
+  box-shadow: 0 0 8px #10b981;
+  transition: all 0.25s ease;
+}
+.status-dot.listening {
+  background: #ef4444;
+  box-shadow: 0 0 12px #ef4444;
+  animation: pulse-dot 0.8s infinite alternate;
+}
+.status-dot.thinking {
+  background: #f59e0b;
+  box-shadow: 0 0 12px #f59e0b;
+  animation: pulse-dot 0.6s infinite alternate;
+}
+.status-dot.replying {
+  background: #00e5ff;
+  box-shadow: 0 0 12px #00e5ff;
+  animation: pulse-dot 0.8s infinite alternate;
+}
+@keyframes pulse-dot {
+  0% { transform: scale(0.85); opacity: 0.6; }
+  100% { transform: scale(1.35); opacity: 1; }
+}
+.status-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  color: #e2e8f0;
+  text-transform: uppercase;
+}
+.voice-vu-wrap {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.65);
+  padding: 3px 8px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.vu-label {
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: #38bdf8;
+}
+.vu-bar-track {
+  width: 70px;
+  height: 6px;
+  background: #0f172a;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.vu-bar-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981, #f59e0b, #ef4444);
+  width: 0%;
+  transition: width 0.08s ease;
+}
+.vu-val {
+  font-size: 0.68rem;
+  font-family: monospace;
+  color: #94a3b8;
+  width: 28px;
+  text-align: right;
+}
+.voice-vol-dock {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  background: rgba(15, 23, 42, 0.7);
+  padding: 3px 8px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+.vol-btn {
+  background: #1e293b;
+  color: #e2e8f0;
+  border: 1px solid #334155;
+  border-radius: 4px;
+  width: 22px;
+  height: 20px;
+  font-size: 0.75rem;
+  font-weight: bold;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.vol-btn:hover {
+  background: #38bdf8;
+  color: #0f172a;
+}
+.vol-val {
+  font-size: 0.72rem;
+  font-family: monospace;
+  font-weight: 700;
+  color: #38bdf8;
+  min-width: 32px;
+  text-align: center;
+}
+.mic-button-zone {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 0;
+  position: relative;
+}
+.xz-mic-button {
+  width: 78px;
+  height: 78px;
+  border-radius: 50%;
+  border: 2px solid #38bdf8;
+  background: radial-gradient(circle, #1e293b 0%, #0b1120 100%);
+  color: #38bdf8;
+  cursor: pointer;
+  outline: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  transition: all 0.25s ease;
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
+}
+.xz-mic-button:hover {
+  transform: scale(1.05);
+  box-shadow: 0 0 30px rgba(56, 189, 248, 0.5);
+  border-color: #7dd3fc;
+}
+.mic-wave-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  opacity: 0;
+}
+.xz-mic-button.listening {
+  border-color: #ef4444;
+  color: #ffffff;
+  background: radial-gradient(circle, #b91c1c 0%, #450a0a 100%);
+  box-shadow: 0 0 32px rgba(239, 68, 68, 0.65);
+  animation: pulse-mic 1.1s infinite alternate;
+}
+.xz-mic-button.listening .mic-wave-ring.r1 {
+  border: 2px solid rgba(239, 68, 68, 0.7);
+  animation: ripple 1.6s infinite;
+}
+.xz-mic-button.listening .mic-wave-ring.r2 {
+  border: 2px solid rgba(239, 68, 68, 0.45);
+  animation: ripple 1.6s infinite 0.5s;
+}
+.xz-mic-button.listening .mic-wave-ring.r3 {
+  border: 2px solid rgba(239, 68, 68, 0.2);
+  animation: ripple 1.6s infinite 1.0s;
+}
+.xz-mic-button.thinking {
+  border-color: #f59e0b;
+  color: #f59e0b;
+  background: radial-gradient(circle, #78350f 0%, #1c1917 100%);
+  box-shadow: 0 0 25px rgba(245, 158, 11, 0.4);
+  animation: pulse-mic 1.5s infinite alternate;
+}
+.xz-mic-button.replying {
+  border-color: #00e5ff;
+  color: #00e5ff;
+  background: radial-gradient(circle, #083344 0%, #030712 100%);
+  box-shadow: 0 0 25px rgba(0, 229, 255, 0.45);
+  animation: pulse-mic 1.8s infinite alternate;
+}
+@keyframes ripple {
+  0% { width: 78px; height: 78px; opacity: 0.95; }
+  100% { width: 150px; height: 150px; opacity: 0; }
+}
+@keyframes pulse-mic {
+  0% { transform: scale(1); }
+  100% { transform: scale(1.06); }
+}
+.mic-sub-hint {
+  margin-top: 10px;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: #94a3b8;
+  text-align: center;
+  transition: color 0.2s ease;
+}
+.voice-suggest-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+  padding-top: 6px;
+  border-top: 1px dashed rgba(255, 255, 255, 0.06);
+}
+.suggest-lead {
+  font-size: 0.72rem;
+  color: #64748b;
+  white-space: nowrap;
+}
+.suggest-scroll {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+.suggest-scroll::-webkit-scrollbar { display: none; }
+.suggest-chip {
+  font-size: 0.72rem;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.1);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  padding: 3px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+}
+
+/* Kiểu bong bóng tin nhắn chat người dùng & trợ lý */
+.chat-msg.user .chat-bubble {
+  background: linear-gradient(135deg, #065f46 0%, #064e3b 100%) !important;
+  border: 1px solid #10b981 !important;
+  color: #ecfdf5 !important;
+  box-shadow: 0 2px 10px rgba(16, 185, 129, 0.25) !important;
+}
+.chat-msg.user .chat-avatar {
+  background: #10b981 !important;
+  color: #064e3b !important;
+  font-weight: bold;
+}
+.chat-msg.bot .chat-bubble {
+  background: linear-gradient(135deg, #1e1b4b 0%, #0f172a 100%) !important;
+  border: 1px solid #6366f1 !important;
+  color: #f8fafc !important;
+  box-shadow: 0 2px 10px rgba(99, 102, 241, 0.25) !important;
+}
+.chat-emotion-tag {
+  display: inline-block;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: #38bdf8;
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.3);
+  padding: 2px 6px;
+  border-radius: 6px;
+  margin-bottom: 5px;
+}
+#card-xiaozhi-auth {
+  display: none !important;
+}
+</style>
+
+<script>
+(function() {
+  let xzPollTimer = null;
+  let xzLastTurnId = 0;
+  let xzLastState = "";
+  let xzCurVol = 80;
+  let xzActiveUserBubble = null;
+  let xzActiveBotBubble = null;
+  let xzRenderedTurnIds = new Set();
+
+  function initXiaoZhiVoiceUI() {
+    // 0. Ẩn hoàn toàn thẻ Mã Xác Thực thêm thiết bị vì đã kết nối Hub thành công
+    const authCard = document.getElementById('card-xiaozhi-auth');
+    if (authCard) authCard.style.display = 'none';
+
+    // 1. Tìm hoặc ẩn khung nhập bàn phím cũ
+    const oldInputBar = document.querySelector('#tab-chat .chat-input-bar');
+    if (oldInputBar) oldInputBar.style.display = 'none';
+    const oldQuickPrompts = document.querySelector('#tab-chat .quick-prompts-wrapper');
+    if (oldQuickPrompts) oldQuickPrompts.style.display = 'none';
+
+    // 2. Chèn Voice Dock mới nếu chưa có
+    if (!document.getElementById('xiaozhi-voice-dock')) {
+      const chatPanel = document.querySelector('#tab-chat .chat-panel') || document.getElementById('tab-chat');
+      const dock = document.createElement('div');
+      dock.id = 'xiaozhi-voice-dock';
+      dock.className = 'voice-dock';
+      dock.innerHTML = `
+        <div class="voice-status-bar">
+          <div class="voice-status-info">
+            <span id="xz-status-icon" class="status-dot"></span>
+            <span id="xz-status-text" class="status-label">SẴN SÀNG</span>
+          </div>
+          <div class="voice-vu-wrap" id="xz-vu-container" style="display:none;">
+            <span class="vu-label">MIC</span>
+            <div class="vu-bar-track">
+              <div id="xz-vu-level" class="vu-bar-fill"></div>
+            </div>
+            <span id="xz-vu-val" class="vu-val">0%</span>
+          </div>
+          <div class="voice-vol-dock">
+            <span title="Âm lượng thoại XiaoZhi AI" style="font-size:0.75rem;">🔊</span>
+            <button class="vol-btn" onclick="window.adjustXiaoZhiVolume(-5)">-</button>
+            <span id="xz-vol-label" class="vol-val">80%</span>
+            <button class="vol-btn" onclick="window.adjustXiaoZhiVolume(5)">+</button>
+          </div>
+        </div>
+
+        <div class="mic-button-zone">
+          <button id="btn-xz-mic-trigger" class="xz-mic-button idle" onclick="window.triggerXiaoZhiMicWeb()">
+            <div class="mic-wave-ring r1"></div>
+            <div class="mic-wave-ring r2"></div>
+            <div class="mic-wave-ring r3"></div>
+            <div class="mic-icon-center">
+              <svg viewBox="0 0 24 24" width="34" height="34" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                <line x1="12" y1="19" x2="12" y2="23"></line>
+                <line x1="8" y1="23" x2="16" y2="23"></line>
+              </svg>
+            </div>
+          </button>
+          <div id="xz-mic-sub-hint" class="mic-sub-hint">Chạm nút để kích hoạt Micro trên ESP32</div>
+        </div>
+
+        <div class="voice-suggest-bar">
+          <span class="suggest-lead">💡 Câu mẫu nói vào Mic:</span>
+          <div class="suggest-scroll">
+            <span class="suggest-chip">"Phát nhạc đi"</span>
+            <span class="suggest-chip">"Mấy giờ rồi?"</span>
+            <span class="suggest-chip">"Thời tiết hôm nay thế nào?"</span>
+            <span class="suggest-chip">"Giới thiệu về bạn đi"</span>
+            <span class="suggest-chip">"Đổi sang màn hình PC HUD"</span>
+            <span class="suggest-chip">"Kể chuyện cười đi"</span>
+          </div>
+        </div>
+      `;
+      chatPanel.appendChild(dock);
+    }
+
+    // 3. Cập nhật header trạng thái
+    const badge = document.getElementById('chat-status-badge');
+    if (badge) {
+      badge.className = 'chat-status-tag cloud';
+      badge.innerText = '🌐 XiaoZhi Hub Trực Tiếp';
+    }
+    const modeToggle = document.querySelector('#tab-chat .ai-mode-toggle-group');
+    if (modeToggle) modeToggle.style.display = 'none';
+  }
+
+  window.triggerXiaoZhiMicWeb = async function() {
+    const btn = document.getElementById('btn-xz-mic-trigger');
+    const hint = document.getElementById('xz-mic-sub-hint');
+    if (btn) {
+      if (xzLastState === 'listening') {
+        hint.innerText = "Đang gửi âm thanh tới XiaoZhi...";
+      } else {
+        btn.className = 'xz-mic-button listening';
+        hint.innerText = "🎙️ Đang mở Micro trên ESP32... Hãy nói!";
+      }
+    }
+    try {
+      const res = await fetch('/api/xiaozhi/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'listen' })
+      });
+      const data = await res.json();
+      updateXiaoZhiChatUI(data);
+    } catch(e) {
+      console.warn("trigger mic err:", e);
+    }
+  };
+
+  window.adjustXiaoZhiVolume = async function(delta) {
+    let nextVol = Math.max(0, Math.min(100, xzCurVol + delta));
+    xzCurVol = nextVol;
+    const lbl = document.getElementById('xz-vol-label');
+    if (lbl) lbl.innerText = nextVol + '%';
+    try {
+      await fetch('/api/xiaozhi/action', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'volume', volume: nextVol })
+      });
+    } catch(e) {}
+  };
+
+  function formatTime(d = new Date()) {
+    return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+  }
+
+  function appendChatBubble(type, text, emotion = '') {
+    const box = document.getElementById('chat-messages-box');
+    if (!box) return null;
+    const div = document.createElement('div');
+    div.className = 'chat-msg ' + (type === 'user' ? 'user' : 'bot');
+    const time = formatTime();
+
+    if (type === 'user') {
+      div.innerHTML = `
+        <div class="chat-avatar">👤</div>
+        <div class="chat-bubble">
+          <div class="msg-content">${escapeHtml(text)}</div>
+          <div class="chat-time">${time}</div>
+        </div>
+      `;
+    } else {
+      const emoHtml = emotion ? `<div class="chat-emotion-tag">${escapeHtml(emotion)}</div>` : '';
+      div.innerHTML = `
+        <div class="chat-avatar">🤖</div>
+        <div class="chat-bubble">
+          ${emoHtml}
+          <div class="msg-content">${escapeHtml(text).replace(/\\n/g, '<br>')}</div>
+          <div class="chat-time">${time}</div>
+        </div>
+      `;
+    }
+    box.appendChild(div);
+    box.scrollTop = box.scrollHeight;
+    return div;
+  }
+
+  function showTypingDot() {
+    let el = document.getElementById('chat-typing-indicator');
+    if (!el) {
+      const box = document.getElementById('chat-messages-box');
+      if (!box) return;
+      el = document.createElement('div');
+      el.id = 'chat-typing-indicator';
+      el.className = 'chat-msg bot';
+      el.innerHTML = `
+        <div class="chat-avatar">🤖</div>
+        <div class="chat-bubble">
+          <div style="font-size:0.75rem; color:#a5b4fc; margin-bottom:4px;">XiaoZhi đang suy nghĩ...</div>
+          <div class="typing-dots">
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+            <div class="typing-dot"></div>
+          </div>
+        </div>
+      `;
+      box.appendChild(el);
+      box.scrollTop = box.scrollHeight;
+    }
+  }
+
+  function removeTypingDot() {
+    const el = document.getElementById('chat-typing-indicator');
+    if (el) el.remove();
+  }
+
+  function updateXiaoZhiChatUI(data) {
+    if (!data) return;
+    const state = data.state || 'idle';
+    const userText = (data.user_text || '').trim();
+    const aiReply = (data.ai_reply || '').trim();
+    const emotion = data.emotion || 'happy';
+    const vol = (data.volume_pct !== undefined) ? data.volume_pct : 80;
+    const mic = data.mic_level || 0;
+    const turnId = data.turn_id || 0;
+
+    xzCurVol = vol;
+    const volLbl = document.getElementById('xz-vol-label');
+    if (volLbl) volLbl.innerText = vol + '%';
+
+    const btn = document.getElementById('btn-xz-mic-trigger');
+    const hint = document.getElementById('xz-mic-sub-hint');
+    const statusIcon = document.getElementById('xz-status-icon');
+    const statusText = document.getElementById('xz-status-text');
+    const vuBox = document.getElementById('xz-vu-container');
+    const vuFill = document.getElementById('xz-vu-level');
+    const vuVal = document.getElementById('xz-vu-val');
+
+    if (btn) btn.className = 'xz-mic-button ' + state;
+    if (statusIcon) statusIcon.className = 'status-dot ' + state;
+
+    if (state === 'listening') {
+      if (statusText) statusText.innerText = 'ĐANG LẮNG NGHE...';
+      if (hint) hint.innerText = '🎙️ Micro đang thu âm... Hãy nói câu hỏi vào thiết bị!';
+      if (vuBox) vuBox.style.display = 'flex';
+      if (vuFill) vuFill.style.width = Math.min(100, mic) + '%';
+      if (vuVal) vuVal.innerText = mic + '%';
+    } else if (state === 'thinking') {
+      if (statusText) statusText.innerText = 'ĐANG XỬ LÝ...';
+      if (hint) hint.innerText = '⏳ XiaoZhi đang suy nghĩ câu trả lời...';
+      if (vuBox) vuBox.style.display = 'none';
+      showTypingDot();
+    } else if (state === 'replying') {
+      if (statusText) statusText.innerText = 'ĐANG PHÁT ÂM THANH';
+      if (hint) hint.innerText = '🔊 XiaoZhi đang trả lời qua loa...';
+      if (vuBox) vuBox.style.display = 'none';
+      removeTypingDot();
+    } else if (state === 'binding') {
+      if (statusText) statusText.innerText = 'CHỜ LIÊN KẾT HUB';
+      if (hint) hint.innerText = '🔑 Cần nhập mã OTP xác thực trên trang Hub!';
+      if (vuBox) vuBox.style.display = 'none';
+      removeTypingDot();
+    } else {
+      if (statusText) statusText.innerText = 'SẴN SÀNG // CHỜ NÓI';
+      if (hint) hint.innerText = 'Chạm nút để kích hoạt Micro trên ESP32';
+      if (vuBox) vuBox.style.display = 'none';
+      removeTypingDot();
+    }
+
+    // ĐỒNG BỘ NỘI DUNG HỘI THOẠI VÀO CHAT BOX
+    if (turnId > 0 && turnId !== xzLastTurnId) {
+      xzLastTurnId = turnId;
+      xzActiveUserBubble = null;
+      xzActiveBotBubble = null;
+    }
+
+    // 1. Thêm/Cập nhật bong bóng của User
+    if (userText && userText.length > 0 && !userText.startsWith("Xin chào XiaoZhi") && !userText.startsWith("Dang gui") && !userText.startsWith("(Da nhan am thanh)")) {
+      if (!xzActiveUserBubble) {
+        xzActiveUserBubble = appendChatBubble('user', userText);
+      } else {
+        const mc = xzActiveUserBubble.querySelector('.msg-content');
+        if (mc && mc.innerText !== userText) mc.innerText = userText;
+      }
+    }
+
+    // 2. Thêm/Cập nhật bong bóng của XiaoZhi
+    if (aiReply && aiReply.length > 0 && !aiReply.startsWith("Nhấn phím [OK]") && !aiReply.startsWith("Chua phat hien tieng noi") && !aiReply.startsWith("Xin chao!")) {
+      removeTypingDot();
+      let cleanReply = aiReply;
+      if (cleanReply.indexOf('XiaoZhi: ') >= 0) {
+        cleanReply = cleanReply.substring(cleanReply.indexOf('XiaoZhi: ') + 9);
+      }
+      if (!xzActiveBotBubble) {
+        xzActiveBotBubble = appendChatBubble('bot', cleanReply, '✨ ' + emotion);
+      } else {
+        const mc = xzActiveBotBubble.querySelector('.msg-content');
+        if (mc && mc.innerText !== cleanReply) mc.innerHTML = escapeHtml(cleanReply).replace(/\\n/g, '<br>');
+        const et = xzActiveBotBubble.querySelector('.chat-emotion-tag');
+        if (et && emotion) et.innerText = '✨ ' + emotion;
+      }
+    }
+
+    // 3. Đồng bộ biểu cảm sang màn hình Live Preview nếu có hàm
+    if (typeof updateChatPreviewEyes === 'function') {
+      updateChatPreviewEyes(data.eye_state, emotion);
+    }
+
+    xzLastState = state;
+  }
+
+  async function pollXiaoZhiStatus() {
+    const chatTab = document.getElementById('tab-chat');
+    if (chatTab && chatTab.classList.contains('active')) {
+      try {
+        const res = await fetch('/api/xiaozhi/chat_status');
+        if (res.ok) {
+          const data = await res.json();
+          updateXiaoZhiChatUI(data);
+        }
+      } catch(e) {}
+    }
+  }
+
+  setTimeout(() => {
+    initXiaoZhiVoiceUI();
+    pollXiaoZhiStatus();
+    if (!xzPollTimer) {
+      xzPollTimer = setInterval(pollXiaoZhiStatus, 380);
+    }
+  }, 300);
+
+})();
+</script>
+)rawliteral";
+
+static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
+<style>
+  #tab-stream { width: 100%; max-width: 100%; overflow: hidden; }
+  .stream-grid-wrap {
+    display: grid;
+    grid-template-columns: 274px minmax(0, 1fr);
+    gap: 16px;
+    align-items: start;
+    width: 100%;
+    max-width: 100%;
+  }
+  @media (max-width: 780px) {
+    .stream-grid-wrap { grid-template-columns: minmax(0, 1fr); }
+  }
+  .stream-bezel {
+    margin: 0 auto;
+    width: 274px;
+    max-width: 100%;
+    box-sizing: border-box;
+    background: linear-gradient(145deg, #1e293b, #0f172a);
+    border: 2px solid #38bdf8;
+    border-radius: 16px;
+    padding: 14px;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.7), 0 0 15px rgba(56,189,248,0.25);
+  }
+  .stream-screen-preview {
+    width: 240px;
+    height: 320px;
+    background: #000;
+    border-radius: 8px;
+    overflow: hidden;
+    position: relative;
+    border: 1px solid #1e293b;
+    box-shadow: inset 0 0 20px rgba(0,0,0,0.9);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    align-items: center;
+  }
+  .stream-preview-canvas {
+    width: 240px;
+    height: 320px;
+    display: block;
+    background: #060913;
+  }
+  .stream-card {
+    background: #0f172a;
+    border: 1px solid #1e293b;
+    border-radius: 12px;
+    padding: 14px;
+    margin-bottom: 14px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+  }
+  .stream-card-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: #38bdf8;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 10px;
+    border-bottom: 1px solid #1e293b;
+    padding-bottom: 6px;
+  }
+  .stream-btn-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+  .stream-btn {
+    background: #1e293b;
+    border: 1px solid #334155;
+    color: #f8fafc;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 0.76rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    text-align: center;
+  }
+  .stream-btn:hover {
+    background: #0284c7;
+    border-color: #38bdf8;
+    color: #fff;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(56,189,248,0.3);
+  }
+  .stream-btn.btn-stop {
+    background: rgba(239,68,68,0.15);
+    border-color: #ef4444;
+    color: #f87171;
+  }
+  .stream-btn.btn-stop:hover {
+    background: #ef4444;
+    color: #fff;
+  }
+  .stream-btn.active {
+    background: linear-gradient(135deg, #0284c7, #10b981);
+    border-color: #38bdf8;
+    color: #fff;
+    box-shadow: 0 0 10px rgba(16,185,129,0.4);
+  }
+  .stream-param-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 0.74rem;
+    color: #94a3b8;
+    margin-top: 6px;
+  }
+  .stream-input {
+    width: 100%;
+    background: #0b0f19;
+    border: 1px solid #334155;
+    color: #fff;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 0.76rem;
+    margin-bottom: 8px;
+    outline: none;
+    box-sizing: border-box;
+  }
+  .stream-input:focus {
+    border-color: #38bdf8;
+    box-shadow: 0 0 6px rgba(56,189,248,0.3);
+  }
+  .stream-preset-pill {
+    background: #161f30;
+    border: 1px solid #334155;
+    color: #cbd5e1;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.7rem;
+    cursor: pointer;
+    transition: 0.15s;
+  }
+  .stream-preset-pill:hover {
+    border-color: #38bdf8;
+    color: #38bdf8;
+  }
+</style>
+
+<script>
+(function(){
+  let s_streamVideoEl = null;
+  let s_streamOffCanvas = null;
+  let s_streamOffCtx = null;
+  let s_previewCanvas = null;
+  let s_previewCtx = null;
+  let s_mediaStream = null;
+  let s_videoInterval = null;
+  let s_isSendingVideo = false;
+
+  let s_audioCtx = null;
+  let s_audioSourceNode = null;
+  let s_audioProcessor = null;
+  let s_micStream = null;
+  let s_isSendingAudio = false;
+
+  let s_streamFps = 12;
+  let s_jpegQuality = 0.40;
+  let s_frameCount = 0;
+  let s_lastFpsCalcTime = Date.now();
+  let s_currentLiveFps = 0;
+
+  function injectStreamTabAndPage() {
+    const navTabs = document.getElementById('nav-tabs');
+    if (!navTabs || document.getElementById('tab-btn-stream')) return;
+
+    // 1. Thêm nút Tab "📡 Stream Đa Phương Tiện"
+    const btn = document.createElement('button');
+    btn.id = 'tab-btn-stream';
+    btn.className = 'tab-btn';
+    btn.innerHTML = '📡 Web Streamer';
+    btn.onclick = function() { window.switchTab('stream'); };
+
+    const wifiTab = Array.from(navTabs.children).find(c => (c.textContent || '').indexOf('Wi-Fi') >= 0);
+    if (wifiTab) navTabs.insertBefore(btn, wifiTab);
+    else navTabs.appendChild(btn);
+
+    // 2. Tạo Section Page "#tab-stream"
+    const sec = document.createElement('div');
+    sec.id = 'tab-stream';
+    sec.className = 'section';
+    sec.innerHTML = `
+      <div class="stream-grid-wrap">
+        <!-- CỘT TRÁI: MÀN HÌNH PREVIEW 240x320 MÔ PHỎNG ST7789 -->
+        <div class="stream-bezel">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;font-size:0.68rem;color:#64748b;font-weight:700;">
+            <span>ESP32-S3 // 240x320 STREAM</span>
+            <span id="st-live-dot" style="color:#64748b;">● IDLE</span>
+          </div>
+
+          <div class="stream-screen-preview">
+            <canvas id="stream-live-canvas" class="stream-preview-canvas" width="240" height="320"></canvas>
+            <img id="stream-live-mjpg" class="stream-preview-canvas" style="display:none; width:240px; height:320px; object-fit:contain; background:#000;" alt="Live Stream">
+          </div>
+
+          <div style="margin-top:10px;background:#0b0f19;border:1px solid #1e293b;border-radius:8px;padding:8px;font-size:0.72rem;color:#94a3b8;">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+              <span>Tốc độ: <strong id="st-stat-fps" style="color:#00e5ff;">0.0 FPS</strong></span>
+              <span>Đã gửi: <strong id="st-stat-frames" style="color:#10b981;">0 frames</strong></span>
+            </div>
+            <div style="display:flex;justify-content:space-between;">
+              <span>Âm thanh: <strong id="st-stat-audio" style="color:#f59e0b;">Chưa bật</strong></span>
+              <span>Độ trễ: <strong id="st-stat-rtt" style="color:#cbd5e1;">~35ms</strong></span>
+            </div>
+          </div>
+        </div>
+
+        <!-- CỘT PHẢI: BẢNG ĐIỀU KHIỂN STREAM VIDEO & AUDIO -->
+        <div>
+          <!-- THẺ 1: STREAM VIDEO TRỰC TIẾP TỪ PC -->
+          <div class="stream-card">
+            <div class="stream-card-title">
+              <span>🖥️ Stream Video Từ PC Xuống ST7789</span>
+              <span style="font-size:0.72rem;color:#10b981;">Hardware DMA SPI 80MHz</span>
+            </div>
+
+            <div class="stream-btn-grid">
+              <button class="stream-btn" id="btn-stream-screen" style="border-color:#38bdf8;background:linear-gradient(135deg, rgba(2,132,199,0.3), rgba(6,182,212,0.3));font-weight:700;" onclick="window.startScreenStream()">
+                ▶️ Phát Tab YouTube (Trực Tiếp Từ Trình Duyệt)
+              </button>
+              <button class="stream-btn" id="btn-stream-file" onclick="document.getElementById('stream-file-selector').click()">
+                📁 Phát Video MP4 / WebM
+              </button>
+              <button class="stream-btn" id="btn-stream-cam" onclick="window.startWebcamStream()">
+                📷 Bật Webcam Máy Tính
+              </button>
+              <button class="stream-btn btn-stop" id="btn-stream-stop-video" onclick="window.stopVideoStream()">
+                ⏹️ Dừng Video Stream
+              </button>
+            </div>
+            <input type="file" id="stream-file-selector" accept="video/*" style="display:none;" onchange="window.handleVideoFileSelected(event)">
+
+            <div style="background:#0b0f19;border-radius:8px;padding:10px;margin-top:8px;">
+              <div class="stream-param-row">
+                <span>Tốc độ khung hình (FPS):</span>
+                <div style="display:flex;gap:6px;">
+                  <button class="stream-preset-pill" onclick="window.setStreamFps(10)">10 FPS</button>
+                  <button class="stream-preset-pill" style="border-color:#38bdf8;color:#38bdf8;" onclick="window.setStreamFps(15)">15 FPS (Chuẩn)</button>
+                  <button class="stream-preset-pill" onclick="window.setStreamFps(20)">20 FPS (Tối đa)</button>
+                </div>
+              </div>
+              <div class="stream-param-row" style="margin-top:8px;">
+                <span>Chất lượng nén JPEG:</span>
+                <input type="range" id="stream-jpeg-qual" min="30" max="80" value="45" style="width:120px;" onchange="window.setStreamQuality(this.value)">
+                <span id="stream-qual-txt" style="color:#38bdf8;font-weight:700;">45% (Mượt)</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- THẺ 2: STREAM ÂM THANH XUỐNG LOA MAX98357A -->
+          <div class="stream-card">
+            <div class="stream-card-title">
+              <span>🎵 Stream Âm Thanh Ra Loa I2S DAC</span>
+              <span style="font-size:0.72rem;color:#facc15;">MAX98357A (16kHz PCM)</span>
+            </div>
+
+            <div class="stream-btn-grid">
+              <button class="stream-btn" id="btn-stream-mic" onclick="window.startMicAudioStream()">
+                🎙️ Bật Micro / Audio PC
+              </button>
+              <button class="stream-btn btn-stop" id="btn-stream-stop-audio" onclick="window.stopAudioStream()">
+                ⏹️ Dừng Audio Stream
+              </button>
+            </div>
+
+            <div style="display:flex;align-items:center;justify-content:space-between;background:#0b0f19;border-radius:8px;padding:10px;margin-top:8px;">
+              <span style="font-size:0.74rem;color:#94a3b8;">Âm lượng Loa ESP32:</span>
+              <input type="range" id="stream-spk-vol" min="0" max="100" value="75" style="width:140px;" oninput="window.setSpeakerVolume(this.value)">
+              <span id="stream-vol-val" style="color:#10b981;font-weight:700;font-size:0.74rem;">75%</span>
+            </div>
+          </div>
+
+          <!-- THẺ 4: TRẠM CHUYỂN MÃ PC (PC TRANSCODER FOR YOUTUBE & WEB LINK) -->
+          <div class="stream-card" style="border:1px solid rgba(6,182,212,0.4);background:rgba(6,182,212,0.03);">
+            <div class="stream-card-title">
+              <span style="color:#38bdf8;">⚡ Trạm Chuyển Mã PC (YouTube / TikTok / Web Link)</span>
+              <span id="transcoder-badge" style="font-size:0.72rem;background:rgba(16,185,129,0.2);color:#10b981;border:1px solid #10b981;padding:2px 6px;border-radius:10px;">yt-dlp & FFmpeg</span>
+            </div>
+
+            <div style="font-size:0.74rem;color:#94a3b8;margin-bottom:8px;line-height:1.4;">
+              PC giải mã link YouTube/Web, băm nhỏ thành <strong>MJPEG 240x240 @ 15 FPS</strong> và <strong>PCM 16kHz</strong>, stream qua mạng LAN xuống ESP32 mượt mà không nóng vi xử lý.
+            </div>
+
+            <div style="margin-bottom:8px;">
+              <input type="text" id="transcoder-url-input" class="stream-input" placeholder="Dán link YouTube, TikTok, Facebook hoặc tệp video trên PC...">
+              <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+                <span class="stream-preset-pill" onclick="document.getElementById('transcoder-url-input').value='https://www.youtube.com/watch?v=dQw4w9WgXcQ'">🕺 Rickroll</span>
+                <span class="stream-preset-pill" onclick="document.getElementById('transcoder-url-input').value='https://www.youtube.com/watch?v=5qap5aO4i9A'">🎶 Lofi Hip Hop</span>
+                <span class="stream-preset-pill" onclick="document.getElementById('transcoder-url-input').value='https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4'">🐰 Big Buck Bunny</span>
+              </div>
+            </div>
+
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <span style="font-size:0.72rem;color:#94a3b8;white-space:nowrap;">IP Máy Tính (Transcoder):</span>
+              <input type="text" id="pc-transcoder-host-input" class="stream-input" style="margin-bottom:0;padding:4px 8px;font-size:0.72rem;" value="localhost" placeholder="localhost hoặc 192.168.1.xxx" onchange="localStorage.setItem('pc_transcoder_host', this.value.trim());">
+            </div>
+
+            <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;">
+              <button class="stream-btn" id="btn-pc-transcode" style="background:linear-gradient(135deg, #0284c7, #06b6d4);color:#fff;font-weight:700;" onclick="window.startPcTranscoderStream()">
+                🚀 Chuyển Mã & Stream Xuống ESP32
+              </button>
+              <button class="stream-btn btn-stop" onclick="window.stopPcTranscoderStream()">
+                ⏹️ Dừng Stream
+              </button>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;padding-top:8px;border-top:1px dashed rgba(255,255,255,0.08);font-size:0.72rem;">
+              <span id="transcoder-status-txt" style="color:#64748b;">● PC Transcoder: http://localhost:5050</span>
+              <a href="http://localhost:5050" target="_blank" style="color:#38bdf8;text-decoration:none;">Mở Bảng Điều Khiển PC ↗</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+
+    const container = document.querySelector('.container');
+    if (container) container.appendChild(sec);
+
+    initStreamElements();
+  }
+
+  function initStreamElements() {
+    s_previewCanvas = document.getElementById('stream-live-canvas');
+    if (s_previewCanvas) {
+      s_previewCtx = s_previewCanvas.getContext('2d');
+      drawIdlePreviewScreen();
+    }
+
+    s_streamOffCanvas = document.createElement('canvas');
+    s_streamOffCanvas.width = 240;
+    s_streamOffCanvas.height = 320;
+    s_streamOffCtx = s_streamOffCanvas.getContext('2d');
+
+    s_streamVideoEl = document.createElement('video');
+    s_streamVideoEl.muted = false;
+    s_streamVideoEl.volume = 1.0;
+    s_streamVideoEl.playsInline = true;
+    s_streamVideoEl.autoplay = true;
+    s_streamVideoEl.style.cssText = 'position:fixed;top:-9999px;left:-9999px;width:240px;height:320px;opacity:0.01;pointer-events:none;';
+    document.body.appendChild(s_streamVideoEl);
+  }
+
+  function drawIdlePreviewScreen() {
+    if (!s_previewCtx) return;
+    s_previewCtx.fillStyle = '#060913';
+    s_previewCtx.fillRect(0, 0, 240, 320);
+
+    s_previewCtx.strokeStyle = '#1e293b';
+    s_previewCtx.strokeRect(10, 10, 220, 300);
+
+    s_previewCtx.fillStyle = '#38bdf8';
+    s_previewCtx.font = 'bold 12px sans-serif';
+    s_previewCtx.textAlign = 'center';
+    s_previewCtx.fillText('ESP32-S3 STREAM PREVIEW', 120, 110);
+
+    s_previewCtx.fillStyle = '#64748b';
+    s_previewCtx.font = '11px sans-serif';
+    s_previewCtx.fillText('240 x 320 Portrait', 120, 135);
+    s_previewCtx.fillText('Chưa có luồng dữ liệu', 120, 160);
+
+    s_previewCtx.fillStyle = '#10b981';
+    s_previewCtx.fillText('Bấm nút bên phải để bắt đầu!', 120, 210);
+  }
+
+  window.setStreamFps = function(fps) {
+    s_streamFps = fps;
+    if (s_videoInterval) {
+      clearInterval(s_videoInterval);
+      startVideoPump();
+    }
+  };
+
+  window.setStreamQuality = function(q) {
+    s_jpegQuality = q / 100.0;
+    const txt = document.getElementById('stream-qual-txt');
+    if (txt) txt.innerText = q + '%';
+  };
+
+  window.setSpeakerVolume = async function(vol) {
+    const valEl = document.getElementById('stream-vol-val');
+    if (valEl) valEl.innerText = vol + '%';
+    await fetch('/api/media/control', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'volume', value: parseInt(vol) })
+    }).catch(()=>{});
+  };
+
+  function updateLiveDot(active, text) {
+    const el = document.getElementById('st-live-dot');
+    if (el) {
+      el.style.color = active ? '#10b981' : '#64748b';
+      el.innerText = active ? ('● ' + text) : '● IDLE';
+    }
+  }
+
+  let s_videoPumpActive = false;
+  let s_videoPumpTimeout = null;
+
+  function scheduleNextVideoFrame(delayMs) {
+    if (!s_videoPumpActive) return;
+    if (s_videoPumpTimeout) clearTimeout(s_videoPumpTimeout);
+    s_videoPumpTimeout = setTimeout(sendNextVideoFrame, Math.max(5, Math.round(delayMs)));
+  }
+
+  function sendNextVideoFrame() {
+    if (!s_videoPumpActive) return;
+    if (!s_streamVideoEl || s_streamVideoEl.paused || s_streamVideoEl.ended || s_streamVideoEl.readyState < 2) {
+      if (s_streamVideoEl && s_streamVideoEl.paused && (s_streamVideoEl.src || s_streamVideoEl.srcObject)) {
+        s_streamVideoEl.play().catch(()=>{});
+      }
+      scheduleNextVideoFrame(50);
+      return;
+    }
+
+    const vw = s_streamVideoEl.videoWidth || 240;
+    const vh = s_streamVideoEl.videoHeight || 320;
+
+    // Scale và canh giữa tỉ lệ 240x320
+    s_streamOffCtx.fillStyle = '#000000';
+    s_streamOffCtx.fillRect(0, 0, 240, 320);
+
+    const targetAspect = 240.0 / 320.0;
+    const videoAspect = vw / vh;
+    let drawW = 240, drawH = 320, drawX = 0, drawY = 0;
+
+    if (videoAspect > targetAspect) {
+      drawW = 240;
+      drawH = Math.round(240 / videoAspect);
+      drawY = Math.round((320 - drawH) / 2);
+    } else {
+      drawH = 320;
+      drawW = Math.round(320 * videoAspect);
+      drawX = Math.round((240 - drawW) / 2);
+    }
+
+    s_streamOffCtx.drawImage(s_streamVideoEl, drawX, drawY, drawW, drawH);
+
+    // Cập nhật live preview trên trang Web
+    if (s_previewCtx) {
+      s_previewCtx.drawImage(s_streamOffCanvas, 0, 0);
+    }
+
+    const targetInterval = Math.round(1000 / s_streamFps);
+    const t0 = performance.now();
+
+    s_streamOffCanvas.toBlob(blob => {
+      if (!blob || !s_videoPumpActive) {
+        scheduleNextVideoFrame(targetInterval);
+        return;
+      }
+
+      // AbortController 650ms: Đủ thời gian cho mạng Wi-Fi và ESP32 giải mã, tránh abort sớm gây nghẽn socket
+      const ctrl = new AbortController();
+      const tid = setTimeout(() => ctrl.abort(), 650);
+
+      const fd = new FormData();
+      fd.append('f', blob);
+
+      fetch('/api/stream/video_frame', {
+        method: 'POST',
+        body: fd,
+        signal: ctrl.signal
+      })
+      .then(() => {
+        clearTimeout(tid);
+        s_frameCount++;
+        const now = Date.now();
+        if (now - s_lastFpsCalcTime >= 1000) {
+          s_currentLiveFps = ((s_frameCount * 1000.0) / (now - s_lastFpsCalcTime)).toFixed(1);
+          s_frameCount = 0;
+          s_lastFpsCalcTime = now;
+          const fpsEl = document.getElementById('st-stat-fps');
+          if (fpsEl) fpsEl.innerText = s_currentLiveFps + ' FPS';
+        }
+        const framesEl = document.getElementById('st-stat-frames');
+        if (framesEl) framesEl.innerText = s_frameCount + ' frames';
+
+        const rtt = Math.round(performance.now() - t0);
+        const rttEl = document.getElementById('st-stat-rtt');
+        if (rttEl) rttEl.innerText = '~' + rtt + 'ms';
+
+        // Nhịp gửi thích ứng (Adaptive Pacing): Bù trừ độ trễ mạng để luôn đạt FPS mục tiêu
+        // Khi audio đang hoạt động, duy trì "khoảng thở vàng" tối thiểu 35ms để ESP32 ưu tiên nhận Audio PCM
+        const minGap = s_audioProcessor ? 35 : 10;
+        const remainingDelay = Math.max(minGap, targetInterval - rtt);
+        scheduleNextVideoFrame(remainingDelay);
+      })
+      .catch(() => {
+        clearTimeout(tid);
+        // Nếu bị nghẽn mạng: dừng nhẹ 80ms để ESP32 giải phóng kết nối TCP trước khi gửi frame mới
+        scheduleNextVideoFrame(80);
+      });
+    }, 'image/jpeg', s_jpegQuality);
+  }
+
+  function startVideoPump() {
+    stopVideoPump();
+    const mjpgEl = document.getElementById('stream-live-mjpg');
+    const cvEl = document.getElementById('stream-live-canvas');
+    if (mjpgEl && cvEl) {
+      mjpgEl.removeAttribute('src');
+      mjpgEl.style.display = 'none';
+      cvEl.style.display = 'block';
+    }
+    s_videoPumpActive = true;
+    s_frameCount = 0;
+    s_lastFpsCalcTime = Date.now();
+    updateLiveDot(true, 'LIVE VIDEO');
+    fetch('/api/screen/state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: 'stream' })
+    }).catch(()=>{});
+    sendNextVideoFrame();
+  }
+
+  function stopVideoPump() {
+    s_videoPumpActive = false;
+    if (s_videoPumpTimeout) {
+      clearTimeout(s_videoPumpTimeout);
+      s_videoPumpTimeout = null;
+    }
+  }
+
+  window.startScreenStream = async function() {
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+        if (confirm("💡 Trình duyệt Cốc Cốc / Chrome yêu cầu bảo mật Localhost để cho phép chia sẻ Tab YouTube.\n\nBấm [OK] để mở trang Bảng Điều Khiển: http://localhost:5050 (đang chạy trên máy tính) để bắt Tab YouTube mượt mà không bị chặn!")) {
+          window.open('http://localhost:5050', '_blank');
+        }
+        return;
+      }
+      window.stopVideoStream();
+      s_mediaStream = await navigator.mediaDevices.getDisplayMedia({
+        video: { frameRate: { ideal: s_streamFps } },
+        audio: true
+      });
+      s_streamVideoEl.srcObject = s_mediaStream;
+      await s_streamVideoEl.play();
+      startVideoPump();
+
+      const audioTracks = s_mediaStream.getAudioTracks();
+      if (audioTracks && audioTracks.length > 0) {
+        initWebAudio(s_mediaStream);
+        const audEl = document.getElementById('st-stat-audio');
+        if (audEl) { audEl.innerText = 'Audio Kèm Màn Hình'; audEl.style.color = '#10b981'; }
+      }
+
+      s_mediaStream.getVideoTracks()[0].onended = () => { window.stopVideoStream(); };
+    } catch(e) {
+      if (e.name !== 'NotAllowedError') {
+        alert("Không thể bắt đầu chia sẻ màn hình: " + e.message);
+      }
+    }
+  };
+
+  window.startWebcamStream = async function() {
+    try {
+      window.stopVideoStream();
+      s_mediaStream = await navigator.mediaDevices.getUserMedia({
+        video: { width: { ideal: 640 }, height: { ideal: 480 } },
+        audio: false
+      });
+      s_streamVideoEl.srcObject = s_mediaStream;
+      await s_streamVideoEl.play();
+      startVideoPump();
+    } catch(e) {
+      alert("Không thể mở webcam: " + e.message);
+    }
+  };
+
+  let s_videoAudioSourceConnected = false;
+  let s_videoAudioGainNode = null;
+
+  function connectVideoElementToWebAudio() {
+    if (!s_audioCtx) {
+      try {
+        s_audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+      } catch(e) {
+        s_audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      }
+    }
+    if (s_audioCtx.state === 'suspended') {
+      s_audioCtx.resume();
+    }
+
+    if (!s_videoAudioSourceConnected && s_streamVideoEl) {
+      try {
+        s_audioSourceNode = s_audioCtx.createMediaElementSource(s_streamVideoEl);
+        s_videoAudioSourceConnected = true;
+      } catch(e) {
+        console.warn("createMediaElementSource error:", e);
+      }
+    }
+
+    if (s_audioProcessor) {
+      try { s_audioProcessor.disconnect(); } catch(e){}
+      s_audioProcessor = null;
+    }
+
+    try {
+      s_audioProcessor = s_audioCtx.createScriptProcessor(2048, 1, 1);
+    } catch(e) {
+      console.warn("createScriptProcessor error:", e);
+      return;
+    }
+
+    if (!s_videoAudioGainNode && s_audioCtx) {
+      s_videoAudioGainNode = s_audioCtx.createGain();
+      s_videoAudioGainNode.gain.value = 0.0;
+      s_videoAudioGainNode.connect(s_audioCtx.destination);
+    }
+
+    if (s_audioSourceNode && s_audioProcessor) {
+      try { s_audioSourceNode.disconnect(); } catch(e){}
+      s_audioSourceNode.connect(s_audioProcessor);
+      s_audioProcessor.connect(s_videoAudioGainNode || s_audioCtx.destination);
+    }
+
+    let sampleBuffer = [];
+    const targetHz = 16000;
+    const inputHz = s_audioCtx.sampleRate;
+    let phaseAcc = 0.0;
+    const isDirect16k = (inputHz === targetHz);
+    const step = inputHz / targetHz;
+
+    s_audioProcessor.onaudioprocess = function(e) {
+      if (!s_streamVideoEl || s_streamVideoEl.paused || s_streamVideoEl.ended) return;
+      const input = e.inputBuffer.getChannelData(0);
+      const inputLen = input.length;
+
+      if (isDirect16k) {
+        for (let i = 0; i < inputLen; i++) {
+          let s = Math.max(-1, Math.min(1, input[i]));
+          sampleBuffer.push(Math.round(s < 0 ? s * 32768 : s * 32767));
+        }
+      } else {
+        while (phaseAcc < inputLen - 1) {
+          const idx = Math.floor(phaseAcc);
+          const frac = phaseAcc - idx;
+          const s = input[idx] * (1.0 - frac) + input[idx + 1] * frac;
+          const clamped = Math.max(-1, Math.min(1, s));
+          sampleBuffer.push(Math.round(clamped < 0 ? clamped * 32768 : clamped * 32767));
+          phaseAcc += step;
+        }
+        phaseAcc -= inputLen;
+        if (phaseAcc < 0) phaseAcc = 0;
+      }
+
+      // Tuyệt đối không drop audio: Cho phép buffer tích lũy tới 32,000 mẫu (~2.0s) khi mạng bận
+      if (sampleBuffer.length > 32000) {
+        sampleBuffer = sampleBuffer.slice(sampleBuffer.length - 32000);
+      }
+
+      function tryFlushAudio() {
+        if (s_isSendingAudio || sampleBuffer.length < 1600) return;
+        s_isSendingAudio = true;
+        const sendCount = Math.min(sampleBuffer.length, 3200);
+        const toSend = sampleBuffer.splice(0, sendCount);
+        const int16Arr = new Int16Array(toSend);
+        const blob = new Blob([int16Arr.buffer], { type: 'application/octet-stream' });
+        const fd = new FormData();
+        fd.append('a', blob, 'stream.pcm');
+
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 1200);
+
+        fetch('/api/stream/audio_pcm', { method: 'POST', body: fd, signal: ctrl.signal })
+          .catch(()=>{})
+          .finally(() => {
+            clearTimeout(tid);
+            s_isSendingAudio = false;
+            if (sampleBuffer.length >= 1600) {
+              setTimeout(tryFlushAudio, 5);
+            }
+          });
+      }
+
+      tryFlushAudio();
+    };
+  }
+
+  window.handleVideoFileSelected = function(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    // 1. Kích hoạt AudioContext ngay lập tức trong User Gesture của trình duyệt
+    if (!s_audioCtx) {
+      s_audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if (s_audioCtx.state === 'suspended') {
+      s_audioCtx.resume();
+    }
+
+    window.stopVideoStream();
+    if (typeof showToast === 'function') {
+      showToast("🎬 Đang tải video: " + file.name + "... Vui lòng đợi trong giây lát!", false);
+    }
+    updateLiveDot(true, 'DANG TAI VIDEO');
+
+    s_streamVideoEl.srcObject = null;
+    s_streamVideoEl.src = URL.createObjectURL(file);
+    s_streamVideoEl.loop = true;
+    s_streamVideoEl.muted = false;
+    s_streamVideoEl.volume = 1.0;
+    s_streamVideoEl.playsInline = true;
+
+    connectVideoElementToWebAudio();
+
+    let hasStarted = false;
+    const triggerStart = async () => {
+      if (hasStarted) return;
+      hasStarted = true;
+      try {
+        if (s_audioCtx && s_audioCtx.state === 'suspended') {
+          await s_audioCtx.resume();
+        }
+        await s_streamVideoEl.play();
+      } catch(err) {
+        console.warn("Video play:", err);
+      }
+      startVideoPump();
+      const audEl = document.getElementById('st-stat-audio');
+      if (audEl) { audEl.innerText = 'MP4 PCM 16kHz LIVE'; audEl.style.color = '#10b981'; }
+      if (typeof showToast === 'function') {
+        showToast("▶ Đang stream video sang ESP32!");
+      }
+    };
+
+    s_streamVideoEl.onloadedmetadata = triggerStart;
+    s_streamVideoEl.oncanplay = triggerStart;
+    s_streamVideoEl.onplay = () => {
+      if (!s_videoPumpActive) startVideoPump();
+    };
+    s_streamVideoEl.load();
+    setTimeout(() => {
+      if (!hasStarted) triggerStart();
+    }, 250);
+    e.target.value = '';
+  };
+
+  window.stopVideoStream = function() {
+    stopVideoPump();
+    if (s_videoInterval) {
+      clearInterval(s_videoInterval);
+      s_videoInterval = null;
+    }
+    if (s_mediaStream) {
+      s_mediaStream.getTracks().forEach(t => t.stop());
+      s_mediaStream = null;
+    }
+    if (s_streamVideoEl) {
+      s_streamVideoEl.pause();
+      s_streamVideoEl.srcObject = null;
+      s_streamVideoEl.removeAttribute('src');
+    }
+    if (s_audioProcessor) {
+      try { s_audioProcessor.disconnect(); } catch(e){}
+      s_audioProcessor = null;
+    }
+    fetch('/api/stream/stop', { method: 'POST' }).catch(()=>{});
+    updateLiveDot(false, '');
+    drawIdlePreviewScreen();
+    const fpsEl = document.getElementById('st-stat-fps');
+    if (fpsEl) fpsEl.innerText = '0.0 FPS';
+    const audEl = document.getElementById('st-stat-audio');
+    if (audEl) { audEl.innerText = 'Đã dừng'; audEl.style.color = '#f59e0b'; }
+  };
+
+  // ---------------- STREAM ÂM THANH QUA WEB AUDIO API (16kHz PCM) ----------------
+
+  window.startMicAudioStream = async function() {
+    try {
+      window.stopAudioStream();
+      s_micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      initWebAudio(s_micStream);
+      const audEl = document.getElementById('st-stat-audio');
+      if (audEl) { audEl.innerText = '16kHz PCM LIVE'; audEl.style.color = '#10b981'; }
+    } catch(e) {
+      alert("Không thể kích hoạt Micro: " + e.message);
+    }
+  };
+
+  function initWebAudio(stream) {
+    s_audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    s_audioSourceNode = s_audioCtx.createMediaStreamSource(stream);
+    s_audioProcessor = s_audioCtx.createScriptProcessor(2048, 1, 1);
+
+    s_audioSourceNode.connect(s_audioProcessor);
+    s_audioProcessor.connect(s_audioCtx.destination);
+
+    let sampleBuffer = [];
+    const targetHz = 16000;
+    const inputHz = s_audioCtx.sampleRate;
+    const ratio = targetHz / inputHz;
+
+    s_audioProcessor.onaudioprocess = function(e) {
+      const channelData = e.inputBuffer.getChannelData(0);
+      for (let i = 0; i < channelData.length; i += (1 / ratio)) {
+        const idx = Math.floor(i);
+        if (idx < channelData.length) {
+          let s = Math.max(-1, Math.min(1, channelData[idx]));
+          let val16 = Math.round(s < 0 ? s * 32768 : s * 32767);
+          sampleBuffer.push(val16);
+        }
+      }
+      function tryFlushAudio() {
+        if (s_isSendingAudio || sampleBuffer.length < 1600) return;
+        s_isSendingAudio = true;
+        const sendCount = Math.min(sampleBuffer.length, 3200);
+        const toSend = sampleBuffer.splice(0, sendCount);
+        const int16Arr = new Int16Array(toSend);
+        const blob = new Blob([int16Arr.buffer], { type: 'application/octet-stream' });
+        const fd = new FormData();
+        fd.append('a', blob, 'stream.pcm');
+
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 1200);
+
+        fetch('/api/stream/audio_pcm', { method: 'POST', body: fd, signal: ctrl.signal })
+          .catch(()=>{})
+          .finally(() => {
+            clearTimeout(tid);
+            s_isSendingAudio = false;
+            if (sampleBuffer.length >= 1600) {
+              setTimeout(tryFlushAudio, 5);
+            }
+          });
+      }
+
+      tryFlushAudio();
+    };
+  }
+
+
+  window.stopAudioStream = function() {
+    if (s_audioProcessor) {
+      try { s_audioProcessor.disconnect(); } catch(e){}
+      s_audioProcessor = null;
+    }
+    if (s_audioSourceNode) {
+      try { s_audioSourceNode.disconnect(); } catch(e){}
+      s_audioSourceNode = null;
+    }
+    if (s_audioCtx) {
+      try { s_audioCtx.close(); } catch(e){}
+      s_audioCtx = null;
+      s_videoAudioSourceConnected = false;
+      s_videoAudioGainNode = null;
+    }
+    if (s_micStream) {
+      s_micStream.getTracks().forEach(t => t.stop());
+      s_micStream = null;
+    }
+    if (s_webRelayAudioEl) {
+      s_webRelayAudioEl.pause();
+      s_webRelayAudioEl.src = "";
+    }
+    if (!s_videoInterval) {
+      fetch('/api/stream/stop', { method: 'POST' }).catch(()=>{});
+    }
+    const audEl = document.getElementById('st-stat-audio');
+    if (audEl) { audEl.innerText = 'Đã dừng'; audEl.style.color = '#f59e0b'; }
+  };
+
+  let s_webRelayAudioEl = null;
+
+  function initWebAudioFromElement(mediaEl) {
+    if (!s_audioCtx) s_audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (s_audioSourceNode) try { s_audioSourceNode.disconnect(); } catch(e){}
+    if (s_audioProcessor) try { s_audioProcessor.disconnect(); } catch(e){}
+
+    try {
+      s_audioSourceNode = s_audioCtx.createMediaElementSource(mediaEl);
+    } catch(e) {}
+    s_audioProcessor = s_audioCtx.createScriptProcessor(2048, 1, 1);
+
+    if (s_audioSourceNode) s_audioSourceNode.connect(s_audioProcessor);
+    s_audioProcessor.connect(s_audioCtx.destination);
+
+    let sampleBuffer = [];
+    const targetHz = 16000;
+    const inputHz = s_audioCtx.sampleRate;
+    const ratio = targetHz / inputHz;
+
+    s_audioProcessor.onaudioprocess = function(e) {
+      const channelData = e.inputBuffer.getChannelData(0);
+      for (let i = 0; i < channelData.length; i += (1 / ratio)) {
+        const idx = Math.floor(i);
+        if (idx < channelData.length) {
+          let s = Math.max(-1, Math.min(1, channelData[idx]));
+          let val16 = Math.round(s < 0 ? s * 32768 : s * 32767);
+          sampleBuffer.push(val16);
+        }
+      }
+      function tryFlushAudio() {
+        if (s_isSendingAudio || sampleBuffer.length < 1600) return;
+        s_isSendingAudio = true;
+        const sendCount = Math.min(sampleBuffer.length, 3200);
+        const toSend = sampleBuffer.splice(0, sendCount);
+        const int16Arr = new Int16Array(toSend);
+        const blob = new Blob([int16Arr.buffer], { type: 'application/octet-stream' });
+        const fd = new FormData();
+        fd.append('a', blob, 'stream.pcm');
+
+        const ctrl = new AbortController();
+        const tid = setTimeout(() => ctrl.abort(), 1200);
+
+        fetch('/api/stream/audio_pcm', { method: 'POST', body: fd, signal: ctrl.signal })
+          .catch(()=>{})
+          .finally(() => {
+            clearTimeout(tid);
+            s_isSendingAudio = false;
+            if (sampleBuffer.length >= 1600) {
+              setTimeout(tryFlushAudio, 5);
+            }
+          });
+      }
+
+      tryFlushAudio();
+    };
+  }
+
+
+  // ---------------- PHÁT STREAM URL QUA TRÌNH DUYỆT HOẶC ESP32 ----------------
+
+  window.fillUrl = function(url, type) {
+    const input = document.getElementById('stream-url-input');
+    if (input) input.value = url;
+  };
+
+  function isWebVideoPlatform(url) {
+    return /youtube\.com|youtu\.be|tiktok\.com|bilibili\.com|facebook\.com|fb\.watch/i.test(url);
+  }
+
+  window.playUrlStreamWebRelay = function(type) {
+    const input = document.getElementById('stream-url-input');
+    const url = (input ? input.value : '').trim();
+    if (!url) return alert("Vui lòng nhập đường link stream!");
+
+    if (isWebVideoPlatform(url)) {
+      const pcInput = document.getElementById('transcoder-url-input');
+      if (pcInput) pcInput.value = url;
+      alert("ℹ️ Đây là link trang web video (YouTube / TikTok), vi xử lý ESP32 không thể tự phân tích HTML.\n\nHệ thống đang tự động kích hoạt Trạm Chuyển Mã PC (FFmpeg) để giải mã mượt mà!");
+      return window.startPcTranscoderStream();
+    }
+
+    if (type === 'audio') {
+      window.stopAudioStream();
+      try {
+        if (!s_webRelayAudioEl) {
+          s_webRelayAudioEl = new Audio();
+          s_webRelayAudioEl.crossOrigin = "anonymous";
+        }
+        s_webRelayAudioEl.src = url;
+        s_webRelayAudioEl.play().then(() => {
+          initWebAudioFromElement(s_webRelayAudioEl);
+          const audEl = document.getElementById('st-stat-audio');
+          if (audEl) { audEl.innerText = 'Radio Web Relay'; audEl.style.color = '#10b981'; }
+          updateLiveDot(true, 'WEB AUDIO RELAY');
+        }).catch(err => {
+          alert("Trình duyệt không thể phát trực tiếp link này (do CORS). Đang chuyển sang để ESP32 tự tải...");
+          window.playUrlStream('audio');
+        });
+      } catch(e) {
+        window.playUrlStream('audio');
+      }
+    } else if (type === 'video') {
+      window.stopVideoStream();
+      s_streamVideoEl.srcObject = null;
+      s_streamVideoEl.crossOrigin = "anonymous";
+      s_streamVideoEl.src = url;
+      s_streamVideoEl.muted = false;
+      s_streamVideoEl.onloadedmetadata = async () => {
+        try {
+          await s_streamVideoEl.play();
+        } catch(err) {}
+        startVideoPump();
+        connectVideoElementToWebAudio();
+        const audEl = document.getElementById('st-stat-audio');
+        if (audEl) { audEl.innerText = 'Video PCM (16kHz)'; audEl.style.color = '#10b981'; }
+      };
+      s_streamVideoEl.onerror = () => {
+        alert("Video không hỗ trợ phát qua trình duyệt, đang chuyển sang để ESP32 tải...");
+        window.playUrlStream('video');
+      };
+    }
+  };
+
+  window.playUrlStream = async function(type) {
+    const input = document.getElementById('stream-url-input');
+    const url = (input ? input.value : '').trim();
+    if (!url) return alert("Vui lòng nhập đường link stream HTTP/HTTPS!");
+
+    if (isWebVideoPlatform(url)) {
+      const pcInput = document.getElementById('transcoder-url-input');
+      if (pcInput) pcInput.value = url;
+      alert("ℹ️ Đây là link trang web video (YouTube / TikTok), vi xử lý ESP32 không thể tự phân tích HTML.\n\nHệ thống đang tự động kích hoạt Trạm Chuyển Mã PC (FFmpeg) để giải mã mượt mà!");
+      return window.startPcTranscoderStream();
+    }
+
+    const res = await fetch('/api/stream/start_url', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type: type, url: url })
+    });
+    const data = await res.json();
+    if (data.status === 'ok') {
+      alert("Đã gửi yêu cầu kết nối luồng " + type.toUpperCase() + " tới ESP32!");
+      updateLiveDot(true, 'ESP32 ' + type.toUpperCase());
+    } else {
+      alert("Lỗi kết nối URL stream: " + (data.error || 'Thất bại'));
+    }
+  };
+
+  window.stopAllStreams = async function() {
+    window.stopVideoStream();
+    window.stopAudioStream();
+    await fetch('/api/stream/stop', { method: 'POST' }).catch(()=>{});
+    updateLiveDot(false, '');
+    drawIdlePreviewScreen();
+  };
+
+  // ---------------- TRẠM CHUYỂN MÃ PC (PC TRANSCODER) ----------------
+  window.startPcTranscoderStream = async function() {
+    const input = document.getElementById('transcoder-url-input');
+    const url = (input ? input.value : '').trim();
+    if (!url) return alert("Vui lòng dán link YouTube hoặc video cần chuyển mã!");
+
+    const hostInput = document.getElementById('pc-transcoder-host-input');
+    let host = (hostInput ? hostInput.value.trim() : '') || localStorage.getItem('pc_transcoder_host') || 'localhost';
+    localStorage.setItem('pc_transcoder_host', host);
+    const transcoderBase = 'http://' + host + ':5050';
+
+    const btn = document.getElementById('btn-pc-transcode');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Đang phân tích link & nạp luồng...';
+    }
+
+    const esp_ip = window.location.hostname || '192.168.1.233';
+
+    const statusTxt = document.getElementById('transcoder-status-txt');
+    if (statusTxt) {
+      statusTxt.innerText = "⏳ Đang kết nối tới PC Transcoder (" + transcoderBase + ")...";
+      statusTxt.style.color = "#f59e0b";
+    }
+
+    try {
+      const res = await fetch(transcoderBase + '/api/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: url, esp_ip: esp_ip, fps: 15, resolution: '240x240', volume: 100 })
+      });
+      const data = await res.json();
+      if (data.status === 'ok') {
+        if (typeof showToast === 'function') {
+          showToast("✅ Đang stream: " + (data.title || "Video"), false);
+        } else {
+          alert("✅ Đã bắt đầu chuyển mã & stream: " + (data.title || "Video"));
+        }
+        if (statusTxt) {
+          statusTxt.innerText = "🟢 Đang stream: " + (data.title || url);
+          statusTxt.style.color = "#10b981";
+        }
+        updateLiveDot(true, 'PC TRANSCODER');
+
+        // Bật Live Preview thời gian thực trực tiếp trên màn hình ảo ST7789
+        const mjpgEl = document.getElementById('stream-live-mjpg');
+        const cvEl = document.getElementById('stream-live-canvas');
+        if (mjpgEl && cvEl) {
+          mjpgEl.src = transcoderBase + '/api/stream.mjpg';
+          mjpgEl.style.display = 'block';
+          cvEl.style.display = 'none';
+        }
+
+        // Cập nhật thống kê FPS và số frames gửi từ PC Transcoder
+        if (window.s_transcoderStatInterval) clearInterval(window.s_transcoderStatInterval);
+        window.s_transcoderStatInterval = setInterval(async () => {
+          try {
+            const sres = await fetch(transcoderBase + '/api/status');
+            const st = await sres.json();
+            if (!st.running) {
+              window.stopPcTranscoderStream();
+              return;
+            }
+            const fpsEl = document.getElementById('st-stat-fps');
+            if (fpsEl) fpsEl.innerText = (st.live_fps || '15.0') + ' FPS';
+            const fEl = document.getElementById('st-stat-frames');
+            if (fEl) fEl.innerText = (st.frames_sent || '0') + ' frames';
+            const aEl = document.getElementById('st-stat-audio');
+            if (aEl) { aEl.innerText = (st.audio_kb_sent || '0') + ' KB (UDP)'; aEl.style.color = '#10b981'; }
+            const rttEl = document.getElementById('st-stat-rtt');
+            if (rttEl) rttEl.innerText = '< 2ms (UDP)';
+          } catch(e) {}
+        }, 1000);
+      } else {
+        alert("Lỗi Transcoder: " + (data.error || "Thất bại"));
+        if (statusTxt) {
+          statusTxt.innerText = "🔴 Lỗi: " + (data.error || "Thất bại");
+          statusTxt.style.color = "#ef4444";
+        }
+      }
+    } catch(err) {
+      let promptMsg = "⚠️ Không thể kết nối tới Trạm Chuyển Mã (" + transcoderBase + ")!\n\n" +
+                      "Nếu bạn đang mở web từ điện thoại, vui lòng nhập địa chỉ IP của máy tính (ví dụ: 192.168.1.238):\n" +
+                      "(Nếu chưa bật, hãy mở tệp 'start_transcoder.bat' trên máy tính, hoặc bấm 'Phát Tab YouTube' ở thẻ trên để phát trực tiếp không cần cài đặt)";
+      let newHost = prompt(promptMsg, host);
+      if (newHost && newHost.trim()) {
+        localStorage.setItem('pc_transcoder_host', newHost.trim());
+        if (hostInput) hostInput.value = newHost.trim();
+        window.startPcTranscoderStream();
+        return;
+      }
+      if (statusTxt) {
+        statusTxt.innerText = "🔴 Chưa chạy start_transcoder.bat hoặc sai IP PC";
+        statusTxt.style.color = "#ef4444";
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '🚀 Chuyển Mã & Stream Xuống ESP32';
+      }
+    }
+  };
+
+  window.stopPcTranscoderStream = async function() {
+    if (window.s_transcoderStatInterval) {
+      clearInterval(window.s_transcoderStatInterval);
+      window.s_transcoderStatInterval = null;
+    }
+    const mjpgEl = document.getElementById('stream-live-mjpg');
+    const cvEl = document.getElementById('stream-live-canvas');
+    if (mjpgEl && cvEl) {
+      mjpgEl.removeAttribute('src');
+      mjpgEl.style.display = 'none';
+      cvEl.style.display = 'block';
+      drawIdlePreviewScreen();
+    }
+    let host = localStorage.getItem('pc_transcoder_host') || 'localhost';
+    try {
+      await fetch('http://' + host + ':5050/api/stop', { method: 'POST' });
+    } catch(e) {}
+    window.stopAllStreams();
+    const statusTxt = document.getElementById('transcoder-status-txt');
+    if (statusTxt) {
+      statusTxt.innerText = "⚪ Đã dừng stream";
+      statusTxt.style.color = "#64748b";
+    }
+  };
+
+  // Mở rộng hàm switchTab để hỗ trợ và kích hoạt Tab 'stream'
+  const origSwitchTab_Stream = window.switchTab;
+  window.switchTab = function(tabId) {
+    injectStreamTabAndPage();
+    if (tabId === 'stream') {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      const stSec = document.getElementById('tab-stream');
+      const stBtn = document.getElementById('tab-btn-stream');
+      if (stSec) stSec.classList.add('active');
+      if (stBtn) {
+        stBtn.classList.add('active');
+        stBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+      setTimeout(() => {
+        if (!s_previewCanvas) initStreamElements();
+        drawIdlePreviewScreen();
+      }, 50);
+      return;
+    }
+    const stSec = document.getElementById('tab-stream');
+    const stBtn = document.getElementById('tab-btn-stream');
+    if (stSec) stSec.classList.remove('active');
+    if (stBtn) stBtn.classList.remove('active');
+
+    if (typeof origSwitchTab_Stream === 'function') origSwitchTab_Stream(tabId);
+  };
+
+  setTimeout(injectStreamTabAndPage, 250);
+})();
+</script>
+)rawliteral";
+
+// ---------------- INJECT SCRIPT GIAO DIỆN ĐIỀU KHIỂN DECOR & NGUỒN PIN ----------------
+static const char DECOR_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
+<style>
+  .decor-card { background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:16px; margin-bottom:16px; box-shadow:0 4px 12px rgba(0,0,0,0.25); }
+  .decor-title { font-size:0.95rem; font-weight:700; color:#38bdf8; display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; border-bottom:1px solid #1e293b; padding-bottom:8px; }
+  .decor-grid-2 { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media(max-width:600px) { .decor-grid-2 { grid-template-columns:1fr; } }
+  .decor-tube-card { background:#162032; border:1px solid #334155; border-radius:10px; padding:12px; }
+  .decor-preset-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(130px, 1fr)); gap:8px; margin-bottom:14px; }
+  .btn-decor-preset { background:linear-gradient(135deg, #1e293b, #0f172a); border:1px solid #334155; color:#f1f5f9; padding:8px 10px; border-radius:8px; font-size:0.78rem; font-weight:600; cursor:pointer; transition:all 0.15s; display:flex; align-items:center; justify-content:center; gap:6px; }
+  .btn-decor-preset:hover { background:linear-gradient(135deg, #0284c7, #0369a1); border-color:#38bdf8; color:#fff; transform:translateY(-1px); box-shadow:0 0 10px rgba(56,189,248,0.3); }
+  .decor-slider-row { display:flex; align-items:center; gap:10px; margin-top:8px; }
+  .decor-slider-row input[type=range] { flex:1; accent-color:#38bdf8; cursor:pointer; }
+  .decor-badge-pill { padding:3px 8px; border-radius:12px; font-size:0.7rem; font-weight:700; }
+  .bat-bar-wrap { width:100%; height:14px; background:#1e293b; border-radius:7px; overflow:hidden; position:relative; margin:8px 0; border:1px solid #334155; }
+  .bat-bar-fill { height:100%; width:0%; transition:width 0.4s ease, background 0.3s ease; }
+</style>
+<script>
+(function(){
+  function injectDecorTabAndPage() {
+    const navTabs = document.getElementById('nav-tabs');
+    if (!navTabs || document.getElementById('tab-btn-decor')) return;
+
+    // 1. Cập nhật thanh Status Bar ở đầu trang web để hiển thị thông số Pin & Sạc
+    const statusBar = document.querySelector('.status-bar .status-left');
+    if (statusBar && !document.getElementById('st-bat-box')) {
+      const batSpan = document.createElement('span');
+      batSpan.id = 'st-bat-box';
+      batSpan.innerHTML = 'Nguồn: <strong id="st-bat-txt" style="color:#10b981;">🔋 --V (--%)</strong>';
+      statusBar.appendChild(batSpan);
+    }
+
+    // 2. Thêm nút Tab "✨ Hiệu Ứng Decor & Nguồn"
+    const btn = document.createElement('button');
+    btn.id = 'tab-btn-decor';
+    btn.className = 'tab-btn';
+    btn.innerHTML = '✨ Hiệu Ứng Decor & Nguồn (<span id="tab-decor-bat">--%</span>)';
+    btn.onclick = function() { window.switchTab('decor'); };
+
+    const streamTab = document.getElementById('tab-btn-stream');
+    const wifiTab = Array.from(navTabs.children).find(c => (c.textContent || '').indexOf('Wi-Fi') >= 0);
+    if (streamTab) navTabs.insertBefore(btn, streamTab);
+    else if (wifiTab) navTabs.insertBefore(btn, wifiTab);
+    else navTabs.appendChild(btn);
+
+    // 3. Tạo Section Page "#tab-decor"
+    const sec = document.createElement('div');
+    sec.id = 'tab-decor';
+    sec.className = 'section';
+    sec.innerHTML = `
+      <!-- CARD 1: GIÁM SÁT NGUỒN PIN 18650 & BO SẠC MH-CD42 -->
+      <div class="decor-card">
+        <div class="decor-title">
+          <span>🔋 Giám Sát Nguồn & Pin MH-CD42</span>
+          <span id="dec-chg-badge" class="decor-badge-pill" style="background:#059669;color:#ecfdf5;">Đang kiểm tra...</span>
+        </div>
+        <div class="decor-grid-2">
+          <div>
+            <div style="display:flex;align-items:baseline;gap:8px;">
+              <span id="dec-bat-v" style="font-size:1.7rem;font-weight:700;color:#38bdf8;">--</span>
+              <span style="font-size:1rem;color:#94a3b8;font-weight:600;">V</span>
+              <span id="dec-bat-mv" style="font-size:0.8rem;color:#64748b;margin-left:6px;">(-- mV)</span>
+            </div>
+            <div class="bat-bar-wrap">
+              <div id="dec-bat-fill" class="bat-bar-fill" style="width:0%;background:#10b981;"></div>
+            </div>
+            <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:#94a3b8;">
+              <span>Dung lượng: <strong id="dec-bat-pct" style="color:#f8fafc;">--%</strong></span>
+              <span>Kênh: <strong>GPIO 2 (ADC1_CH1)</strong></span>
+            </div>
+          </div>
+          <div style="background:#162032;padding:10px 14px;border-radius:8px;border:1px solid #334155;font-size:0.8rem;">
+            <div style="margin-bottom:6px;display:flex;justify-content:space-between;">
+              <span style="color:#94a3b8;">Nguồn cung cấp:</span>
+              <strong id="dec-src-txt" style="color:#facc15;">--</strong>
+            </div>
+            <div style="margin-bottom:6px;display:flex;justify-content:space-between;">
+              <span style="color:#94a3b8;">Cờ nhận diện sạc:</span>
+              <span>GPIO 46 (Vin High/Low)</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <span style="color:#94a3b8;">Cảm biến chạm TTP223:</span>
+              <span id="dec-touch-status" class="decor-badge-pill" style="background:#334155;color:#e2e8f0;">GPIO 20 (Nhả)</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 2: CỤM ĐÈN ỐNG EDISON FILAMENT (SƯỜN TRÁI & PHẢI) -->
+      <div class="decor-card">
+        <div class="decor-title">
+          <span>💡 Cụm Đèn Ống Edison Sườn Trạm (Filament Tubes)</span>
+          <label style="font-size:0.75rem;color:#94a3b8;display:flex;align-items:center;gap:6px;cursor:pointer;">
+            <input type="checkbox" id="chk-sync-edison" checked /> Đồng bộ cả 2 ống
+          </label>
+        </div>
+
+        <div style="font-size:0.76rem;color:#94a3b8;margin-bottom:8px;">Preset 1 Chạm (Áp dụng nhanh cho 2 ống Edison):</div>
+        <div class="decor-preset-grid">
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('reactor')">⚡ Lò Phản Ứng</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('candle')">🕯️ Ngọn Nến</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('heartbeat')">💓 Nhịp Tim</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('lightning')">🌩️ Sấm Sét</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('dual_breath')">🌊 Thở Lệch Pha</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('charging')">🔋 Dòng Năng Lượng</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('max')">☀️ Sáng Tối Đa</button>
+          <button class="btn-decor-preset" onclick="window.applyDecorPreset('off')">🌑 Tắt Đèn</button>
+        </div>
+
+        <div class="decor-grid-2">
+          <!-- ỐNG TRÁI -->
+          <div class="decor-tube-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <strong style="color:#facc15;font-size:0.85rem;">Ống Sườn TRÁI (GPIO 47)</strong>
+              <span id="txt-edl-pct" style="color:#38bdf8;font-size:0.78rem;font-weight:700;">70%</span>
+            </div>
+            <label style="font-size:0.74rem;color:#94a3b8;">Chế độ hiệu ứng:</label>
+            <select id="sel-edl-mode" style="width:100%;padding:6px 10px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:6px;font-size:0.8rem;margin:4px 0 8px 0;" onchange="window.onEdisonModeChange('edison_left', this.value)">
+              <option value="0">0: Tắt (0%)</option>
+              <option value="1">1: Dịu nhẹ (25%)</option>
+              <option value="2">2: Vừa phải (50%)</option>
+              <option value="3">3: Sáng rõ (75%)</option>
+              <option value="4">4: Tối đa (100%)</option>
+              <option value="5" selected>5: Lò phản ứng (Reactor & PC)</option>
+              <option value="6">6: Ngọn nến lung linh (Candle)</option>
+              <option value="7">7: Nhịp đập Cyberpunk (Heartbeat)</option>
+              <option value="8">8: Sấm sét hồ quang (Lightning)</option>
+              <option value="9">9: Thở đối xứng lệch pha (Dual Breath)</option>
+              <option value="10">10: Dòng năng lượng sạc (Power Flow)</option>
+            </select>
+            <div class="decor-slider-row">
+              <span style="font-size:0.72rem;color:#64748b;">0%</span>
+              <input type="range" id="rng-edl-bright" min="0" max="100" value="70" oninput="window.onEdisonSliderInput('edison_left', this.value)" onchange="window.onEdisonSliderChange('edison_left', this.value)" />
+              <span style="font-size:0.72rem;color:#64748b;">100%</span>
+            </div>
+          </div>
+
+          <!-- ỐNG PHẢI -->
+          <div class="decor-tube-card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+              <strong style="color:#facc15;font-size:0.85rem;">Ống Sườn PHẢI (GPIO 21)</strong>
+              <span id="txt-edr-pct" style="color:#38bdf8;font-size:0.78rem;font-weight:700;">70%</span>
+            </div>
+            <label style="font-size:0.74rem;color:#94a3b8;">Chế độ hiệu ứng:</label>
+            <select id="sel-edr-mode" style="width:100%;padding:6px 10px;background:#0f172a;color:#f8fafc;border:1px solid #334155;border-radius:6px;font-size:0.8rem;margin:4px 0 8px 0;" onchange="window.onEdisonModeChange('edison_right', this.value)">
+              <option value="0">0: Tắt (0%)</option>
+              <option value="1">1: Dịu nhẹ (25%)</option>
+              <option value="2">2: Vừa phải (50%)</option>
+              <option value="3">3: Sáng rõ (75%)</option>
+              <option value="4">4: Tối đa (100%)</option>
+              <option value="5" selected>5: Lò phản ứng (Reactor & PC)</option>
+              <option value="6">6: Ngọn nến lung linh (Candle)</option>
+              <option value="7">7: Nhịp đập Cyberpunk (Heartbeat)</option>
+              <option value="8">8: Sấm sét hồ quang (Lightning)</option>
+              <option value="9">9: Thở đối xứng lệch pha (Dual Breath)</option>
+              <option value="10">10: Dòng năng lượng sạc (Power Flow)</option>
+            </select>
+            <div class="decor-slider-row">
+              <span style="font-size:0.72rem;color:#64748b;">0%</span>
+              <input type="range" id="rng-edr-bright" min="0" max="100" value="70" oninput="window.onEdisonSliderInput('edison_right', this.value)" onchange="window.onEdisonSliderChange('edison_right', this.value)" />
+              <span style="font-size:0.72rem;color:#64748b;">100%</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- CARD 3 & 4: CỐI XAY GIÓ & LED NƯỚC CHẢY COB -->
+      <div class="decor-grid-2">
+        <!-- CỐI XAY GIÓ L298N -->
+        <div class="decor-card">
+          <div class="decor-title">
+            <span>🎡 Cối Xay Gió (GPIO 1)</span>
+            <span id="txt-wm-speed" style="font-size:0.78rem;color:#38bdf8;font-weight:700;">0%</span>
+          </div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px;">
+            <button class="btn-secondary" style="padding:4px 8px;font-size:0.72rem;" onclick="window.sendDecorControl({target:'windmill',mode:0})">Tắt (0%)</button>
+            <button class="btn-secondary" style="padding:4px 8px;font-size:0.72rem;" onclick="window.sendDecorControl({target:'windmill',mode:1})">Êm (35%)</button>
+            <button class="btn-secondary" style="padding:4px 8px;font-size:0.72rem;" onclick="window.sendDecorControl({target:'windmill',mode:2})">Vừa (60%)</button>
+            <button class="btn-secondary" style="padding:4px 8px;font-size:0.72rem;" onclick="window.sendDecorControl({target:'windmill',mode:3})">Nhanh (85%)</button>
+            <button class="btn-secondary" style="padding:4px 8px;font-size:0.72rem;" onclick="window.sendDecorControl({target:'windmill',mode:4})">Thở</button>
+          </div>
+          <div class="decor-slider-row">
+            <span style="font-size:0.72rem;color:#64748b;">0%</span>
+            <input type="range" id="rng-wm-speed" min="0" max="100" value="0" oninput="document.getElementById('txt-wm-speed').innerText = this.value + '%'" onchange="window.sendDecorControl({target:'windmill',speed:parseInt(this.value)})" />
+            <span style="font-size:0.72rem;color:#64748b;">100%</span>
+          </div>
+        </div>
+
+        <!-- LED NƯỚC CHẢY COB MẶT LƯNG -->
+        <div class="decor-card">
+          <div class="decor-title">
+            <span>🌊 LED Nước Chảy COB</span>
+            <span id="dec-flow-status" class="decor-badge-pill" style="background:#059669;color:#ecfdf5;">Đang BẬT</span>
+          </div>
+          <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:10px;">
+            Vị trí: 2 thanh mặt lưng (Trái: GPIO 38, Phải: GPIO 18). IC quét tự động.
+          </div>
+          <div style="display:flex;gap:8px;">
+            <button class="btn-secondary" style="flex:1;padding:8px;" onclick="window.sendDecorControl({target:'flowing',action:'toggle'})">🔘 Bật / Tắt Nguồn</button>
+            <button class="btn-primary" style="flex:1;padding:8px;background:linear-gradient(135deg,#0284c7,#0369a1);" onclick="window.sendDecorControl({target:'flowing',action:'next_mode'})">⚡ Chuyển Mode IC</button>
+          </div>
+        </div>
+      </div>
+    `;
+    const tabImages = document.getElementById('tab-images');
+    if (tabImages && tabImages.parentNode) {
+      tabImages.parentNode.insertBefore(sec, tabImages);
+    } else {
+      document.querySelector('.container').appendChild(sec);
+    }
+  }
+
+  window.sendDecorControl = async function(payload) {
+    try {
+      const res = await fetch('/api/decor/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      if (res.ok) {
+        const data = await res.json();
+        renderDecorState(data);
+      }
+    } catch(e) {
+      console.warn("Decor control failed:", e);
+    }
+  };
+
+  window.applyDecorPreset = function(preset) {
+    window.sendDecorControl({ preset: preset });
+  };
+
+  window.onEdisonModeChange = function(target, modeVal) {
+    const isSync = document.getElementById('chk-sync-edison')?.checked;
+    const finalTarget = isSync ? 'edison_both' : target;
+    window.sendDecorControl({ target: finalTarget, mode: parseInt(modeVal) });
+  };
+
+  window.onEdisonSliderInput = function(target, val) {
+    const isSync = document.getElementById('chk-sync-edison')?.checked;
+    if (target === 'edison_left' || isSync) {
+      const el = document.getElementById('txt-edl-pct');
+      if (el) el.innerText = val + '%';
+      const rng = document.getElementById('rng-edl-bright');
+      if (rng && rng.value != val) rng.value = val;
+    }
+    if (target === 'edison_right' || isSync) {
+      const el = document.getElementById('txt-edr-pct');
+      if (el) el.innerText = val + '%';
+      const rng = document.getElementById('rng-edr-bright');
+      if (rng && rng.value != val) rng.value = val;
+    }
+  };
+
+  window.onEdisonSliderChange = function(target, val) {
+    const isSync = document.getElementById('chk-sync-edison')?.checked;
+    const finalTarget = isSync ? 'edison_both' : target;
+    window.sendDecorControl({ target: finalTarget, brightness: parseInt(val) });
+  };
+
+  function renderDecorState(d) {
+    if (!d) return;
+    // 1. Cụm Pin & Sạc
+    if (d.battery) {
+      const b = d.battery;
+      const vEl = document.getElementById('dec-bat-v');
+      const mvEl = document.getElementById('dec-bat-mv');
+      const pctEl = document.getElementById('dec-bat-pct');
+      const fillEl = document.getElementById('dec-bat-fill');
+      const chgBadge = document.getElementById('dec-chg-badge');
+      const srcTxt = document.getElementById('dec-src-txt');
+      const tabBat = document.getElementById('tab-decor-bat');
+      const stBat = document.getElementById('st-bat-txt');
+
+      if (vEl) vEl.innerText = Number(b.voltage || 0).toFixed(2);
+      if (mvEl) mvEl.innerText = '(' + (b.millivolts || 0) + ' mV)';
+      if (pctEl) pctEl.innerText = (b.percent || 0) + '%';
+      if (tabBat) tabBat.innerText = (b.percent || 0) + '%';
+      if (fillEl) {
+        fillEl.style.width = (b.percent || 0) + '%';
+        if (b.percent > 50) fillEl.style.background = '#10b981';
+        else if (b.percent > 20) fillEl.style.background = '#f59e0b';
+        else fillEl.style.background = '#ef4444';
+      }
+      if (chgBadge) {
+        if (b.is_charging) {
+          chgBadge.className = 'decor-badge-pill';
+          chgBadge.style.background = '#059669';
+          chgBadge.style.color = '#ecfdf5';
+          chgBadge.innerText = '⚡ ĐANG SẠC PIN (Vin = HIGH)';
+        } else {
+          chgBadge.className = 'decor-badge-pill';
+          chgBadge.style.background = '#334155';
+          chgBadge.style.color = '#cbd5e1';
+          chgBadge.innerText = '🔋 DÙNG PIN LITHIUM (Vin = LOW)';
+        }
+      }
+      if (srcTxt) srcTxt.innerText = b.charging_source || (b.is_charging ? 'Vin MH-CD42' : 'Pin 18650');
+      if (stBat) {
+        stBat.innerText = (b.is_charging ? '⚡ ' : '🔋 ') + Number(b.voltage || 0).toFixed(2) + 'V (' + (b.percent || 0) + '%)';
+        stBat.style.color = b.is_charging ? '#38bdf8' : (b.percent > 20 ? '#10b981' : '#ef4444');
+      }
+    }
+
+    // 2. Touch
+    if (d.touch) {
+      const tEl = document.getElementById('dec-touch-status');
+      if (tEl) {
+        tEl.innerText = d.touch.pressed ? '🟢 ĐANG CHẠM' : 'GPIO 20 (Nhả)';
+        tEl.style.background = d.touch.pressed ? '#059669' : '#334155';
+      }
+    }
+
+    // 3. Edison
+    if (d.edison_left) {
+      const edL = d.edison_left;
+      const selL = document.getElementById('sel-edl-mode');
+      const rngL = document.getElementById('rng-edl-bright');
+      const txtL = document.getElementById('txt-edl-pct');
+      if (selL) selL.value = edL.mode;
+      if (rngL) rngL.value = edL.brightness;
+      if (txtL) txtL.innerText = edL.brightness + '%';
+    }
+    if (d.edison_right) {
+      const edR = d.edison_right;
+      const selR = document.getElementById('sel-edr-mode');
+      const rngR = document.getElementById('rng-edr-bright');
+      const txtR = document.getElementById('txt-edr-pct');
+      if (selR) selR.value = edR.mode;
+      if (rngR) rngR.value = edR.brightness;
+      if (txtR) txtR.innerText = edR.brightness + '%';
+    }
+
+    // 4. Windmill
+    if (d.windmill) {
+      const wm = d.windmill;
+      const rngWm = document.getElementById('rng-wm-speed');
+      const txtWm = document.getElementById('txt-wm-speed');
+      if (rngWm) rngWm.value = wm.speed;
+      if (txtWm) txtWm.innerText = wm.speed + '%';
+    }
+
+    // 5. Flowing Leds
+    if (d.flowing_leds) {
+      const fl = d.flowing_leds;
+      const flBadge = document.getElementById('dec-flow-status');
+      if (flBadge) {
+        flBadge.innerText = fl.is_on ? 'Đang BẬT (' + (fl.mode_name || '') + ')' : 'Đang TẮT';
+        flBadge.style.background = fl.is_on ? '#059669' : '#475569';
+      }
+    }
+  }
+
+  window.fetchDecorStatus = async function() {
+    try {
+      const res = await fetch('/api/decor/status');
+      if (res.ok) {
+        const d = await res.json();
+        renderDecorState(d);
+      }
+    } catch(e) {}
+  };
+
+  // Mở rộng window.switchTab cho tab 'decor'
+  const origSwitchTab_Decor = window.switchTab;
+  window.switchTab = function(tabId) {
+    injectDecorTabAndPage();
+    if (tabId === 'decor') {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      const decSec = document.getElementById('tab-decor');
+      const decBtn = document.getElementById('tab-btn-decor');
+      if (decSec) decSec.classList.add('active');
+      if (decBtn) {
+        decBtn.classList.add('active');
+        decBtn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+      window.fetchDecorStatus();
+      return;
+    }
+    const decSec = document.getElementById('tab-decor');
+    const decBtn = document.getElementById('tab-btn-decor');
+    if (decSec) decSec.classList.remove('active');
+    if (decBtn) decBtn.classList.remove('active');
+
+    if (typeof origSwitchTab_Decor === 'function') origSwitchTab_Decor(tabId);
+  };
+
+  setTimeout(() => {
+    injectDecorTabAndPage();
+    window.fetchDecorStatus();
+    setInterval(window.fetchDecorStatus, 3000);
+  }, 350);
+})();
+</script>
+)rawliteral";
+
+static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
+<script>
+(function(){
+  const KEYPAD_STYLES = `
+    .keypad-sim-container {
+      display: flex;
+      gap: 24px;
+      align-items: flex-start;
+      justify-content: center;
+      flex-wrap: wrap;
+      margin-top: 10px;
+    }
+    .keypad-screen-col {
+      flex: 0 0 310px;
+      max-width: 320px;
+    }
+    .keypad-controls-col {
+      flex: 1 1 360px;
+      max-width: 520px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    /* Khung Màn hình Bezel Cyberpunk ST7789 */
+    .sim-bezel {
+      background: linear-gradient(145deg, #0e1726, #090e18);
+      border: 3px solid #1e293b;
+      border-radius: 18px;
+      box-shadow: 0 15px 35px rgba(0,0,0,0.7), inset 0 0 20px rgba(6,182,212,0.12);
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      user-select: none;
+    }
+    .sim-bezel-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-bottom: 8px;
+      border-bottom: 1px solid rgba(255,255,255,0.06);
+      margin-bottom: 8px;
+      font-size: 0.68rem;
+      font-weight: 700;
+      color: #94a3b8;
+      letter-spacing: 0.5px;
+    }
+    .sim-live-led {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 10px #10b981;
+      transition: all 0.2s ease;
+    }
+    .sim-live-led.blink {
+      background: #38bdf8;
+      box-shadow: 0 0 14px #38bdf8;
+      transform: scale(1.3);
+    }
+    /* Vùng hiển thị màn hình ST7789 (Tỉ lệ chuẩn dọc 240x320) */
+    .sim-screen-body {
+      width: 100%;
+      height: 380px;
+      background: #000;
+      border-radius: 8px;
+      overflow: hidden;
+      position: relative;
+      border: 1px solid #1e293b;
+      box-shadow: inset 0 0 15px rgba(0,0,0,0.9);
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    }
+    .sim-view {
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+      display: flex;
+      flex-direction: column;
+      box-sizing: border-box;
+      padding: 12px;
+    }
+    /* 1. STANDBY VIEW - ĐỒNG BỘ 100% VỚI MÀN HÌNH ESP32 VÀ TAB MÀN HÌNH DEMO & THIẾT KẾ */
+    #sim-view-standby {
+      background-size: cover;
+      background-position: center;
+      background-repeat: no-repeat;
+      color: #fff;
+      position: relative;
+      padding: 10px 10px 8px 10px;
+      overflow: hidden;
+    }
+    .sim-standby-dim {
+      position: absolute;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.35);
+      pointer-events: none;
+      z-index: 1;
+      transition: background 0.25s ease;
+    }
+    .sim-standby-content {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      box-sizing: border-box;
+    }
+    .sim-topbar {
+      width: 100%;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .sim-pill {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.65rem;
+      font-weight: 700;
+      color: #cbd5e1;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+    }
+    .sim-pill-node {
+      color: #38bdf8;
+      border-color: rgba(56, 189, 248, 0.4);
+    }
+    .sim-dot-wifi {
+      color: #10b981;
+      font-size: 0.65rem;
+      line-height: 1;
+      filter: drop-shadow(0 0 5px #10b981);
+    }
+    .sim-clock-area {
+      text-align: center;
+      margin: auto 0;
+      width: 100%;
+    }
+    .sim-clock-time {
+      font-size: 2.75rem;
+      font-weight: 800;
+      color: #38bdf8;
+      letter-spacing: 1px;
+      text-shadow: 0 0 16px rgba(56, 189, 248, 0.7);
+      line-height: 1;
+      font-variant-numeric: tabular-nums;
+      margin-bottom: 4px;
+      transition: all 0.2s ease;
+    }
+    .sim-clock-sec {
+      font-size: 1.15rem;
+      color: #94a3b8;
+      opacity: 0.85;
+      font-weight: 500;
+      margin-left: 2px;
+    }
+    .sim-clock-date {
+      font-size: 0.75rem;
+      color: #e2e8f0;
+      font-weight: 600;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+      margin-top: 4px;
+    }
+    .sim-footer-area {
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 4px;
+    }
+    .sim-weather-pill {
+      background: rgba(15, 23, 42, 0.75);
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 0.68rem;
+      color: #f1f5f9;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.4);
+    }
+    .sim-slogan-text {
+      font-size: 0.7rem;
+      color: #fbbf24;
+      font-style: italic;
+      text-shadow: 0 1px 3px #000;
+      max-width: 90%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .sim-power-tag {
+      font-size: 0.62rem;
+      color: #34d399;
+      font-weight: bold;
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      padding: 2px 8px;
+      border-radius: 6px;
+    }
+
+    /* 2. S40 MENU VIEW - ĐỒNG BỘ 100% TIÊU ĐỀ FIRMWARE */
+    #sim-view-s40 {
+      background: #020617;
+      padding: 6px;
+    }
+    .s40-header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: linear-gradient(90deg, #1e3a8a, #0369a1);
+      padding: 4px 8px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      font-weight: bold;
+      color: #fff;
+      margin-bottom: 4px;
+    }
+    .s40-desc-banner {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      padding: 4px 6px;
+      font-size: 0.68rem;
+      color: #fbbf24;
+      font-weight: 600;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 6px;
+      border-radius: 4px;
+    }
+    .s40-grid-viewport {
+      flex: 1;
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 4px;
+      overflow-y: hidden;
+    }
+    .s40-cell {
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 4px 2px;
+      transition: all 0.15s ease;
+      cursor: pointer;
+    }
+    .s40-cell.selected {
+      background: #1e3a8a;
+      border: 2px solid #fbbf24;
+      box-shadow: 0 0 10px rgba(251, 191, 36, 0.6);
+      transform: scale(1.04);
+    }
+    .s40-cell-icon { font-size: 1.25rem; line-height: 1.1; }
+    .s40-cell-name { font-size: 0.58rem; color: #cbd5e1; margin-top: 2px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 90%; }
+    .s40-cell.selected .s40-cell-name { color: #fbbf24; font-weight: bold; }
+    .s40-bottom-softkeys {
+      display: flex;
+      justify-content: space-between;
+      padding-top: 4px;
+      font-size: 0.68rem;
+      font-weight: bold;
+      color: #94a3b8;
+      border-top: 1px solid #1e293b;
+      margin-top: 4px;
+    }
+
+    /* 3. PC HUD VIEW */
+    #sim-view-pchud {
+      background: #020617;
+      color: #fff;
+    }
+    .pchud-header { font-size: 0.72rem; font-weight: 800; color: #38bdf8; border-bottom: 1px solid #1e293b; padding-bottom: 4px; margin-bottom: 8px; }
+    .pchud-meter { margin-bottom: 10px; }
+    .pchud-meter .m-lbl { font-size: 0.68rem; font-weight: 700; color: #94a3b8; }
+    .pchud-meter .m-bar { height: 10px; background: #1e293b; border-radius: 5px; overflow: hidden; margin: 2px 0; }
+    .pchud-meter .m-bar div { height: 100%; background: linear-gradient(90deg, #06b6d4, #3b82f6); border-radius: 5px; transition: width 0.3s ease; }
+    .pchud-meter .m-val { font-size: 0.75rem; font-weight: 800; color: #38bdf8; float: right; margin-top: -16px; }
+
+    /* 4. XIAOZHI VIEW */
+    #sim-view-xiaozhi {
+      background: #000;
+      color: #fff;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .sim-eyes-stage { display: flex; gap: 28px; margin-top: 35px; }
+    .sim-eye {
+      width: 42px;
+      height: 62px;
+      background: #00f0ff;
+      border-radius: 20px;
+      box-shadow: 0 0 25px #00f0ff;
+      animation: simEyeBlink 4s infinite;
+    }
+    @keyframes simEyeBlink {
+      0%, 94%, 100% { transform: scaleY(1); }
+      96% { transform: scaleY(0.08); }
+    }
+    .sim-sub-box {
+      width: 100%;
+      background: #111827;
+      border: 1px solid #1f2937;
+      border-radius: 8px;
+      padding: 8px;
+      margin-bottom: 6px;
+    }
+    .sim-sub-sender { font-size: 0.65rem; color: #38bdf8; font-weight: bold; margin-bottom: 2px; }
+    .sim-sub-content { font-size: 0.75rem; color: #f3f4f6; line-height: 1.3; }
+
+    /* 5. MEDIA VIEW */
+    #sim-view-media { background: #030712; color: #fff; align-items: center; justify-content: center; }
+    .vinyl-disc-spin { font-size: 3.5rem; animation: spinDisc 3s linear infinite; margin: 15px 0; }
+    @keyframes spinDisc { 100% { transform: rotate(360deg); } }
+    .visualizer-bars { display: flex; gap: 4px; align-items: flex-end; height: 35px; margin-bottom: 15px; }
+    .visualizer-bars .vbar { width: 8px; background: #38bdf8; border-radius: 3px; animation: bounceBar 0.6s infinite alternate ease-in-out; }
+    .visualizer-bars .vbar:nth-child(2) { animation-delay: 0.1s; }
+    .visualizer-bars .vbar:nth-child(3) { animation-delay: 0.2s; }
+    .visualizer-bars .vbar:nth-child(4) { animation-delay: 0.3s; }
+    .visualizer-bars .vbar:nth-child(5) { animation-delay: 0.15s; }
+    .visualizer-bars .vbar:nth-child(6) { animation-delay: 0.25s; }
+    @keyframes bounceBar { 0% { height: 6px; } 100% { height: 32px; background: #ec4899; } }
+
+    /* 6. DIAG VIEW */
+    #sim-view-diag { background: #050b14; color: #38bdf8; font-family: monospace; }
+    .diag-header { font-size: 0.75rem; font-weight: bold; color: #fbbf24; border-bottom: 1px solid #1e293b; padding-bottom: 4px; margin-bottom: 10px; }
+    .diag-info-list div { margin-bottom: 8px; font-size: 0.72rem; }
+
+    /* Bezel Foot */
+    .sim-bezel-foot {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 8px;
+      margin-top: 6px;
+      border-top: 1px solid rgba(255,255,255,0.06);
+    }
+    .sim-foot-status { display: flex; gap: 6px; align-items: center; }
+    .sim-foot-status .mode-tag { background: #0284c7; color: #fff; font-size: 0.62rem; font-weight: 800; padding: 2px 6px; border-radius: 4px; }
+    .sim-foot-status .title-tag { font-size: 0.7rem; color: #cbd5e1; }
+    .btn-refresh-sim { background: #1e293b; border: 1px solid #334155; color: #38bdf8; border-radius: 6px; padding: 2px 8px; cursor: pointer; }
+
+    /* --- BẢNG THÔNG SỐ ĐO ADC (CỘT PHẢI) --- */
+    .adc-matrix-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 12px 16px;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.4);
+    }
+    .adc-matrix-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 10px;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #e2e8f0;
+    }
+    .hud-chip {
+      background: rgba(56, 189, 248, 0.15);
+      border: 1px solid #0284c7;
+      color: #38bdf8;
+      font-size: 0.65rem;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-weight: bold;
+    }
+    .adc-grid-stats {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .adc-cell {
+      background: #090e17;
+      border: 1px solid #1e293b;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: flex;
+      flex-direction: column;
+    }
+    .adc-cell .lbl { font-size: 0.68rem; color: #64748b; font-weight: 600; text-transform: uppercase; margin-bottom: 2px; }
+    .adc-cell .val { font-size: 0.92rem; font-weight: 800; font-family: monospace; }
+
+    /* --- DÀN PHÍM ẢO MÔ PHỎNG (D-PAD CHỮ THẬP + FUNCTION) --- */
+    .virtual-dpad-box {
+      background: linear-gradient(145deg, #131c2e, #0a0f1d);
+      border: 2px solid #1e293b;
+      border-radius: 16px;
+      padding: 18px 14px;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      user-select: none;
+    }
+    .dpad-row {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 10px;
+    }
+    .dpad-btn {
+      background: linear-gradient(145deg, #1e293b, #0f172a);
+      border: 2px solid #334155;
+      color: #f8fafc;
+      border-radius: 12px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      box-shadow: 0 5px 0 #090d16, 0 8px 15px rgba(0,0,0,0.4);
+      transition: all 0.08s ease;
+      touch-action: manipulation;
+    }
+    .dpad-btn:active, .dpad-btn.pressed {
+      transform: translateY(4px);
+      box-shadow: 0 1px 0 #090d16, 0 0 16px rgba(56, 189, 248, 0.8);
+      border-color: #38bdf8;
+      background: #0284c7;
+      color: #fff;
+    }
+    .dpad-btn .btn-arrow { font-size: 1.25rem; font-weight: 900; line-height: 1; }
+    .dpad-btn .btn-text { font-size: 0.72rem; font-weight: 800; margin-top: 2px; }
+    .dpad-btn .btn-sub { font-size: 0.6rem; color: #94a3b8; font-weight: 500; }
+    .dpad-btn:active .btn-sub, .dpad-btn.pressed .btn-sub { color: #e0f2fe; }
+
+    /* Kích thước D-Pad chính */
+    .btn-up, .btn-down { width: 130px; height: 60px; }
+    .btn-left, .btn-right { width: 115px; height: 65px; }
+    .btn-ok {
+      width: 110px;
+      height: 65px;
+      background: linear-gradient(145deg, #0369a1, #0c4a6e);
+      border-color: #0284c7;
+      color: #fff;
+      box-shadow: 0 5px 0 #082f49, 0 8px 15px rgba(2, 132, 199, 0.4);
+    }
+    .btn-ok:active, .btn-ok.pressed {
+      background: #0284c7;
+      border-color: #38bdf8;
+      box-shadow: 0 1px 0 #082f49, 0 0 20px #38bdf8;
+    }
+    .btn-center-ring { font-size: 1.1rem; color: #38bdf8; }
+
+    /* Phím chức năng Menu & Exit */
+    .function-row {
+      display: flex;
+      gap: 12px;
+      justify-content: center;
+      margin-top: 6px;
+    }
+    .btn-func {
+      flex: 1;
+      height: 52px;
+      border-radius: 10px;
+      flex-direction: row;
+      gap: 8px;
+    }
+    .btn-func .btn-icon { font-size: 1.1rem; }
+    .btn-func .btn-text { font-size: 0.75rem; }
+    .btn-menu {
+      border-color: #6366f1;
+      background: linear-gradient(145deg, #312e81, #1e1b4b);
+    }
+    .btn-menu:active, .btn-menu.pressed {
+      background: #4f46e5;
+      border-color: #a5b4fc;
+      box-shadow: 0 1px 0 #1e1b4b, 0 0 15px rgba(99, 102, 241, 0.8);
+    }
+    .btn-exit {
+      border-color: #e11d48;
+      background: linear-gradient(145deg, #881337, #4c0519);
+    }
+    .btn-exit:active, .btn-exit.pressed {
+      background: #e11d48;
+      border-color: #fda4af;
+      box-shadow: 0 1px 0 #4c0519, 0 0 15px rgba(225, 29, 72, 0.8);
+    }
+
+    /* Phím Chạm Touch TTP223 */
+    .touch-row { margin-top: 4px; }
+    .btn-touch {
+      width: 100%;
+      height: 48px;
+      background: linear-gradient(145deg, #854d0e, #451a03);
+      border-color: #eab308;
+      color: #fef08a;
+      flex-direction: row;
+      gap: 8px;
+    }
+    .btn-touch:active, .btn-touch.pressed {
+      background: #ca8a04;
+      border-color: #fef08a;
+      box-shadow: 0 1px 0 #451a03, 0 0 18px rgba(234, 179, 8, 0.8);
+      color: #fff;
+    }
+
+    .keyboard-shortcuts-pill {
+      background: #0f172a;
+      border: 1px dashed #334155;
+      border-radius: 8px;
+      padding: 8px 12px;
+      font-size: 0.72rem;
+      color: #94a3b8;
+      line-height: 1.5;
+    }
+    .keyboard-shortcuts-pill kbd {
+      background: #1e293b;
+      border: 1px solid #475569;
+      color: #38bdf8;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-weight: bold;
+      font-size: 0.7rem;
+    }
+  `;
+
+  // 14 TIÊU ĐỀ & MÔ TẢ ĐỒNG BỘ CHÍNH XÁC 100% VỚI S40_MENU_TITLES DƯỚI FIRMWARE ESP32
+  const S40_APP_LIST = [
+    { id: 0,  title: "Hình nền",  icon: "🖼️", desc: "1. Tùy chỉnh Hình nền & Đồng hồ chờ", tab: "screen" },
+    { id: 1,  title: "Cài đặt",   icon: "⚙️", desc: "2. Giao diện (6 Chủ đề), Độ sáng & Loa", tab: "screen" },
+    { id: 2,  title: "Máy tính",  icon: "📊", desc: "3. Giám sát Hiệu năng Máy tính (PC)", mode: "pchud" },
+    { id: 3,  title: "Thư viện",  icon: "🌄", desc: "4. Bộ sưu tập Hình ảnh & Ảnh nền", tab: "images" },
+    { id: 4,  title: "Bộ nhớ",    icon: "📁", desc: "5. Quản lý Tệp tin & Bộ nhớ lưu trữ", tab: "images" },
+    { id: 5,  title: "Trợ lý AI", icon: "🤖", desc: "6. Trò chuyện Giọng nói XiaoZhi AI", tab: "chat" },
+    { id: 6,  title: "Âm nhạc",   icon: "🎵", desc: "7. Trình phát Âm nhạc & Sóng nhạc", tab: "music" },
+    { id: 7,  title: "Đồng hồ",   icon: "⏰", desc: "8. Đồng hồ: Báo thức, Bấm giờ & Hẹn giờ", mode: "clock" },
+    { id: 8,  title: "Lịch",      icon: "📅", desc: "9. Lịch Vạn Niên & Tra cứu Ngày tháng", mode: "calendar" },
+    { id: 9,  title: "Thiết bị",  icon: "ℹ️", desc: "10. Thông tin Thiết bị & Kết nối Mạng", tab: "system" },
+    { id: 10, title: "Sóng âm",   icon: "🧪", desc: "11. Biểu đồ Sóng âm & Cảm biến phòng", mode: "diag" },
+    { id: 11, title: "Thẻ nhớ",   icon: "💾", desc: "12. Thông tin Chi tiết Thẻ nhớ MicroSD", tab: "images" },
+    { id: 12, title: "Trò chơi",  icon: "🎮", desc: "13. Trò chơi: Rắn săn mồi, Flappy & Xếp gạch", mode: "game" },
+    { id: 13, title: "Mã QR",     icon: "📱", desc: "14. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý", tab: "wifi" }
+  ];
+
+  let currentS40Cursor = 0;
+
+  function injectKeypadStyles() {
+    if (document.getElementById('keypad-injected-styles')) return;
+    const s = document.createElement('style');
+    s.id = 'keypad-injected-styles';
+    s.innerHTML = KEYPAD_STYLES;
+    document.head.appendChild(s);
+  }
+
+  function injectKeypadTabAndPage() {
+    const navTabs = document.getElementById('nav-tabs');
+    if (!navTabs || document.getElementById('tab-btn-keypad')) return;
+
+    injectKeypadStyles();
+
+    // 1. Tạo nút tab mới
+    const btn = document.createElement('button');
+    btn.className = 'tab-btn';
+    btn.id = 'tab-btn-keypad';
+    btn.innerHTML = '🎮 Bàn Phím Ảo (Keypad)';
+    btn.onclick = () => window.switchTab('keypad');
+
+    const streamTab = Array.from(navTabs.children).find(c => (c.textContent || '').indexOf('Web Streamer') >= 0);
+    const decorTab = Array.from(navTabs.children).find(c => (c.textContent || '').indexOf('Decor') >= 0);
+    if (streamTab) navTabs.insertBefore(btn, streamTab);
+    else if (decorTab) navTabs.insertBefore(btn, decorTab.nextSibling);
+    else navTabs.appendChild(btn);
+
+    // 2. Tạo phần nội dung Tab
+    const mainContainer = document.querySelector('.main-content') || document.querySelector('.container') || document.body;
+    const sec = document.createElement('div');
+    sec.id = 'tab-keypad';
+    sec.className = 'section';
+    sec.innerHTML = `
+      <div class="keypad-sim-container">
+        <!-- CỘT TRÁI: MÀN HÌNH DEMO ST7789 ĐỒNG BỘ THỜI GIAN THỰC -->
+        <div class="keypad-screen-col">
+          <div class="sim-bezel">
+            <div class="sim-bezel-head">
+              <span>ESP32-S3 // ST7789 LIVE SYNC</span>
+              <div class="sim-live-led" id="sim-live-led"></div>
+            </div>
+
+            <div class="sim-screen-body" id="sim-screen-body">
+              <!-- Mode 0: Standby (Đồng bộ ảnh nền & màu chữ với Tab Màn hình Demo & thiết kế) -->
+              <div class="sim-view" id="sim-view-standby">
+                <div class="sim-standby-dim" id="sim-standby-dim"></div>
+                <div class="sim-standby-content">
+                  <!-- Top Bar: Wi-Fi Pill (trái) & ESP32-S3 (phải) giống hệt thiết bị thật -->
+                  <div class="sim-topbar">
+                    <div class="sim-pill sim-pill-wifi" id="sim-pill-wifi">
+                      <span class="sim-dot-wifi" id="sim-dot-wifi">●</span>
+                      <span id="sim-wifi-ssid">STA</span>
+                    </div>
+                    <div class="sim-pill sim-pill-node">
+                      <span>ESP32-S3</span>
+                    </div>
+                  </div>
+
+                  <!-- Đồng hồ số trung tâm (chạy thời gian thực từng giây) -->
+                  <div class="sim-clock-area">
+                    <div class="sim-clock-time" id="sim-clock">12:00<span class="sim-clock-sec" id="sim-sec">:00</span></div>
+                    <div class="sim-clock-date" id="sim-date">Chủ Nhật, 18/10/2026</div>
+                  </div>
+
+                  <!-- Footer thời tiết, slogan, pin sạc -->
+                  <div class="sim-footer-area">
+                    <div class="sim-weather-pill" id="sim-weather">🌡️ 28.5°C | 💧 65%</div>
+                    <div class="sim-slogan-text" id="sim-slogan">Trạm Decor Vũ Trụ ✨</div>
+                    <div class="sim-power-tag" id="sim-power-tag">🔋 4.05V (88%)</div>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Mode 4: Symbian S40 Menu (Đồng bộ 14 app) -->
+              <div class="sim-view" id="sim-view-s40" style="display:none;">
+                <div class="s40-header-bar">
+                  <span id="s40-head-title">MENU CHÍNH</span>
+                  <span>📶 🔋</span>
+                </div>
+                <div class="s40-desc-banner" id="s40-desc-banner">1. Tùy chỉnh Hình nền & Đồng hồ chờ</div>
+                <div class="s40-grid-viewport" id="s40-grid-cells"></div>
+                <div class="s40-bottom-softkeys">
+                  <span style="color:#38bdf8; cursor:pointer;" onclick="window.triggerS40OpenCurrentApp()">Chọn (OK)</span>
+                  <span id="s40-cur-label">1/14</span>
+                  <span style="cursor:pointer;" onclick="window.pressKeypadKey(6)">Thoát</span>
+                </div>
+              </div>
+
+              <!-- Mode 2: PC HUD -->
+              <div class="sim-view" id="sim-view-pchud" style="display:none;">
+                <div class="pchud-header">PC STATUS TELEMETRY // HUD</div>
+                <div class="pchud-meter">
+                  <span class="m-lbl">CPU Intel Core</span>
+                  <span class="m-val" id="sim-cpu-val">42%</span>
+                  <div class="m-bar"><div id="sim-cpu-bar" style="width:42%"></div></div>
+                </div>
+                <div class="pchud-meter">
+                  <span class="m-lbl">GPU Graphics</span>
+                  <span class="m-val" id="sim-gpu-val">28%</span>
+                  <div class="m-bar"><div id="sim-gpu-bar" style="width:28%; background:linear-gradient(90deg, #ec4899, #8b5cf6);"></div></div>
+                </div>
+                <div class="pchud-meter">
+                  <span class="m-lbl">RAM System</span>
+                  <span class="m-val" id="sim-ram-val">65%</span>
+                  <div class="m-bar"><div id="sim-ram-bar" style="width:65%; background:linear-gradient(90deg, #f59e0b, #ef4444);"></div></div>
+                </div>
+                <div class="pchud-meter">
+                  <span class="m-lbl">Mạng Internet</span>
+                  <span class="m-val" id="sim-net-val">15 MB/s</span>
+                  <div class="m-bar"><div id="sim-net-bar" style="width:45%; background:linear-gradient(90deg, #10b981, #06b6d4);"></div></div>
+                </div>
+              </div>
+
+              <!-- Mode 1 / 11: XiaoZhi AI -->
+              <div class="sim-view" id="sim-view-xiaozhi" style="display:none;">
+                <div class="sim-eyes-stage">
+                  <div class="sim-eye left"></div>
+                  <div class="sim-eye right"></div>
+                </div>
+                <div class="sim-sub-box">
+                  <div class="sim-sub-sender">🤖 TRỢ LÝ XIAOZHI AI</div>
+                  <div class="sim-sub-content" id="sim-sub-content">Xin chào! Hãy trò chuyện cùng mình nhé.</div>
+                </div>
+              </div>
+
+              <!-- Mode 12: Media Player -->
+              <div class="sim-view" id="sim-view-media" style="display:none;">
+                <div style="font-size:0.75rem; color:#38bdf8; font-weight:bold; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" id="sim-media-title">🎵 Neon_City_Chill.mp3</div>
+                <div class="vinyl-disc-spin">💿</div>
+                <div class="visualizer-bars">
+                  <div class="vbar"></div><div class="vbar"></div><div class="vbar"></div><div class="vbar"></div><div class="vbar"></div><div class="vbar"></div><div class="vbar"></div>
+                </div>
+                <div style="font-size:0.75rem; color:#34d399; font-weight:bold;">▶ Đang Phát Âm Thanh I2S</div>
+              </div>
+
+              <!-- Mode 3: Chẩn đoán -->
+              <div class="sim-view" id="sim-view-diag" style="display:none;">
+                <div class="diag-header">🧪 CHẨN ĐOÁN DIO & ADC</div>
+                <div class="diag-info-list">
+                  <div>PIN ADC: <strong id="sim-diag-pin">GPIO 3 (ADC1_CH2)</strong></div>
+                  <div>ĐIỆN ÁP: <strong id="sim-diag-volt" style="color:#34d399;">3.30 V</strong></div>
+                  <div>ADC 12-BIT: <strong id="sim-diag-raw" style="color:#fbbf24;">4095</strong></div>
+                  <div>NÚT NHẬN DIỆN: <strong id="sim-diag-btn" style="color:#38bdf8;">KHÔNG BẤM</strong></div>
+                </div>
+              </div>
+            </div>
+
+            <div class="sim-bezel-foot">
+              <div class="sim-foot-status">
+                <span class="mode-tag" id="sim-mode-tag">STANDBY</span>
+                <span class="title-tag" id="sim-title-tag">Màn Hình Chờ</span>
+              </div>
+              <button class="btn-refresh-sim" onclick="window.fetchKeypadStatus()" title="Làm mới tức thì">🔄</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- CỘT PHẢI: DÀN PHÍM ẢO MÔ PHỎNG & BẢNG ĐO ADC -->
+        <div class="keypad-controls-col">
+          <!-- BẢNG LED ĐO ADC THANG ĐIỆN TRỞ -->
+          <div class="adc-matrix-card">
+            <div class="adc-matrix-head">
+              <span>🎛️ BẢNG THÔNG SỐ ĐIỆN TỬ ADC (GPIO 3)</span>
+              <span class="hud-chip">12-BIT RESISTOR LADDER</span>
+            </div>
+            <div class="adc-grid-stats">
+              <div class="adc-cell"><span class="lbl">Nút Vừa Bấm</span><span class="val" id="adc-key-name" style="color:#38bdf8;">KHÔNG BẤM</span></div>
+              <div class="adc-cell"><span class="lbl">Điện Trở (R)</span><span class="val" id="adc-key-res" style="color:#a78bfa;">∞ (Pull-up 10k)</span></div>
+              <div class="adc-cell"><span class="lbl">Điện Áp Đo</span><span class="val" id="adc-key-volt" style="color:#34d399;">3.30 V (3300 mV)</span></div>
+              <div class="adc-cell"><span class="lbl">Mã ADC 12-Bit</span><span class="val" id="adc-key-raw" style="color:#fbbf24;">4095 / 4095</span></div>
+            </div>
+          </div>
+
+          <!-- DÀN PHÍM ẢO MÔ PHỎNG -->
+          <div class="virtual-dpad-box">
+            <!-- HÀNG 1: UP -->
+            <div class="dpad-row">
+              <button class="dpad-btn btn-up" id="vbtn-1" onclick="window.pressKeypadKey(1)">
+                <span class="btn-arrow">▲</span>
+                <span class="btn-text">LÊN (UP)</span>
+                <span class="btn-sub">1.0kΩ | 0.30V</span>
+              </button>
+            </div>
+
+            <!-- HÀNG 2: LEFT - OK - RIGHT -->
+            <div class="dpad-row">
+              <button class="dpad-btn btn-left" id="vbtn-3" onclick="window.pressKeypadKey(3)">
+                <span class="btn-arrow">◄</span>
+                <span class="btn-text">TRÁI (LEFT)</span>
+                <span class="btn-sub">4.7kΩ | 1.05V</span>
+              </button>
+
+              <button class="dpad-btn btn-ok" id="vbtn-0" onclick="window.pressKeypadKey(0)">
+                <span class="btn-center-ring">●</span>
+                <span class="btn-text">OK (GIỮA)</span>
+                <span class="btn-sub">0Ω (GND) | 0.00V</span>
+              </button>
+
+              <button class="dpad-btn btn-right" id="vbtn-4" onclick="window.pressKeypadKey(4)">
+                <span class="btn-arrow">►</span>
+                <span class="btn-text">PHẢI (RIGHT)</span>
+                <span class="btn-sub">10kΩ | 1.65V</span>
+              </button>
+            </div>
+
+            <!-- HÀNG 3: DOWN -->
+            <div class="dpad-row">
+              <button class="dpad-btn btn-down" id="vbtn-2" onclick="window.pressKeypadKey(2)">
+                <span class="btn-arrow">▼</span>
+                <span class="btn-text">XUỐNG (DOWN)</span>
+                <span class="btn-sub">2.2kΩ | 0.60V</span>
+              </button>
+            </div>
+
+            <!-- HÀNG 4: 2 PHÍM CHỨC NĂNG HỆ THỐNG MENU & EXIT -->
+            <div class="function-row">
+              <button class="dpad-btn btn-func btn-menu" id="vbtn-5" onclick="window.pressKeypadKey(5)">
+                <span class="btn-icon">☰</span>
+                <span class="btn-text">MENU (TRÌNH ĐƠN)</span>
+                <span class="btn-sub">20kΩ | 2.18V</span>
+              </button>
+
+              <button class="dpad-btn btn-func btn-exit" id="vbtn-6" onclick="window.pressKeypadKey(6)">
+                <span class="btn-icon">✕</span>
+                <span class="btn-text">EXIT (THOÁT)</span>
+                <span class="btn-sub">47kΩ | 2.65V</span>
+              </button>
+            </div>
+
+            <!-- HÀNG 5: PHÍM CẢM BIẾN CHẠM TTP223 -->
+            <div class="touch-row">
+              <button class="dpad-btn btn-touch" id="vbtn-touch" onclick="window.pressKeypadKey('touch')">
+                <span style="font-size:1.2rem;">👆</span>
+                <span class="btn-text">CHẠM CẢM ỨNG TTP223 (GPIO 20)</span>
+                <span class="btn-sub">Đổi hiệu ứng Edison & Phản hồi xúc giác</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- BẢNG PHÍM TẮT BÀN PHÍM PC -->
+          <div class="keyboard-shortcuts-pill">
+            <span>⌨️ <strong>Phím tắt PC:</strong></span>
+            <kbd>↑</kbd><kbd>↓</kbd><kbd>←</kbd><kbd>→</kbd> / <kbd>W</kbd><kbd>S</kbd><kbd>A</kbd><kbd>D</kbd> Điều hướng
+            • <kbd>Enter</kbd> / <kbd>Space</kbd> OK (Mở tính năng)
+            • <kbd>M</kbd> Menu
+            • <kbd>Esc</kbd> Exit
+            • <kbd>T</kbd> Chạm Touch
+          </div>
+        </div>
+      </div>
+    `;
+    mainContainer.appendChild(sec);
+
+    renderS40Grid(0);
+    window.syncKeypadStandbyTheme();
+  }
+
+  // ĐỒNG BỘ ẢNH NỀN VÀ MÀU SẮC MÀN HÌNH CHỜ VỚI TAB MÀN HÌNH DEMO & THIẾT KẾ VÀ ESP32
+  window.syncKeypadStandbyTheme = async function(liveData) {
+    const simStandby = document.getElementById('sim-view-standby');
+    if (!simStandby) return;
+
+    // 1. Thử copy ảnh nền trực tiếp từ Tab 1 (#screen-standby) nếu đã có
+    const tab1Screen = document.getElementById('screen-standby');
+    if (tab1Screen && tab1Screen.style.backgroundImage && tab1Screen.style.backgroundImage !== 'none') {
+      simStandby.style.backgroundImage = tab1Screen.style.backgroundImage;
+      simStandby.style.backgroundColor = tab1Screen.style.backgroundColor || '#000000';
+    }
+
+    let bgMode = (liveData && liveData.bg_mode) ? liveData.bg_mode : (document.getElementById('cfg-bg-mode')?.value || '');
+    let bgImg = (liveData && liveData.bg_image) ? liveData.bg_image : (window.activeImageName || '');
+    let dimVal = (liveData && liveData.dim_overlay !== undefined) ? liveData.dim_overlay : (parseInt(document.getElementById('cfg-dim')?.value) || 35);
+    let clockColor = (liveData && liveData.clock_color) ? liveData.clock_color : (document.getElementById('cfg-clock-color')?.value || '#38bdf8');
+    let slogan = (liveData && liveData.slogan) ? liveData.slogan : (document.getElementById('cfg-slogan')?.value || 'Trạm Decor Vũ Trụ ✨');
+    let wifiSsid = (liveData && liveData.wifi_ssid) ? liveData.wifi_ssid : '';
+    let wifiConn = (liveData && liveData.wifi_connected !== undefined) ? liveData.wifi_connected : true;
+    let temp = liveData ? liveData.temp : undefined;
+    let hum = liveData ? liveData.humidity : undefined;
+
+    // 2. Nếu chưa có ảnh nền cụ thể, fetch trực tiếp từ /api/screen/standby
+    if (!bgImg && (!tab1Screen || !tab1Screen.style.backgroundImage || tab1Screen.style.backgroundImage === 'none')) {
+      try {
+        const res = await fetch('/api/screen/standby');
+        if (res.ok) {
+          const cfg = await res.json();
+          if (cfg.bg_mode) bgMode = cfg.bg_mode;
+          if (cfg.bg_image) bgImg = cfg.bg_image;
+          if (cfg.dim_overlay !== undefined) dimVal = cfg.dim_overlay;
+          if (cfg.clock_color) clockColor = cfg.clock_color;
+          if (cfg.custom_text) slogan = cfg.custom_text;
+          if (cfg.temp !== undefined) temp = cfg.temp;
+          if (cfg.humidity !== undefined) hum = cfg.humidity;
+        }
+      } catch(e){}
+    }
+
+    // 3. Áp dụng hình nền lên màn hình chờ ảo của Tab Bàn Phím
+    if (bgImg) {
+      const cleanImg = bgImg.replace(/^sd:/, '');
+      const url = (typeof window.resolveWebImgUrl === 'function')
+        ? window.resolveWebImgUrl(cleanImg)
+        : (cleanImg.startsWith('/sd_images/') ? '/api/sd/file?path=' + encodeURIComponent(cleanImg) : cleanImg);
+      simStandby.style.backgroundImage = `url('${url}')`;
+      simStandby.style.backgroundColor = '#000000';
+    } else if (bgMode === 'image' && window.activeImageName) {
+      const url = (typeof window.resolveWebImgUrl === 'function') ? window.resolveWebImgUrl(window.activeImageName) : window.activeImageName;
+      simStandby.style.backgroundImage = `url('${url}')`;
+      simStandby.style.backgroundColor = '#000000';
+    } else if (bgMode === 'gradient-cyber') {
+      simStandby.style.backgroundImage = 'linear-gradient(180deg, #0b132b 0%, #1c2541 50%, #3a0ca3 100%)';
+    } else if (bgMode === 'gradient-nebula') {
+      simStandby.style.backgroundImage = 'linear-gradient(180deg, #2b0938 0%, #0f172a 60%, #1e1b4b 100%)';
+    } else if (bgMode === 'gradient-sunset') {
+      simStandby.style.backgroundImage = 'linear-gradient(180deg, #3d1308 0%, #1e1b4b 70%, #0f172a 100%)';
+    } else if (bgMode === 'solid-black') {
+      simStandby.style.backgroundImage = 'none';
+      simStandby.style.backgroundColor = '#000000';
+    }
+
+    // 4. Lớp phủ làm tối
+    const dimElDom = document.getElementById('sim-standby-dim');
+    if (dimElDom) {
+      dimElDom.style.background = `rgba(0,0,0,${dimVal / 100})`;
+    }
+
+    // 5. Màu chữ đồng hồ
+    const clockEl = document.getElementById('sim-clock');
+    if (clockEl) {
+      clockEl.style.color = clockColor;
+      clockEl.style.textShadow = `0 0 15px ${clockColor}`;
+    }
+
+    // 6. Slogan
+    const sloganDom = document.getElementById('sim-slogan');
+    if (sloganDom) sloganDom.innerText = slogan;
+
+    // 7. Cập nhật viên thuốc WiFi SSID (Top Left)
+    if (wifiSsid) {
+      const ssidEl = document.getElementById('sim-wifi-ssid');
+      if (ssidEl) ssidEl.innerText = wifiSsid;
+    }
+    const dotWifi = document.getElementById('sim-dot-wifi');
+    if (dotWifi) {
+      dotWifi.style.color = wifiConn ? '#10b981' : '#f59e0b';
+      dotWifi.style.filter = wifiConn ? 'drop-shadow(0 0 5px #10b981)' : 'drop-shadow(0 0 5px #f59e0b)';
+    }
+
+    // 8. Cập nhật nhiệt độ & độ ẩm (Weather pill)
+    if (temp !== undefined && hum !== undefined) {
+      const wEl = document.getElementById('sim-weather');
+      if (wEl) wEl.innerText = `🌡️ ${Number(temp).toFixed(1)}°C | 💧 ${hum}%`;
+    }
+  };
+
+  // Đồng hồ chạy thời gian thực từng giây cho màn hình chờ ảo
+  function updateSimClockLive() {
+    const now = new Date();
+    let h = now.getHours();
+    const m = String(now.getMinutes()).padStart(2, '0');
+    const s = String(now.getSeconds()).padStart(2, '0');
+
+    const fmtEl = document.getElementById('cfg-clock-fmt');
+    const is12h = fmtEl && fmtEl.value === '12h';
+    let ampm = '';
+    if (is12h) {
+      ampm = h >= 12 ? ' PM' : ' AM';
+      h = h % 12 || 12;
+    }
+    const hStr = String(h).padStart(2, '0');
+
+    const clkEl = document.getElementById('sim-clock');
+    if (clkEl) {
+      const showSec = !document.getElementById('cfg-show-sec') || document.getElementById('cfg-show-sec').checked;
+      clkEl.innerHTML = `${hStr}:${m}${ampm}<span class="sim-clock-sec" id="sim-sec">${showSec ? ':' + s : ''}</span>`;
+    }
+
+    const dateEl = document.getElementById('sim-date');
+    if (dateEl) {
+      const daysVi = ['Chủ Nhật', 'Thứ Hai', 'Thứ Ba', 'Thứ Tư', 'Thứ Năm', 'Thứ Sáu', 'Thứ Bảy'];
+      const dayName = daysVi[now.getDay()];
+      const d = String(now.getDate()).padStart(2, '0');
+      const mo = String(now.getMonth() + 1).padStart(2, '0');
+      const y = now.getFullYear();
+      dateEl.innerText = `${dayName}, ${d}/${mo}/${y}`;
+    }
+  }
+
+  updateSimClockLive();
+  setInterval(updateSimClockLive, 1000);
+
+  const origUpdateClock_Keypad = window.updateClock;
+  window.updateClock = function() {
+    if (typeof origUpdateClock_Keypad === 'function') origUpdateClock_Keypad();
+    updateSimClockLive();
+  };
+
+  // Hook vào hàm updateLivePreview của Tab 1 để đồng bộ tức thì khi người dùng đổi ảnh nền
+  const origUpdateLivePreview_Keypad = window.updateLivePreview;
+  window.updateLivePreview = function() {
+    if (typeof origUpdateLivePreview_Keypad === 'function') origUpdateLivePreview_Keypad();
+    window.syncKeypadStandbyTheme();
+  };
+
+  function renderS40Grid(curIdx) {
+    const grid = document.getElementById('s40-grid-cells');
+    if (!grid) return;
+    currentS40Cursor = curIdx;
+    grid.innerHTML = '';
+    S40_APP_LIST.forEach((app, idx) => {
+      const cell = document.createElement('div');
+      cell.className = 's40-cell' + (idx === curIdx ? ' selected' : '');
+      cell.innerHTML = `
+        <div class="s40-cell-icon">${app.icon}</div>
+        <div class="s40-cell-name">${app.title}</div>
+      `;
+      // Bấm vào ô: Nếu chưa chọn thì chọn ô đó, nếu đã chọn thì bấm OK (mở app)
+      cell.onclick = () => {
+        if (idx !== currentS40Cursor) {
+          currentS40Cursor = idx;
+          renderS40Grid(idx);
+          // Gửi phím điều hướng xuống ESP32
+          window.pressKeypadKey(idx > curIdx ? 4 : 3, false);
+        } else {
+          window.triggerS40OpenCurrentApp();
+        }
+      };
+      grid.appendChild(cell);
+    });
+    const curLabel = document.getElementById('s40-cur-label');
+    if (curLabel) curLabel.innerText = (curIdx + 1) + '/' + S40_APP_LIST.length;
+    const banner = document.getElementById('s40-desc-banner');
+    if (banner && S40_APP_LIST[curIdx]) banner.innerText = S40_APP_LIST[curIdx].desc;
+  }
+
+  // KHI BẤM OK TRONG MENU S40: GỬI LỆNH XUỐNG ESP32 VÀ TỰ ĐỘNG CHUYỂN THẲNG VÀO TAB CHỨC NĂNG TRÊN WEB!
+  window.triggerS40OpenCurrentApp = function() {
+    const app = S40_APP_LIST[currentS40Cursor];
+    if (!app) return;
+
+    // 1. Gửi lệnh phím OK (key 0) xuống ESP32 để chuyển mode phần cứng thật
+    window.pressKeypadKey(0);
+
+    // 2. Chuyển thẳng sang Tab tương ứng trên Web nếu có
+    if (app.tab && typeof window.switchTab === 'function') {
+      setTimeout(() => {
+        window.switchTab(app.tab);
+        if (typeof showToast === 'function') {
+          showToast(`🚀 Đã mở "${app.title}" trên Web & đồng bộ xuống ESP32!`);
+        }
+      }, 120);
+    }
+  };
+
+  // Âm thanh click phím cơ nhẹ qua Web Audio API
+  function playKeyClickSound() {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+      const ctx = new AudioCtx();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(800, ctx.currentTime);
+      osc.frequency.exponentialRampToValueAtTime(320, ctx.currentTime + 0.035);
+      gain.gain.setValueAtTime(0.18, ctx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.035);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start();
+      osc.stop(ctx.currentTime + 0.04);
+    } catch(e){}
+  }
+
+  const BTN_SPECS_INFO = [
+    { name: "OK (Giữa)",   res: "0 Ohm (GND)",   volt: "0.00 V (0 mV)",     raw: "0 / 4095" },
+    { name: "UP (Lên)",    res: "1.0 kOhm",      volt: "0.30 V (300 mV)",   raw: "372 / 4095" },
+    { name: "DOWN (Xuống)",res: "2.2 kOhm",      volt: "0.60 V (600 mV)",   raw: "744 / 4095" },
+    { name: "LEFT (Trái)", res: "4.7 kOhm",      volt: "1.05 V (1050 mV)",  raw: "1303 / 4095" },
+    { name: "RIGHT (Phải)",res: "10 kOhm",       volt: "1.65 V (1650 mV)",  raw: "2048 / 4095" },
+    { name: "MENU",        res: "20 kOhm",       volt: "2.18 V (2180 mV)",  raw: "2705 / 4095" },
+    { name: "EXIT",        res: "47 kOhm",       volt: "2.65 V (2650 mV)",  raw: "3288 / 4095" }
+  ];
+
+  window.pressKeypadKey = async function(key, allowAppOpen = true) {
+    playKeyClickSound();
+
+    // Hiệu ứng nhấp nhả nút ảo trên giao diện
+    const btnId = (key === 'touch') ? 'vbtn-touch' : ('vbtn-' + key);
+    const btnEl = document.getElementById(btnId);
+    if (btnEl) {
+      btnEl.classList.add('pressed');
+      setTimeout(() => btnEl.classList.remove('pressed'), 120);
+    }
+
+    const led = document.getElementById('sim-live-led');
+    if (led) {
+      led.classList.add('blink');
+      setTimeout(() => led.classList.remove('blink'), 150);
+    }
+
+    // Cập nhật ngay thông số ADC trên bảng
+    if (typeof key === 'number' && BTN_SPECS_INFO[key]) {
+      const s = BTN_SPECS_INFO[key];
+      const knEl = document.getElementById('adc-key-name');
+      const krEl = document.getElementById('adc-key-res');
+      const kvEl = document.getElementById('adc-key-volt');
+      const kwEl = document.getElementById('adc-key-raw');
+      if (knEl) knEl.innerText = s.name;
+      if (krEl) krEl.innerText = s.res;
+      if (kvEl) kvEl.innerText = s.volt;
+      if (kwEl) kwEl.innerText = s.raw;
+    } else if (key === 'touch') {
+      const knEl = document.getElementById('adc-key-name');
+      const krEl = document.getElementById('adc-key-res');
+      const kvEl = document.getElementById('adc-key-volt');
+      if (knEl) knEl.innerText = "CHẠM TTP223 (GPIO 20)";
+      if (krEl) krEl.innerText = "Cảm ứng điện dung";
+      if (kvEl) kvEl.innerText = "Active HIGH (3.3V)";
+    }
+
+    // Nếu đang ở Menu S40 và bấm phím OK: Mở thẳng Tab Web tương ứng
+    const s40View = document.getElementById('sim-view-s40');
+    if (key === 0 && allowAppOpen && s40View && s40View.style.display !== 'none') {
+      const app = S40_APP_LIST[currentS40Cursor];
+      if (app && app.tab && typeof window.switchTab === 'function') {
+        setTimeout(() => {
+          window.switchTab(app.tab);
+          if (typeof showToast === 'function') {
+            showToast(`🚀 Đã mở "${app.title}" trên Web & đồng bộ xuống ESP32!`);
+          }
+        }, 120);
+      }
+    }
+
+    try {
+      const res = await fetch('/api/keypad/press', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ key: key })
+      });
+      const data = await res.json();
+      if (data && data.success) {
+        updateSimScreenFromData(data);
+      }
+    } catch(e) {
+      console.warn("Lỗi gửi phím bấm ảo:", e);
+    }
+  };
+
+  function updateSimScreenFromData(d) {
+    if (!d) return;
+
+    // 1. Cập nhật thẻ trạng thái footer
+    const modeTag = document.getElementById('sim-mode-tag');
+    const titleTag = document.getElementById('sim-title-tag');
+    if (modeTag) modeTag.innerText = (d.screen_mode || 'STANDBY').toUpperCase();
+    if (titleTag) titleTag.innerText = d.screen_title || 'Màn hình ESP32';
+
+    // 2. Chuyển đổi View theo mode_id
+    const views = ['standby', 's40', 'pchud', 'xiaozhi', 'media', 'diag'];
+    views.forEach(v => {
+      const el = document.getElementById('sim-view-' + v);
+      if (el) el.style.display = 'none';
+    });
+
+    const mId = (typeof d.current_mode_id === 'number') ? d.current_mode_id : 0;
+    if (mId === 4) {
+      // S40 Menu
+      const el = document.getElementById('sim-view-s40');
+      if (el) el.style.display = 'flex';
+      renderS40Grid(d.menu_cursor || 0);
+    } else if (mId === 2) {
+      // PC HUD
+      const el = document.getElementById('sim-view-pchud');
+      if (el) el.style.display = 'flex';
+    } else if (mId === 1 || mId === 11) {
+      // XiaoZhi
+      const el = document.getElementById('sim-view-xiaozhi');
+      if (el) el.style.display = 'flex';
+      const sub = document.getElementById('sim-sub-content');
+      if (sub && d.subtitle) sub.innerText = d.subtitle;
+    } else if (mId === 12) {
+      // Media Player
+      const el = document.getElementById('sim-view-media');
+      if (el) el.style.display = 'flex';
+    } else if (mId === 3 || mId === 9) {
+      // Diag
+      const el = document.getElementById('sim-view-diag');
+      if (el) el.style.display = 'flex';
+    } else {
+      // Standby (Mặc định)
+      const el = document.getElementById('sim-view-standby');
+      if (el) el.style.display = 'flex';
+      if (d.battery_v) {
+        const pt = document.getElementById('sim-power-tag');
+        if (pt) pt.innerText = (d.is_charging ? '⚡ SẠC: ' : '🔋 PIN: ') + d.battery_v.toFixed(2) + 'V (' + (d.battery_pct || 0) + '%)';
+      }
+      window.syncKeypadStandbyTheme(d);
+    }
+  }
+
+  window.fetchKeypadStatus = async function() {
+    try {
+      const res = await fetch('/api/keypad/status');
+      const data = await res.json();
+      if (data) {
+        updateSimScreenFromData(data);
+        if (data.adc_mv !== undefined) {
+          const kvEl = document.getElementById('adc-key-volt');
+          const kwEl = document.getElementById('adc-key-raw');
+          if (kvEl && data.adc_voltage) kvEl.innerText = data.adc_voltage.toFixed(2) + ' V (' + data.adc_mv + ' mV)';
+          if (kwEl && data.adc_raw) kwEl.innerText = data.adc_raw + ' / 4095';
+        }
+      }
+    } catch(e){}
+  };
+
+  // Lắng nghe bàn phím PC
+  window.addEventListener('keydown', (e) => {
+    // Chỉ kích hoạt khi đang không gõ chữ vào input/textarea
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
+
+    if (e.key === 'ArrowUp' || e.code === 'KeyW') {
+      e.preventDefault(); window.pressKeypadKey(1);
+    } else if (e.key === 'ArrowDown' || e.code === 'KeyS') {
+      e.preventDefault(); window.pressKeypadKey(2);
+    } else if (e.key === 'ArrowLeft' || e.code === 'KeyA') {
+      e.preventDefault(); window.pressKeypadKey(3);
+    } else if (e.key === 'ArrowRight' || e.code === 'KeyD') {
+      e.preventDefault(); window.pressKeypadKey(4);
+    } else if (e.key === 'Enter' || e.code === 'Space') {
+      e.preventDefault(); window.pressKeypadKey(0);
+    } else if (e.key === 'm' || e.key === 'M') {
+      e.preventDefault(); window.pressKeypadKey(5);
+    } else if (e.key === 'Escape' || e.key === 'Backspace') {
+      e.preventDefault(); window.pressKeypadKey(6);
+    } else if (e.key === 't' || e.key === 'T') {
+      e.preventDefault(); window.pressKeypadKey('touch');
+    }
+  });
+
+  // Hook vào switchTab của hệ thống
+  const origSwitchTab_Keypad = window.switchTab;
+  window.switchTab = function(tabId) {
+    injectKeypadTabAndPage();
+    if (tabId === 'keypad') {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      const sec = document.getElementById('tab-keypad');
+      const btn = document.getElementById('tab-btn-keypad');
+      if (sec) sec.classList.add('active');
+      if (btn) {
+        btn.classList.add('active');
+        btn.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+      }
+      window.fetchKeypadStatus();
+      window.syncKeypadStandbyTheme();
+      return;
+    }
+    const sec = document.getElementById('tab-keypad');
+    const btn = document.getElementById('tab-btn-keypad');
+    if (sec) sec.classList.remove('active');
+    if (btn) btn.classList.remove('active');
+
+    if (typeof origSwitchTab_Keypad === 'function') origSwitchTab_Keypad(tabId);
+  };
+
+  setTimeout(() => {
+    injectKeypadTabAndPage();
+    window.fetchKeypadStatus();
+    window.syncKeypadStandbyTheme();
+    setInterval(() => {
+      const sec = document.getElementById('tab-keypad');
+      if (sec && sec.classList.contains('active')) {
+        window.fetchKeypadStatus();
+      }
+    }, 450);
+  }, 400);
+})();
+</script>
+)rawliteral";
+
 static void handleRoot() {
   if (LittleFS.exists("/index.html")) {
     File file = LittleFS.open("/index.html", "r");
@@ -1550,6 +4974,10 @@ static void handleRoot() {
     file.close();
     server.sendContent_P(SD_CONVERTER_INJECT_SCRIPT);
     server.sendContent_P(MEDIA_PAGE_INJECT_SCRIPT);
+    server.sendContent_P(XIAOZHI_CHAT_INJECT_SCRIPT);
+    server.sendContent_P(STREAM_PAGE_INJECT_SCRIPT);
+    server.sendContent_P(DECOR_PAGE_INJECT_SCRIPT);
+    server.sendContent_P(KEYPAD_PAGE_INJECT_SCRIPT);
     server.sendContent("");
   } else {
     server.send(404, "text/plain", "Chưa tìm thấy index.html trên LittleFS!");
@@ -1622,9 +5050,6 @@ static void handleWifiConnect() {
 
   bool ok = WifiManager::connectDirect(ssid, pass, save);
   if (ok) {
-    // Tự động kiểm tra OTA khi kết nối thành công
-    XiaoZhiClient::queryOTA(true);
-
     JsonDocument resDoc;
     resDoc["status"] = "ok";
     resDoc["connected"] = true;
@@ -1667,6 +5092,21 @@ static void handleSystemStatus() {
   doc["humidity_pct"] = (int)roundf(TestSensors::getHumidityPct());
   doc["touch_pressed"] = TestSensors::isTouchPressed();
   doc["last_button"] = TestButtons::getLastButtonName();
+  doc["battery_v"] = serialized(String(TestSensors::getBatteryVoltage(), 2));
+  doc["battery_mv"] = TestSensors::getBatteryMilliVolts();
+  doc["battery_pct"] = TestSensors::getBatteryPercentage();
+  doc["is_charging"] = TestSensors::isCharging();
+  doc["edison_l_mode"] = TestWindmill::getEdisonLeftMode();
+  doc["edison_l_name"] = TestWindmill::getEdisonLeftModeName();
+  doc["edison_l_pct"] = TestWindmill::getEdisonLeftBrightness();
+  doc["edison_r_mode"] = TestWindmill::getEdisonRightMode();
+  doc["edison_r_name"] = TestWindmill::getEdisonRightModeName();
+  doc["edison_r_pct"] = TestWindmill::getEdisonRightBrightness();
+  doc["windmill_mode"] = TestWindmill::getMode();
+  doc["windmill_name"] = TestWindmill::getModeName();
+  doc["windmill_speed"] = TestWindmill::getMotorSpeed();
+  doc["flowing_leds_on"] = CobLeds::isOn();
+  doc["flowing_leds_mode"] = CobLeds::getModeName();
   doc["xiaozhi_bound"] = XiaoZhiClient::isDeviceBound();
   doc["xiaozhi_ws_connected"] = XiaoZhiClient::isWebSocketConnected();
 
@@ -1844,6 +5284,255 @@ static void handleScreenStatePost() {
   server.send(200, "application/json", "{\"status\":\"ok\"}");
 }
 
+// ---------------- REST APIS ĐIỀU KHIỂN HIỆU ỨNG DECOR & NGUỒN PIN ----------------
+
+static void handleDecorStatus() {
+  JsonDocument doc;
+
+  // 1. Cụm Edison Trái & Phải
+  JsonObject edL = doc["edison_left"].to<JsonObject>();
+  edL["pin"] = PIN_EDISON_TUBE_L;
+  edL["mode"] = TestWindmill::getEdisonLeftMode();
+  edL["mode_name"] = TestWindmill::getEdisonLeftModeName();
+  edL["brightness"] = TestWindmill::getEdisonLeftBrightness();
+
+  JsonObject edR = doc["edison_right"].to<JsonObject>();
+  edR["pin"] = PIN_EDISON_TUBE_R;
+  edR["mode"] = TestWindmill::getEdisonRightMode();
+  edR["mode_name"] = TestWindmill::getEdisonRightModeName();
+  edR["brightness"] = TestWindmill::getEdisonRightBrightness();
+
+  JsonArray modesArr = doc["edison_modes"].to<JsonArray>();
+  uint8_t totalModes = TestWindmill::getEdisonModeCount();
+  for (uint8_t i = 0; i < totalModes; i++) {
+    modesArr.add(TestWindmill::getEdisonModeNameByIdx(i));
+  }
+
+  // 2. Cối xay gió L298N
+  JsonObject wm = doc["windmill"].to<JsonObject>();
+  wm["pin"] = PIN_L298N_IN1_MOTOR;
+  wm["mode"] = TestWindmill::getMode();
+  wm["mode_name"] = TestWindmill::getModeName();
+  wm["speed"] = TestWindmill::getMotorSpeed();
+  wm["breathing"] = TestWindmill::isBreathing();
+
+  // 3. LED Nước Chảy COB Mặt Lưng
+  JsonObject fl = doc["flowing_leds"].to<JsonObject>();
+  fl["pin_left"] = PIN_FLOWING_LED_L;
+  fl["pin_right"] = PIN_FLOWING_LED_R;
+  fl["is_on"] = CobLeds::isOn();
+  fl["mode"] = CobLeds::getCurrentMode();
+  fl["mode_name"] = CobLeds::getModeName();
+
+  // 4. Pin 18650 & Bo Sạc MH-CD42
+  JsonObject bat = doc["battery"].to<JsonObject>();
+  bat["pin"] = PIN_BAT_ADC;
+  bat["adc_channel"] = "ADC1_CH1";
+  bat["voltage"] = serialized(String(TestSensors::getBatteryVoltage(), 2));
+  bat["millivolts"] = TestSensors::getBatteryMilliVolts();
+  bat["percent"] = TestSensors::getBatteryPercentage();
+  bat["charging_pin"] = PIN_CHG_STAT;
+  bat["is_charging"] = TestSensors::isCharging();
+  bat["charging_source"] = TestSensors::isCharging() ? "Vin MH-CD42 (HIGH - Đang Sạc)" : "Pin Lithium 18650 (Vin LOW)";
+
+  // 5. Cảm biến chạm TTP223
+  JsonObject tch = doc["touch"].to<JsonObject>();
+  tch["pin"] = PIN_TOUCH_TTP223;
+  tch["pressed"] = TestSensors::isTouchPressed();
+
+  String res;
+  serializeJson(doc, res);
+  server.send(200, "application/json", res);
+}
+
+static void handleDecorControl() {
+  String target = "";
+  int mode = -1;
+  int brightness = -1;
+  int speed = -1;
+  String preset = "";
+  String action = "";
+
+  if (server.hasArg("plain")) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (!err) {
+      if (doc["target"].is<const char*>()) target = doc["target"].as<String>();
+      if (doc["mode"].is<int>()) mode = doc["mode"].as<int>();
+      if (doc["brightness"].is<int>()) brightness = doc["brightness"].as<int>();
+      if (doc["speed"].is<int>()) speed = doc["speed"].as<int>();
+      if (doc["preset"].is<const char*>()) preset = doc["preset"].as<String>();
+      if (doc["action"].is<const char*>()) action = doc["action"].as<String>();
+    }
+  }
+
+  if (server.hasArg("target")) target = server.arg("target");
+  if (server.hasArg("mode")) mode = server.arg("mode").toInt();
+  if (server.hasArg("brightness")) brightness = server.arg("brightness").toInt();
+  if (server.hasArg("speed")) speed = server.arg("speed").toInt();
+  if (server.hasArg("preset")) preset = server.arg("preset");
+  if (server.hasArg("action")) action = server.arg("action");
+
+  if (preset.length() > 0) {
+    TestWindmill::applyEffectPreset(preset);
+  } else if (target == "edison_left") {
+    if (brightness >= 0) TestWindmill::setEdisonLeftBrightness((uint8_t)brightness);
+    if (mode >= 0) TestWindmill::setEdisonLeftMode((uint8_t)mode);
+  } else if (target == "edison_right") {
+    if (brightness >= 0) TestWindmill::setEdisonRightBrightness((uint8_t)brightness);
+    if (mode >= 0) TestWindmill::setEdisonRightMode((uint8_t)mode);
+  } else if (target == "edison_both" || target == "edison") {
+    if (brightness >= 0) TestWindmill::setEdisonBrightness((uint8_t)brightness);
+    if (mode >= 0) TestWindmill::setEdisonBothMode((uint8_t)mode);
+  } else if (target == "windmill") {
+    if (speed >= 0) TestWindmill::setMotorSpeed((uint8_t)speed);
+    if (mode >= 0) TestWindmill::setMode((uint8_t)mode);
+  } else if (target == "flowing") {
+    if (action == "on") CobLeds::turnOn();
+    else if (action == "off") CobLeds::turnOff();
+    else if (action == "next_mode") CobLeds::nextMode();
+    else CobLeds::togglePower();
+    TestWindmill::setFlowingLeds(CobLeds::isOn());
+  }
+
+  handleDecorStatus();
+}
+
+// ---------------- REST APIS ĐIỀU KHIỂN BÀN PHÍM ẢO SIMULATOR ----------------
+
+static void handleKeypadPress() {
+  int keyIdx = -1;
+  String keyStr = "";
+
+  if (server.hasArg("plain")) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (!err) {
+      if (doc["key"].is<int>()) {
+        keyIdx = doc["key"].as<int>();
+      } else if (doc["key"].is<const char*>()) {
+        keyStr = doc["key"].as<String>();
+      }
+    }
+  }
+
+  if (server.hasArg("key")) {
+    String argKey = server.arg("key");
+    if (argKey.length() == 1 && argKey[0] >= '0' && argKey[0] <= '6') {
+      keyIdx = argKey.toInt();
+    } else {
+      keyStr = argKey;
+    }
+  }
+
+  if (keyStr.length() > 0) {
+    keyStr.toLowerCase();
+    if (keyStr == "ok" || keyStr == "center") keyIdx = 0;
+    else if (keyStr == "up") keyIdx = 1;
+    else if (keyStr == "down" || keyStr == "dn") keyIdx = 2;
+    else if (keyStr == "left" || keyStr == "lf") keyIdx = 3;
+    else if (keyStr == "right" || keyStr == "rt") keyIdx = 4;
+    else if (keyStr == "menu" || keyStr == "mn") keyIdx = 5;
+    else if (keyStr == "exit" || keyStr == "ex" || keyStr == "back") keyIdx = 6;
+    else if (keyStr == "touch") {
+      // Giả lập chạm cảm biến TTP223 (đổi hiệu ứng bóng đèn Edison hoặc đánh thức màn hình)
+      TestWindmill::setEdisonBothMode((TestWindmill::getEdisonLeftMode() + 1) % 11);
+      JsonDocument res;
+      res["success"] = true;
+      res["action"] = "touch";
+      res["touch_pressed"] = true;
+      res["edison_mode"] = TestWindmill::getEdisonLeftMode();
+      res["edison_mode_name"] = TestWindmill::getEdisonLeftModeName();
+      res["screen_mode"] = TestDisplay::getScreenModeName();
+      res["current_mode_id"] = TestDisplay::getCurrentMode();
+      res["screen_title"] = TestDisplay::getCurrentScreenTitle();
+      String out;
+      serializeJson(res, out);
+      server.send(200, "application/json", out);
+      return;
+    }
+  }
+
+  if (keyIdx >= 0 && keyIdx <= 6) {
+    TestButtons::injectButtonPress(keyIdx);
+  }
+
+  JsonDocument res;
+  res["success"] = (keyIdx >= 0 && keyIdx <= 6);
+  res["key_index"] = keyIdx;
+  res["key_name"] = TestButtons::getLastButtonName();
+  res["adc_mv"] = TestButtons::getLastAdcMilliVolts();
+  res["adc_voltage"] = TestButtons::getLastAdcVoltage();
+  res["adc_raw"] = TestButtons::getLastAdcRaw();
+  res["screen_mode"] = TestDisplay::getScreenModeName();
+  res["current_mode_id"] = TestDisplay::getCurrentMode();
+  res["menu_cursor"] = TestDisplay::getS40MenuCursor();
+  res["screen_title"] = TestDisplay::getCurrentScreenTitle();
+  res["subtitle"] = TestDisplay::getSubtitle();
+  res["hud_style"] = TestDisplay::getHudStyleName();
+  res["battery_v"] = TestSensors::getBatteryVoltage();
+  res["battery_pct"] = TestSensors::getBatteryPercentage();
+  res["is_charging"] = TestSensors::isCharging();
+  res["bg_image"] = TestDisplay::getStandbyBgImage();
+  res["bg_mode"] = TestDisplay::getStandbyBgMode();
+  res["dim_overlay"] = TestDisplay::getStandbyDimOverlay();
+  res["clock_color"] = TestDisplay::getStandbyClockColor();
+  res["slogan"] = TestDisplay::getStandbyCustomText();
+  res["temp"] = TestDisplay::getStandbyTemp();
+  res["humidity"] = TestDisplay::getStandbyHumidity();
+  bool isWifiConn1 = (WiFi.status() == WL_CONNECTED);
+  res["wifi_connected"] = isWifiConn1;
+  if (isWifiConn1) {
+    String s = WifiManager::getCurrentSsid();
+    if (s.length() > 8) s = s.substring(0, 8);
+    res["wifi_ssid"] = (s.length() > 0) ? s : "STA";
+  } else {
+    res["wifi_ssid"] = "AP MODE";
+  }
+
+  String out;
+  serializeJson(res, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleKeypadStatus() {
+  JsonDocument res;
+  res["active_btn_idx"] = TestButtons::getActiveButtonIndex();
+  res["last_button_str"] = TestButtons::getLastButtonName();
+  res["adc_voltage"] = TestButtons::getLastAdcVoltage();
+  res["adc_mv"] = TestButtons::getLastAdcMilliVolts();
+  res["adc_raw"] = TestButtons::getLastAdcRaw();
+  res["screen_mode"] = TestDisplay::getScreenModeName();
+  res["current_mode_id"] = TestDisplay::getCurrentMode();
+  res["menu_cursor"] = TestDisplay::getS40MenuCursor();
+  res["screen_title"] = TestDisplay::getCurrentScreenTitle();
+  res["subtitle"] = TestDisplay::getSubtitle();
+  res["hud_style"] = TestDisplay::getHudStyleName();
+  res["battery_v"] = TestSensors::getBatteryVoltage();
+  res["battery_pct"] = TestSensors::getBatteryPercentage();
+  res["is_charging"] = TestSensors::isCharging();
+  res["bg_image"] = TestDisplay::getStandbyBgImage();
+  res["bg_mode"] = TestDisplay::getStandbyBgMode();
+  res["dim_overlay"] = TestDisplay::getStandbyDimOverlay();
+  res["clock_color"] = TestDisplay::getStandbyClockColor();
+  res["slogan"] = TestDisplay::getStandbyCustomText();
+  res["temp"] = TestDisplay::getStandbyTemp();
+  res["humidity"] = TestDisplay::getStandbyHumidity();
+  bool isWifiConn2 = (WiFi.status() == WL_CONNECTED);
+  res["wifi_connected"] = isWifiConn2;
+  if (isWifiConn2) {
+    String s = WifiManager::getCurrentSsid();
+    if (s.length() > 8) s = s.substring(0, 8);
+    res["wifi_ssid"] = (s.length() > 0) ? s : "STA";
+  } else {
+    res["wifi_ssid"] = "AP MODE";
+  }
+
+  String out;
+  serializeJson(res, out);
+  server.send(200, "application/json", out);
+}
+
 // ---------------- REST APIS CẤU HÌNH XIAOZHI AI ----------------
 
 static void handleGetAIConfig() {
@@ -1893,6 +5582,87 @@ static void handleXiaoZhiUnbind() {
   String out;
   serializeJson(res, out);
   server.send(200, "application/json", out);
+}
+
+static void handleXiaoZhiChatStatus() {
+  String stateStr = "idle";
+  String userText = "";
+  String aiReply = "";
+  String emotion = "happy";
+  uint8_t eyeState = 0;
+  int vol = 80;
+  int mic = 0;
+  uint32_t turnId = 0;
+
+  TestDisplay::getXiaoZhiChatState(stateStr, userText, aiReply, emotion, eyeState, vol, mic, turnId);
+
+  JsonDocument doc;
+  doc["state"] = stateStr;
+  doc["user_text"] = userText;
+  doc["ai_reply"] = aiReply;
+  doc["emotion"] = emotion;
+  doc["eye_state"] = eyeState;
+  doc["volume_pct"] = vol;
+  doc["mic_level"] = mic;
+  doc["turn_id"] = turnId;
+  doc["bound"] = XiaoZhiClient::isDeviceBound();
+  doc["ws_connected"] = XiaoZhiClient::isWebSocketConnected();
+  doc["mac"] = WiFi.macAddress();
+  doc["otp"] = XiaoZhiClient::getLastAuthCode();
+
+  String response;
+  serializeJson(doc, response);
+  server.send(200, "application/json", response);
+}
+
+static void handleXiaoZhiAction() {
+  String action = server.hasArg("action") ? server.arg("action") : "";
+  int volume = -1;
+
+  if (server.hasArg("plain")) {
+    JsonDocument doc;
+    deserializeJson(doc, server.arg("plain"));
+    if (doc["action"].is<const char*>()) action = doc["action"].as<String>();
+    if (doc["volume"].is<int>()) volume = doc["volume"].as<int>();
+  }
+
+  if (action == "listen" || action == "toggle_listen") {
+    TestDisplay::triggerXiaoZhiListeningFromWeb();
+  } else if (action == "stop" || action == "send") {
+    TestDisplay::stopXiaoZhiListeningFromWeb();
+  } else if (action == "volume" || action == "set_volume") {
+    if (volume >= 0 && volume <= 100) {
+      TestAudio::setXiaoZhiVolumePct(volume);
+    }
+  }
+
+  handleXiaoZhiChatStatus();
+}
+
+static void handleLittleFsUpload() {
+  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Uploaded to LittleFS\"}");
+}
+
+static void handleLittleFsUploadChunk() {
+  HTTPUpload& upload = server.upload();
+  static File f;
+  if (upload.status == UPLOAD_FILE_START) {
+    String filename = upload.filename;
+    if (!filename.startsWith("/")) filename = "/" + filename;
+    Serial.printf("📁 [LITTLEFS UPLOAD] Bắt đầu ghi file: %s\n", filename.c_str());
+    if (LittleFS.exists(filename)) LittleFS.remove(filename);
+    f = LittleFS.open(filename, FILE_WRITE);
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (f) f.write(upload.buf, upload.currentSize);
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (f) {
+      f.close();
+      Serial.printf("✅ [LITTLEFS UPLOAD] Ghi hoàn tất: %u bytes\n", upload.totalSize);
+    }
+  } else if (upload.status == UPLOAD_FILE_ABORTED) {
+    if (f) f.close();
+    Serial.println("⚠️ [LITTLEFS UPLOAD] Hủy tải lên LittleFS");
+  }
 }
 
 // ---------------- REST APIS THÔNG SỐ PC HUD ----------------
@@ -2215,6 +5985,147 @@ static void handleMediaStream() {
   server.send(404, "text/plain", "Music file not found on SD");
 }
 
+// ---------------- REST APIS STREAM ĐA PHƯƠNG TIỆN (VIDEO & AUDIO) ----------------
+
+static uint8_t* s_streamJpegUploadBuf = nullptr;
+static size_t s_streamJpegUploadLen = 0;
+static const size_t MAX_STREAM_JPEG_UPLOAD = 64 * 1024;
+static uint32_t s_logVideoFrameCount = 0;
+static uint32_t s_logAudioPcmChunks = 0;
+
+static void handleStreamVideoUpload() {
+  HTTPUpload& upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    if (!s_streamJpegUploadBuf) {
+      if (psramFound()) s_streamJpegUploadBuf = (uint8_t*)ps_malloc(MAX_STREAM_JPEG_UPLOAD);
+      if (!s_streamJpegUploadBuf) s_streamJpegUploadBuf = (uint8_t*)malloc(MAX_STREAM_JPEG_UPLOAD);
+    }
+    s_streamJpegUploadLen = 0;
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (s_streamJpegUploadBuf && s_streamJpegUploadLen + upload.currentSize <= MAX_STREAM_JPEG_UPLOAD) {
+      memcpy(s_streamJpegUploadBuf + s_streamJpegUploadLen, upload.buf, upload.currentSize);
+      s_streamJpegUploadLen += upload.currentSize;
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    if (s_streamJpegUploadBuf && s_streamJpegUploadLen > 100) {
+      s_logVideoFrameCount++;
+      if (s_logVideoFrameCount == 1) {
+        Serial.printf("🎬 [STREAM VIDEO] Bắt đầu nhận frame JPEG (%u bytes)\n", (unsigned)s_streamJpegUploadLen);
+      } else if (s_logVideoFrameCount % 30 == 0) {
+        Serial.printf("🎬 [STREAM VIDEO] Đang hiển thị mượt mà: frame #%u (%u bytes)\n",
+                      (unsigned)s_logVideoFrameCount, (unsigned)s_streamJpegUploadLen);
+      }
+      WebStreamManager::queueVideoFrame(s_streamJpegUploadBuf, s_streamJpegUploadLen);
+    }
+  }
+}
+
+static void handleStreamVideoFinish() {
+  if (server.hasArg("plain")) {
+    const String& body = server.arg("plain");
+    if (body.length() > 100) {
+      s_logVideoFrameCount++;
+      if (s_logVideoFrameCount == 1 || s_logVideoFrameCount % 30 == 0) {
+        Serial.printf("🎬 [STREAM VIDEO (RAW)] Frame #%u (%u bytes)\n", (unsigned)s_logVideoFrameCount, (unsigned)body.length());
+      }
+      WebStreamManager::queueVideoFrame((const uint8_t*)body.c_str(), body.length());
+    }
+  }
+  server.send(200, "text/plain", "1");
+}
+
+static int16_t s_audioCarryByte = -1;
+
+static void handleStreamAudioUpload() {
+  HTTPUpload& upload = server.upload();
+  if (upload.status == UPLOAD_FILE_START) {
+    s_audioCarryByte = -1;
+  } else if (upload.status == UPLOAD_FILE_WRITE) {
+    if (upload.currentSize == 0) return;
+
+    const uint8_t* p = upload.buf;
+    size_t len = upload.currentSize;
+    static int16_t s_alignedBuf[1024];
+    size_t samplesInBuf = 0;
+
+    // 1. Nếu gói trước bị lẻ 1 byte, ghép với byte đầu tiên của gói này tạo thành sample 16-bit
+    if (s_audioCarryByte >= 0 && len > 0) {
+      int16_t sample = (int16_t)(((uint16_t)(*p) << 8) | (uint8_t)s_audioCarryByte);
+      s_alignedBuf[samplesInBuf++] = sample;
+      p++;
+      len--;
+      s_audioCarryByte = -1;
+    }
+
+    // 2. Chuyển đổi các cặp byte 16-bit an toàn
+    size_t pairs = len / 2;
+    for (size_t i = 0; i < pairs; i++) {
+      int16_t sample = (int16_t)((uint16_t)p[0] | ((uint16_t)p[1] << 8));
+      p += 2;
+      s_alignedBuf[samplesInBuf++] = sample;
+      if (samplesInBuf >= 1024) {
+        s_logAudioPcmChunks++;
+        if (s_logAudioPcmChunks == 1 || s_logAudioPcmChunks % 50 == 0) {
+          Serial.printf("🎵 [STREAM AUDIO] Đang nạp PCM 16kHz vào RingBuffer (Chunk #%u, %u mẫu)\n",
+                        (unsigned)s_logAudioPcmChunks, (unsigned)samplesInBuf);
+        }
+        WebStreamManager::playAudioPcmChunk(s_alignedBuf, samplesInBuf);
+        samplesInBuf = 0;
+      }
+    }
+
+    if (samplesInBuf > 0) {
+      s_logAudioPcmChunks++;
+      if (s_logAudioPcmChunks == 1 || s_logAudioPcmChunks % 50 == 0) {
+        Serial.printf("🎵 [STREAM AUDIO] Đang nạp PCM 16kHz vào RingBuffer (Chunk #%u, %u mẫu)\n",
+                      (unsigned)s_logAudioPcmChunks, (unsigned)samplesInBuf);
+      }
+      WebStreamManager::playAudioPcmChunk(s_alignedBuf, samplesInBuf);
+      samplesInBuf = 0;
+    }
+
+    // 3. Nếu còn thừa 1 byte lẻ ở cuối gói, lưu lại cho gói tiếp theo
+    if (len % 2 != 0) {
+      s_audioCarryByte = *p;
+    }
+  } else if (upload.status == UPLOAD_FILE_END) {
+    s_audioCarryByte = -1;
+  }
+}
+
+static void handleStreamAudioFinish() {
+  server.send(200, "text/plain", "1");
+}
+
+static void handleStreamStartUrl() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"error\":\"Missing body\"}");
+    return;
+  }
+  JsonDocument doc;
+  deserializeJson(doc, server.arg("plain"));
+  String type = doc["type"] | "audio";
+  String url = doc["url"] | "";
+  bool ok = WebStreamManager::startUrlStream(type, url);
+  server.send(ok ? 200 : 500, "application/json", ok ? "{\"status\":\"ok\"}" : "{\"error\":\"Failed to start URL stream\"}");
+}
+
+static void handleStreamStop() {
+  Serial.println("🛑 [STREAM] Đã nhận lệnh dừng toàn bộ luồng stream từ Web / Transcoder!");
+  s_logVideoFrameCount = 0;
+  s_logAudioPcmChunks = 0;
+  WebStreamManager::stopAll();
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+static void handleStreamStatus() {
+  JsonDocument doc;
+  WebStreamManager::getStatusJson(doc);
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
 // ================================================================
 //                     KHỞI CHẠY WEB SERVER & ROUTES
 // ================================================================
@@ -2229,6 +6140,11 @@ void WebRoutes::begin() {
   server.on("/api/wifi/connect", HTTP_POST, handleWifiConnect);
   server.on("/api/wifi/delete", HTTP_POST, handleDeleteSavedWifi);
   server.on("/api/system/status", HTTP_GET, handleSystemStatus);
+  server.on("/api/status", HTTP_GET, handleSystemStatus);
+  server.on("/api/decor/status", HTTP_GET, handleDecorStatus);
+  server.on("/api/decor/control", HTTP_POST, handleDecorControl);
+  server.on("/api/keypad/press", HTTP_POST, handleKeypadPress);
+  server.on("/api/keypad/status", HTTP_GET, handleKeypadStatus);
 
   // 3. Các REST API Quản Lý Ảnh (Hỗ trợ cả Thẻ nhớ SD /sd_images + /sd_rgb565 và LittleFS)
   server.on("/api/images", HTTP_GET, handleListImages);
@@ -2290,6 +6206,9 @@ void WebRoutes::begin() {
   server.on("/api/xiaozhi/ota", HTTP_POST, handleXiaoZhiOTA);
   server.on("/api/xiaozhi/unbind", HTTP_GET, handleXiaoZhiUnbind);
   server.on("/api/xiaozhi/unbind", HTTP_POST, handleXiaoZhiUnbind);
+  server.on("/api/xiaozhi/chat_status", HTTP_GET, handleXiaoZhiChatStatus);
+  server.on("/api/xiaozhi/action", HTTP_POST, handleXiaoZhiAction);
+  server.on("/api/littlefs/upload", HTTP_POST, handleLittleFsUpload, handleLittleFsUploadChunk);
 
   // 6. Các REST API Thông số PC (PC Status HUD)
   server.on("/api/pc/metrics", HTTP_GET, handlePcMetricsGet);
@@ -2325,9 +6244,16 @@ void WebRoutes::begin() {
     server.send(200, "application/json", out);
   });
 
+  // 6b3. REST APIs Stream Đa Phương Tiện (Web Browser / URL Video & Audio Stream)
+  server.on("/api/stream/video_frame", HTTP_POST, handleStreamVideoFinish, handleStreamVideoUpload);
+  server.on("/api/stream/audio_pcm", HTTP_POST, handleStreamAudioFinish, handleStreamAudioUpload);
+  server.on("/api/stream/start_url", HTTP_POST, handleStreamStartUrl);
+  server.on("/api/stream/stop", HTTP_POST, handleStreamStop);
+  server.on("/api/stream/status", HTTP_GET, handleStreamStatus);
+
   // 6c. Captive Portal Probes cho iOS / Android / Windows (Tự động mở trang Cấu hình Wi-Fi)
   auto handleCaptiveRedirect = []() {
-    server.sendHeader("Location", "http://192.168.4.1/#wifi", true);
+    server.sendHeader("Location", "http://192.168.4.1/", true);
     server.send(302, "text/plain", "");
   };
   server.on("/hotspot-detect.html", HTTP_GET, handleCaptiveRedirect); // Apple iOS / macOS
@@ -2351,6 +6277,11 @@ void WebRoutes::begin() {
         uri.indexOf("canonical") >= 0 ||
         uri.indexOf("mobile/status") >= 0) {
       handleCaptiveRedirect();
+      return;
+    }
+
+    if (uri.startsWith("/api/")) {
+      server.send(404, "application/json", "{\"error\":\"API Not Found\"}");
       return;
     }
 
@@ -2388,10 +6319,13 @@ void WebRoutes::begin() {
 
     // 2. Chuyển hướng Captive Portal nếu người dùng truy cập domain bất kỳ khi kết nối SoftAP
     String host = server.hostHeader();
-    if (WifiManager::isApActive() && host.length() > 0 &&
-        host != "192.168.4.1" &&
-        (WiFi.status() != WL_CONNECTED || host != WiFi.localIP().toString()) &&
-        host != (String(MDNS_HOSTNAME) + ".local")) {
+    int colonIdx = host.indexOf(':');
+    String hostNoPort = (colonIdx > 0) ? host.substring(0, colonIdx) : host;
+
+    if (WifiManager::isApActive() && hostNoPort.length() > 0 &&
+        hostNoPort != "192.168.4.1" &&
+        (WiFi.status() != WL_CONNECTED || hostNoPort != WiFi.localIP().toString()) &&
+        hostNoPort != (String(MDNS_HOSTNAME) + ".local")) {
       handleCaptiveRedirect();
       return;
     }

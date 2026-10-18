@@ -1,6 +1,7 @@
 #include "tests/TestSensors.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestAudio.h"
+#include "WebStreamManager.h"
 #include "HardwareManager.h"
 #include "Config.h"
 #include <Wire.h>
@@ -27,6 +28,14 @@ namespace TestSensors {
   static unsigned long touchDownTime = 0;
   static bool touchLongHandled = false;
   static uint32_t touchCount = 0;
+
+  // Trạng thái Pin BAT_ADC (GPIO 2 - ADC1_CH1) & Bo Sạc Vin MH-CD42 (GPIO 46)
+  static float currentBatteryV = 4.20f;
+  static int currentBatteryMv = 4200;
+  static int currentBatteryPct = 100;
+  static int currentBatteryRaw = 4095;
+  static bool currentCharging = false;
+  static unsigned long lastBatteryReadMs = 0;
 
   static uint8_t crc8Sht31(const uint8_t* data, int len) {
     uint8_t crc = 0xFF;
@@ -171,6 +180,8 @@ namespace TestSensors {
     Serial.println("-------------------------------------------------------");
 
     pinMode(PIN_TOUCH_TTP223, INPUT_PULLDOWN);
+    pinMode(PIN_BAT_ADC, INPUT);
+    pinMode(PIN_CHG_STAT, INPUT);
 
     scanAndInitSht31(true);
     if (sht31Online) {
@@ -184,39 +195,13 @@ namespace TestSensors {
   void loop() {
     unsigned long now = millis();
 
-    // ================= 1. XỬ LÝ CẢM BIẾN CHẠM TTP223 (GPIO 20) =================
+    // ================= 1. XỬ LÝ CẢM BIẾN CHẠM TTP223 (GPIO 21 - RTC) =================
+    // Quyền điều khiển chuyển màn hình và tương tác phím chạm TTP223 được giao toàn quyền
+    // cho TestDisplay_S40_Full::loop() để nhận diện chính xác theo ngữ cảnh (không tự tiện nhảy sang XiaoZhi khi đang nghe nhạc)
     if (touchModeEnabled) {
       bool touched = (digitalRead(PIN_TOUCH_TTP223) == HIGH);
-
       if (touched && !lastTouchState) {
-        touchDownTime = now;
-        touchLongHandled = false;
         touchCount++;
-        HardwareManager::setLedColor(0, 220, 255);
-        TestAudio::playClickBeep(1568);
-        Serial.printf("👆 [TTP223 - GPIO %d] Phát hiện CHẠM (#%lu)!\n", PIN_TOUCH_TTP223, touchCount);
-      } else if (touched && lastTouchState) {
-        if (!touchLongHandled && (now - touchDownTime >= 900)) {
-          touchLongHandled = true;
-          HardwareManager::setLedColor(180, 0, 255);
-          TestAudio::playTone(1318, 60, 50);
-          delay(10);
-          TestAudio::playTone(1760, 90, 55);
-          Serial.println("🎙️ [TTP223 - GPIO 20] CHẠM GIỮ (>0.9s) -> Đánh thức Trợ lý ảo XiaoZhi AI!");
-          TestDisplay::setScreenMode("emoji");
-          TestDisplay::setEmojiState("listen", "TTP223 (GPIO 20): Da danh thuc XiaoZhi AI!");
-        }
-      } else if (!touched && lastTouchState) {
-        unsigned long pressDur = now - touchDownTime;
-        if (!touchLongHandled && pressDur >= 25) {
-          TestDisplay::cycleScreenMode();
-          String newMode = TestDisplay::getScreenModeName();
-          Serial.printf("✨ [TTP223 - GPIO 20] Chạm ngắn (%lums) -> Đổi màn hình sang: [%s]\n",
-                        pressDur, newMode.c_str());
-          if (newMode == "emoji") {
-            TestDisplay::setEmojiState("happy", "TTP223 Touch (GPIO 20): Xin chao! Minh dang vui ve!");
-          }
-        }
       }
       lastTouchState = touched;
     }
@@ -227,6 +212,10 @@ namespace TestSensors {
       if (now - lastMeasureCycle >= interval) {
         lastMeasureCycle = now;
         if (!sht31Online) {
+          // Khi đang stream video/âm thanh, tạm hoãn quét I2C để tránh chặn CPU gây gián đoạn luồng stream
+          if (WebStreamManager::isVideoStreaming() || WebStreamManager::isAudioStreaming()) {
+            return;
+          }
           scanAndInitSht31(false);
           if (sht31Online) {
             Serial.printf("✅ [SHT31] Đã tự động nhận diện cảm biến tại 0x%02X (SDA=%d, SCL=%d)!\n",
@@ -264,6 +253,29 @@ namespace TestSensors {
         }
       }
     }
+
+    // ================= 3. XỬ LÝ PIN BAT_ADC (GPIO 2) & SẠC VIN MH-CD42 (GPIO 46) =================
+    if (now - lastBatteryReadMs >= 500) {
+      lastBatteryReadMs = now;
+      currentCharging = (digitalRead(PIN_CHG_STAT) == HIGH);
+
+      long sumMv = 0;
+      long sumRaw = 0;
+      for (int i = 0; i < 8; i++) {
+        sumRaw += analogRead(PIN_BAT_ADC);
+        sumMv  += analogReadMilliVolts(PIN_BAT_ADC);
+      }
+      currentBatteryRaw = (int)(sumRaw / 8);
+      int pinMv = (int)(sumMv / 8);
+
+      // Cầu phân áp 100k/100k (tỉ lệ 2.0x)
+      currentBatteryMv = pinMv * 2;
+      currentBatteryV  = currentBatteryMv / 1000.0f;
+
+      // Tính phần trăm dung lượng pin Lithium 18650 (3.00V -> 0%, 4.20V -> 100%)
+      float pct = (currentBatteryV - 3.00f) / (4.20f - 3.00f) * 100.0f;
+      currentBatteryPct = constrain((int)roundf(pct), 0, 100);
+    }
   }
 
   bool isSht31Connected() { return sht31Online; }
@@ -275,10 +287,22 @@ namespace TestSensors {
   float getHumidityPct() { return currentHumPct; }
   bool isTouchPressed() { return lastTouchState; }
 
+  float getBatteryVoltage() { return currentBatteryV; }
+  int   getBatteryMilliVolts() { return currentBatteryMv; }
+  int   getBatteryPercentage() { return currentBatteryPct; }
+  int   getBatteryRawAdc() { return currentBatteryRaw; }
+  bool  isCharging() { return currentCharging; }
+
   bool handleSerial(char cmd) {
     if (cmd == 'g' || cmd == 'G') {
       touchModeEnabled = !touchModeEnabled;
       Serial.printf("👆 [TTP223] Trạng thái cảm biến chạm GPIO 20: %s\n", touchModeEnabled ? "BẬT" : "TẮT");
+      return true;
+    }
+    if (cmd == 'p' || cmd == 'P') {
+      Serial.printf("🔋 [PIN & SẠC] Pin: %.2fV (%dmV, %d%%) | Sạc Vin MH-CD42 (GPIO %d): %s | Raw ADC: %d\n",
+                    currentBatteryV, currentBatteryMv, currentBatteryPct, PIN_CHG_STAT,
+                    currentCharging ? "ĐANG SẠC ⚡ (HIGH)" : "KHÔNG SẠC 🔋 (LOW)", currentBatteryRaw);
       return true;
     }
     if (cmd == 't' || cmd == 'T') {

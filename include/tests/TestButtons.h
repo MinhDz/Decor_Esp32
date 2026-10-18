@@ -27,6 +27,10 @@ namespace TestButtons {
 
   // In bảng trạng thái & Bật/Tắt stream đo ADC trực tiếp trên Serial ('b')
   bool handleSerial(char cmd);
+
+  // Giả lập bấm phím ảo từ giao diện Web (idx: 0=OK, 1=UP, 2=DOWN, 3=LEFT, 4=RIGHT, 5=MENU, 6=EXIT)
+  void injectButtonPress(int idx);
+  void injectButtonRelease();
 }
 
 #if defined(TEST_AUDIO_H_INCLUDED) && !defined(REAL_DISPLAY_DRIVER_CPP)

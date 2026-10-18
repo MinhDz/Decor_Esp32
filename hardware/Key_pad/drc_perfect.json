@@ -1,0 +1,2358 @@
+{
+    "$schema": "https://schemas.kicad.org/drc.v1.json",
+    "coordinate_units": "mm",
+    "date": "2026-10-12T07:19:25",
+    "ignored_checks": [
+        {
+            "description": "Footprint has no courtyard defined",
+            "key": "missing_courtyard"
+        },
+        {
+            "description": "Track endpoint not centered on via",
+            "key": "track_not_centered_on_via"
+        },
+        {
+            "description": "Tuning profile track geometries",
+            "key": "tuning_profile_track_geometries"
+        },
+        {
+            "description": "Footprint doesn't match symbol's footprint filters",
+            "key": "footprint_filters_mismatch"
+        },
+        {
+            "description": "Footprint component type doesn't match footprint pads",
+            "key": "footprint_type_mismatch"
+        }
+    ],
+    "included_severities": [
+        "error",
+        "warning"
+    ],
+    "kicad_version": "10.0.6",
+    "schematic_parity": [],
+    "source": "Key_pad.kicad_pcb",
+    "unconnected_items": [
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "Track [KEY_ADC] on B.Cu, length 10.3341 mm",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 17.8179
+                    },
+                    "uuid": "c60a3881-65b3-4164-9a4a-be78bf8fd518"
+                },
+                {
+                    "description": "Track [KEY_ADC] on B.Cu, length 1.9767 mm",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 30.0
+                    },
+                    "uuid": "a130c41a-26a0-4465-996f-9ad2780ecdbb"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        },
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "Track [GND] on B.Cu, length 6.5095 mm",
+                    "pos": {
+                        "x": 60.6029,
+                        "y": 22.5
+                    },
+                    "uuid": "2880f98d-27b1-4e89-9bd0-48b3a5ecaf5d"
+                },
+                {
+                    "description": "Track [GND] on B.Cu, length 12.7279 mm",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 30.0
+                    },
+                    "uuid": "45301dc9-7312-4795-9f41-15dfd5bf9a98"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        },
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "PTH pad 1 [VBAT] of R_BAT1",
+                    "pos": {
+                        "x": 79.19,
+                        "y": 33.0
+                    },
+                    "uuid": "cad0c260-ece5-4cd2-a1ea-4170b1eca30a"
+                },
+                {
+                    "description": "Track [VBAT] on B.Cu, length 3.5744 mm",
+                    "pos": {
+                        "x": 10.4256,
+                        "y": 7.0
+                    },
+                    "uuid": "b82511f1-d3df-4390-a32a-a24bf2ad75eb"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        },
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "PTH pad 1 [+5V] of J_ESP",
+                    "pos": {
+                        "x": 84.0,
+                        "y": 13.0
+                    },
+                    "uuid": "97578259-dafd-42a5-bd95-65fd4e91b9a0"
+                },
+                {
+                    "description": "Track [+5V] on B.Cu, length 2.2017 mm",
+                    "pos": {
+                        "x": 25.5,
+                        "y": 36.0
+                    },
+                    "uuid": "ca3006f7-f6da-40f7-b4e4-0c7289aef3c0"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        },
+        {
+            "description": "Missing connection between items",
+            "items": [
+                {
+                    "description": "PTH pad 1 [BAT_ADC] of C_BAT",
+                    "pos": {
+                        "x": 81.75,
+                        "y": 46.0
+                    },
+                    "uuid": "d79522c6-5631-4609-a6eb-bb0fc6e4e0b5"
+                },
+                {
+                    "description": "Track [BAT_ADC] on B.Cu, length 6.0000 mm",
+                    "pos": {
+                        "x": 86.81,
+                        "y": 33.0
+                    },
+                    "uuid": "63c87099-84e4-40dd-8306-b04b30f2fb93"
+                }
+            ],
+            "severity": "error",
+            "type": "unconnected_items"
+        }
+    ],
+    "violations": [
+        {
+            "description": "Clearance violation ( clearance 0.2000 mm; actual 0.0017 mm)",
+            "items": [
+                {
+                    "description": "PTH pad [<no net>] of SW_PWR",
+                    "pos": {
+                        "x": 21.9,
+                        "y": 54.0
+                    },
+                    "uuid": "9a760287-347b-498d-857b-70262788d750"
+                },
+                {
+                    "description": "Track [VOUT_5V] on B.Cu, length 12.2396 mm",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 51.6483
+                    },
+                    "uuid": "a260ea4e-df99-4746-8807-4442253595e1"
+                }
+            ],
+            "severity": "error",
+            "type": "clearance"
+        },
+        {
+            "description": "Tracks crossing",
+            "items": [
+                {
+                    "description": "Track [KEY_ADC] on B.Cu, length 9.5065 mm",
+                    "pos": {
+                        "x": 41.7267,
+                        "y": 51.7221
+                    },
+                    "uuid": "27c00366-ce4a-466e-bfb9-b88fd08e1be0"
+                },
+                {
+                    "description": "Track [NET_MENU] on B.Cu, length 7.5000 mm",
+                    "pos": {
+                        "x": 44.25,
+                        "y": 52.0
+                    },
+                    "uuid": "75da9f21-c537-4299-a35f-1bc26f186d34"
+                }
+            ],
+            "severity": "error",
+            "type": "tracks_crossing"
+        },
+        {
+            "description": "Footprint 'MountingHole_3.2mm' not found in library 'MountingHole'",
+            "items": [
+                {
+                    "description": "Footprint MH2",
+                    "pos": {
+                        "x": 86.0,
+                        "y": 4.0
+                    },
+                    "uuid": "10b014e1-fd79-4995-aa83-bc0b1645ab23"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_issues"
+        },
+        {
+            "description": "Footprint 'SW_TactPush_6x6x5mm_2Pin_P4.5mm' does not match copy in library 'CustomLib'",
+            "items": [
+                {
+                    "description": "Footprint SW_LEFT",
+                    "pos": {
+                        "x": 39.75,
+                        "y": 30.0
+                    },
+                    "uuid": "1c8f6e1f-5f3f-4c07-b3fc-964f3c2aac6c"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SW_TactPush_6x6x5mm_2Pin_P4.5mm' does not match copy in library 'CustomLib'",
+            "items": [
+                {
+                    "description": "Footprint SW_RIGHT",
+                    "pos": {
+                        "x": 67.75,
+                        "y": 30.0
+                    },
+                    "uuid": "1f8abc6a-d74b-400c-a1d1-bbddc9956c13"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_MENU",
+                    "pos": {
+                        "x": 44.25,
+                        "y": 44.5
+                    },
+                    "uuid": "318a1e77-45e7-4dc2-8230-1a8591d66fe9"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'MountingHole_3.2mm' not found in library 'MountingHole'",
+            "items": [
+                {
+                    "description": "Footprint MH1",
+                    "pos": {
+                        "x": 4.0,
+                        "y": 4.0
+                    },
+                    "uuid": "365dc487-662f-47df-b2a5-c4fbff55a75d"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_issues"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_CHG2",
+                    "pos": {
+                        "x": 21.81,
+                        "y": 20.0
+                    },
+                    "uuid": "36852c60-ccaf-4778-b787-55903d5e35dc"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_UP",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 9.5
+                    },
+                    "uuid": "3e9dedd0-8199-47ae-abdd-775042c27f06"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'JST_XH_B2B-XH-A_1x02_P2.50mm_Vertical' does not match copy in library 'Connector_JST'",
+            "items": [
+                {
+                    "description": "Footprint J_BAT",
+                    "pos": {
+                        "x": 14.0,
+                        "y": 7.0
+                    },
+                    "uuid": "46607eca-30b1-4be7-823e-6d17183cb536"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_LED",
+                    "pos": {
+                        "x": 23.81,
+                        "y": 47.0
+                    },
+                    "uuid": "49b7b842-5a7d-4151-b3d1-49e0232a7b07"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SW_TactPush_6x6x5mm_2Pin_P4.5mm' does not match copy in library 'CustomLib'",
+            "items": [
+                {
+                    "description": "Footprint SW_MENU",
+                    "pos": {
+                        "x": 39.75,
+                        "y": 52.0
+                    },
+                    "uuid": "52f7ab33-2fc3-488e-a103-e2708fd3644d"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_PU",
+                    "pos": {
+                        "x": 45.81,
+                        "y": 9.5
+                    },
+                    "uuid": "5d477470-521a-4481-92c0-07d9513d7a24"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_DOWN",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 37.5
+                    },
+                    "uuid": "633276d1-062c-42af-b526-0ea2a41c628c"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'C_Disc_D5.0mm_W2.5mm_P2.50mm' does not match copy in library 'Capacitor_THT'",
+            "items": [
+                {
+                    "description": "Footprint C_CHG",
+                    "pos": {
+                        "x": 19.25,
+                        "y": 26.0
+                    },
+                    "uuid": "64b03181-724f-4486-8b85-dbe9175c2892"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'MountingHole_3.2mm' not found in library 'MountingHole'",
+            "items": [
+                {
+                    "description": "Footprint MH4",
+                    "pos": {
+                        "x": 86.0,
+                        "y": 56.0
+                    },
+                    "uuid": "695e1343-4674-4e5b-8d70-109f1418952e"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_issues"
+        },
+        {
+            "description": "Footprint 'PinHeader_1x06_P2.54mm_Vertical' does not match copy in library 'Connector_PinHeader_2.54mm'",
+            "items": [
+                {
+                    "description": "Footprint J_MHCD42",
+                    "pos": {
+                        "x": 8.0,
+                        "y": 13.0
+                    },
+                    "uuid": "7462c64a-2f13-4aac-9129-862129dd9c5c"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'MountingHole_3.2mm' not found in library 'MountingHole'",
+            "items": [
+                {
+                    "description": "Footprint MH3",
+                    "pos": {
+                        "x": 4.0,
+                        "y": 56.0
+                    },
+                    "uuid": "764fd449-8854-4e83-93d4-c946b3cec7a3"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_issues"
+        },
+        {
+            "description": "Footprint 'C_Disc_D5.0mm_W2.5mm_P2.50mm' does not match copy in library 'Capacitor_THT'",
+            "items": [
+                {
+                    "description": "Footprint C_KEY",
+                    "pos": {
+                        "x": 30.75,
+                        "y": 9.5
+                    },
+                    "uuid": "7ca0bbbf-bddf-40f4-acc3-ba5490c9ea0f"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'LED_D3.0mm' does not match copy in library 'LED_THT'",
+            "items": [
+                {
+                    "description": "Footprint D_PWR",
+                    "pos": {
+                        "x": 10.73,
+                        "y": 47.0
+                    },
+                    "uuid": "7f012ef0-3d8c-4664-b30b-1ee453094136"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'C_Disc_D5.0mm_W2.5mm_P2.50mm' does not match copy in library 'Capacitor_THT'",
+            "items": [
+                {
+                    "description": "Footprint C_BAT",
+                    "pos": {
+                        "x": 81.75,
+                        "y": 46.0
+                    },
+                    "uuid": "9056da72-77c2-45fa-8b4a-645c08b123ae"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_RIGHT",
+                    "pos": {
+                        "x": 72.25,
+                        "y": 22.5
+                    },
+                    "uuid": "9688ff10-ff86-4c40-bcdd-bfb74a430186"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SW_TactPush_6x6x5mm_2Pin_P4.5mm' does not match copy in library 'CustomLib'",
+            "items": [
+                {
+                    "description": "Footprint SW_OK",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 30.0
+                    },
+                    "uuid": "ae37adfe-46cf-4fb3-b8c3-063d04b20ebc"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'PinHeader_1x06_P2.54mm_Vertical' does not match copy in library 'Connector_PinHeader_2.54mm'",
+            "items": [
+                {
+                    "description": "Footprint J_ESP",
+                    "pos": {
+                        "x": 84.0,
+                        "y": 13.0
+                    },
+                    "uuid": "ae547bcb-c836-41a7-94c8-cb3aac099c9e"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SW_TactPush_6x6x5mm_2Pin_P4.5mm' does not match copy in library 'CustomLib'",
+            "items": [
+                {
+                    "description": "Footprint SW_EXIT",
+                    "pos": {
+                        "x": 67.75,
+                        "y": 52.0
+                    },
+                    "uuid": "b2adba65-52e6-4ddd-a5b2-312c84ef386c"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_CHG1",
+                    "pos": {
+                        "x": 14.19,
+                        "y": 14.0
+                    },
+                    "uuid": "b56542a9-c32a-441e-8f40-a82f6ae41dc5"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SW_TactPush_6x6x5mm_2Pin_P4.5mm' does not match copy in library 'CustomLib'",
+            "items": [
+                {
+                    "description": "Footprint SW_UP",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 17.0
+                    },
+                    "uuid": "b5b9b7ad-8761-4830-b9c7-7bb57ef94690"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SW_Slide_SPDT_Straight_CK_OS102011MS2Q' does not match copy in library 'Button_Switch_THT'",
+            "items": [
+                {
+                    "description": "Footprint SW_PWR",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 54.0
+                    },
+                    "uuid": "bc8ff5be-267e-4053-b81d-7fe848e8dc13"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_BAT1",
+                    "pos": {
+                        "x": 79.19,
+                        "y": 33.0
+                    },
+                    "uuid": "bf31147a-9f63-4e15-afdf-5ae796da94d7"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_LEFT",
+                    "pos": {
+                        "x": 44.25,
+                        "y": 22.5
+                    },
+                    "uuid": "c0cc0401-bc98-4322-9de9-8c21c854765a"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'CP_Radial_D10.0mm_P5.00mm' does not match copy in library 'Capacitor_THT'",
+            "items": [
+                {
+                    "description": "Footprint C_5V",
+                    "pos": {
+                        "x": 23.0,
+                        "y": 36.0
+                    },
+                    "uuid": "ce522db5-9feb-48d8-a224-87d5b123f853"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_EXIT",
+                    "pos": {
+                        "x": 72.25,
+                        "y": 44.5
+                    },
+                    "uuid": "dc4018db-3671-40a5-b4f4-22772ffef5ee"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'SW_TactPush_6x6x5mm_2Pin_P4.5mm' does not match copy in library 'CustomLib'",
+            "items": [
+                {
+                    "description": "Footprint SW_DOWN",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 45.0
+                    },
+                    "uuid": "f1b25744-2ceb-4de8-8e74-cd88de547cd3"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Footprint 'R_Axial_DIN0207_L6.3mm_D2.5mm_P7.62mm_Horizontal' does not match copy in library 'Resistor_THT'",
+            "items": [
+                {
+                    "description": "Footprint R_BAT2",
+                    "pos": {
+                        "x": 86.81,
+                        "y": 39.0
+                    },
+                    "uuid": "fdefe256-c238-4a8a-8d49-2ab64fe4d2df"
+                }
+            ],
+            "severity": "warning",
+            "type": "lib_footprint_mismatch"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'LEFT' on F.Silkscreen",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 30.0
+                    },
+                    "uuid": "2774da3e-2c8c-4d6e-b7cd-81b2e3ec0c8d"
+                },
+                {
+                    "description": "Circle of SW_LEFT on F.Silkscreen",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 30.0
+                    },
+                    "uuid": "d8ccc251-b48e-4d84-ba8b-b02af6503284"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of R_DOWN",
+                    "pos": {
+                        "x": 54.44,
+                        "y": 39.87
+                    },
+                    "uuid": "2d43381d-a3ce-434c-9d9e-99f4c7b73ee8"
+                },
+                {
+                    "description": "Reference field of SW_DOWN",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 41.0
+                    },
+                    "uuid": "801fde84-317d-4797-9743-07a6a4f5c132"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'RIGHT' on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 30.0
+                    },
+                    "uuid": "63c43596-fbe7-45e0-9956-ab0d1ccb11fa"
+                },
+                {
+                    "description": "PCB text 'BAT_ADC (VBAT SENSE)' on F.Silkscreen",
+                    "pos": {
+                        "x": 79.0,
+                        "y": 29.0
+                    },
+                    "uuid": "f73218a2-d367-4509-88ef-dfa8ab62c950"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Rectangle of SW_RIGHT on F.Silkscreen",
+                    "pos": {
+                        "x": 67.0,
+                        "y": 27.0
+                    },
+                    "uuid": "88af41ec-19af-4678-b142-62d7b3e68788"
+                },
+                {
+                    "description": "PCB text 'BAT_ADC (VBAT SENSE)' on F.Silkscreen",
+                    "pos": {
+                        "x": 79.0,
+                        "y": 29.0
+                    },
+                    "uuid": "f73218a2-d367-4509-88ef-dfa8ab62c950"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'RIGHT' on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 30.0
+                    },
+                    "uuid": "63c43596-fbe7-45e0-9956-ab0d1ccb11fa"
+                },
+                {
+                    "description": "Circle of SW_RIGHT on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 30.0
+                    },
+                    "uuid": "a4993da9-e89e-4f9b-8f58-6774b3de88b6"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of R_RIGHT",
+                    "pos": {
+                        "x": 68.44,
+                        "y": 24.87
+                    },
+                    "uuid": "621776cc-4dac-4a18-b300-306fb6574f30"
+                },
+                {
+                    "description": "Rectangle of SW_RIGHT on F.Silkscreen",
+                    "pos": {
+                        "x": 67.0,
+                        "y": 27.0
+                    },
+                    "uuid": "88af41ec-19af-4678-b142-62d7b3e68788"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of R_RIGHT",
+                    "pos": {
+                        "x": 68.44,
+                        "y": 24.87
+                    },
+                    "uuid": "621776cc-4dac-4a18-b300-306fb6574f30"
+                },
+                {
+                    "description": "Segment of R_RIGHT on F.Silkscreen",
+                    "pos": {
+                        "x": 71.71,
+                        "y": 23.87
+                    },
+                    "uuid": "8f30d732-7c8c-487d-aa1c-8367a51a3b9f"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of R_RIGHT",
+                    "pos": {
+                        "x": 68.44,
+                        "y": 24.87
+                    },
+                    "uuid": "621776cc-4dac-4a18-b300-306fb6574f30"
+                },
+                {
+                    "description": "Reference field of SW_RIGHT",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 26.0
+                    },
+                    "uuid": "ef2d82c3-d12c-4235-87a5-41b5f07c4873"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of SW_LEFT",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 26.0
+                    },
+                    "uuid": "4a15f10a-15e6-489e-aca9-746d6b18dcad"
+                },
+                {
+                    "description": "Reference field of R_LEFT",
+                    "pos": {
+                        "x": 40.44,
+                        "y": 24.87
+                    },
+                    "uuid": "ad7719de-12f9-4957-b8d8-6498c8541913"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Rectangle of SW_LEFT on F.Silkscreen",
+                    "pos": {
+                        "x": 39.0,
+                        "y": 27.0
+                    },
+                    "uuid": "92a6208c-9742-42d0-aa5c-0e0c83f71f5e"
+                },
+                {
+                    "description": "Reference field of R_LEFT",
+                    "pos": {
+                        "x": 40.44,
+                        "y": 24.87
+                    },
+                    "uuid": "ad7719de-12f9-4957-b8d8-6498c8541913"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of SW_UP",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 13.0
+                    },
+                    "uuid": "829bc1ac-67d7-4f21-aaae-2d2d3acef19f"
+                },
+                {
+                    "description": "Reference field of R_UP",
+                    "pos": {
+                        "x": 54.44,
+                        "y": 11.87
+                    },
+                    "uuid": "b03b3247-a60e-418e-83a1-44b0a3d789cd"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'DOWN' on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 45.0
+                    },
+                    "uuid": "1add14a4-89ee-4441-b166-d966c9ea7d44"
+                },
+                {
+                    "description": "Circle of SW_DOWN on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 45.0
+                    },
+                    "uuid": "be9d9897-ddc8-41da-a0e3-55debd4a13f1"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of R_EXIT",
+                    "pos": {
+                        "x": 68.44,
+                        "y": 46.87
+                    },
+                    "uuid": "1163b260-0cb6-4e60-92a2-b7735e50eeac"
+                },
+                {
+                    "description": "Rectangle of SW_EXIT on F.Silkscreen",
+                    "pos": {
+                        "x": 67.0,
+                        "y": 49.0
+                    },
+                    "uuid": "1d98f0b0-fb38-4a5e-b552-09c85e9b46de"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of R_EXIT",
+                    "pos": {
+                        "x": 68.44,
+                        "y": 46.87
+                    },
+                    "uuid": "1163b260-0cb6-4e60-92a2-b7735e50eeac"
+                },
+                {
+                    "description": "Reference field of SW_EXIT",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 48.0
+                    },
+                    "uuid": "20703c53-d6c6-48a8-b1d2-e979309d56fe"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of R_EXIT",
+                    "pos": {
+                        "x": 68.44,
+                        "y": 46.87
+                    },
+                    "uuid": "1163b260-0cb6-4e60-92a2-b7735e50eeac"
+                },
+                {
+                    "description": "Segment of R_EXIT on F.Silkscreen",
+                    "pos": {
+                        "x": 71.71,
+                        "y": 45.87
+                    },
+                    "uuid": "699c2348-86c8-49b4-900e-b5fc3969f1f4"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'CHG_STAT (VIN DETECT)' on F.Silkscreen",
+                    "pos": {
+                        "x": 14.0,
+                        "y": 10.0
+                    },
+                    "uuid": "06df2b8e-4128-4f7f-a55c-24942873408c"
+                },
+                {
+                    "description": "Reference field of J_MHCD42",
+                    "pos": {
+                        "x": 8.0,
+                        "y": 10.62
+                    },
+                    "uuid": "56e1d780-78cd-44d3-90e9-a545d616662f"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'CHG_STAT (VIN DETECT)' on F.Silkscreen",
+                    "pos": {
+                        "x": 14.0,
+                        "y": 10.0
+                    },
+                    "uuid": "06df2b8e-4128-4f7f-a55c-24942873408c"
+                },
+                {
+                    "description": "Rectangle of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 11.44,
+                        "y": 4.54
+                    },
+                    "uuid": "dddddd30-68e6-4640-8867-c1e72bbd40cc"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'CHG_STAT (VIN DETECT)' on F.Silkscreen",
+                    "pos": {
+                        "x": 14.0,
+                        "y": 10.0
+                    },
+                    "uuid": "06df2b8e-4128-4f7f-a55c-24942873408c"
+                },
+                {
+                    "description": "Segment of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 12.2,
+                        "y": 6.8
+                    },
+                    "uuid": "ffb08f58-0f68-494c-b1bb-16117a175490"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'CHG_STAT (VIN DETECT)' on F.Silkscreen",
+                    "pos": {
+                        "x": 14.0,
+                        "y": 10.0
+                    },
+                    "uuid": "06df2b8e-4128-4f7f-a55c-24942873408c"
+                },
+                {
+                    "description": "Segment of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 12.2,
+                        "y": 9.75
+                    },
+                    "uuid": "b144a185-b65f-4c52-a2f9-538b18bce5f1"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'CHG_STAT (VIN DETECT)' on F.Silkscreen",
+                    "pos": {
+                        "x": 14.0,
+                        "y": 10.0
+                    },
+                    "uuid": "06df2b8e-4128-4f7f-a55c-24942873408c"
+                },
+                {
+                    "description": "Segment of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 18.3,
+                        "y": 9.75
+                    },
+                    "uuid": "fab2c1d4-2806-4916-bfcb-06b3513cd020"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'ESP32-S3 KEYPAD & POWER SHIELD' on F.Silkscreen",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 5.0
+                    },
+                    "uuid": "40ee2270-46a5-40e7-a5d8-811bb1219d82"
+                },
+                {
+                    "description": "Rectangle of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 11.44,
+                        "y": 4.54
+                    },
+                    "uuid": "dddddd30-68e6-4640-8867-c1e72bbd40cc"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of J_MHCD42",
+                    "pos": {
+                        "x": 8.0,
+                        "y": 10.62
+                    },
+                    "uuid": "56e1d780-78cd-44d3-90e9-a545d616662f"
+                },
+                {
+                    "description": "Rectangle of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 11.44,
+                        "y": 4.54
+                    },
+                    "uuid": "dddddd30-68e6-4640-8867-c1e72bbd40cc"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'MH-CD42 (VIN)' on F.Silkscreen",
+                    "pos": {
+                        "x": 9.0,
+                        "y": 8.5
+                    },
+                    "uuid": "0f5f3e16-4e87-4c66-b893-a3d3ef59b772"
+                },
+                {
+                    "description": "Rectangle of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 11.44,
+                        "y": 4.54
+                    },
+                    "uuid": "dddddd30-68e6-4640-8867-c1e72bbd40cc"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'ESP32-S3 KEYPAD & POWER SHIELD' on F.Silkscreen",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 5.0
+                    },
+                    "uuid": "40ee2270-46a5-40e7-a5d8-811bb1219d82"
+                },
+                {
+                    "description": "Rectangle of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 17.25,
+                        "y": 4.55
+                    },
+                    "uuid": "9b430b92-15f4-4549-8878-d700231e9d1b"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'MH-CD42 (VIN)' on F.Silkscreen",
+                    "pos": {
+                        "x": 9.0,
+                        "y": 8.5
+                    },
+                    "uuid": "0f5f3e16-4e87-4c66-b893-a3d3ef59b772"
+                },
+                {
+                    "description": "Segment of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 12.2,
+                        "y": 6.8
+                    },
+                    "uuid": "ffb08f58-0f68-494c-b1bb-16117a175490"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'ESP32-S3 KEYPAD & POWER SHIELD' on F.Silkscreen",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 5.0
+                    },
+                    "uuid": "40ee2270-46a5-40e7-a5d8-811bb1219d82"
+                },
+                {
+                    "description": "Rectangle of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 11.45,
+                        "y": 4.55
+                    },
+                    "uuid": "66ef574e-95ad-4b77-b3fa-7979ea85d1ef"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Segment of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 11.15,
+                        "y": 4.25
+                    },
+                    "uuid": "3a431ddf-172f-4e88-981c-03b9e9d1a2e0"
+                },
+                {
+                    "description": "PCB text 'ESP32-S3 KEYPAD & POWER SHIELD' on F.Silkscreen",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 5.0
+                    },
+                    "uuid": "40ee2270-46a5-40e7-a5d8-811bb1219d82"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'ESP32-S3 KEYPAD & POWER SHIELD' on F.Silkscreen",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 5.0
+                    },
+                    "uuid": "40ee2270-46a5-40e7-a5d8-811bb1219d82"
+                },
+                {
+                    "description": "Segment of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 12.4,
+                        "y": 4.25
+                    },
+                    "uuid": "5a7e1b21-13c1-4e73-89ee-8b6c07dda55a"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'ESP32-S3 KEYPAD & POWER SHIELD' on F.Silkscreen",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 5.0
+                    },
+                    "uuid": "40ee2270-46a5-40e7-a5d8-811bb1219d82"
+                },
+                {
+                    "description": "Rectangle of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 14.75,
+                        "y": 4.55
+                    },
+                    "uuid": "d930e6c6-d371-4363-b0f5-120a447142c6"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of SW_MENU",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 48.0
+                    },
+                    "uuid": "221287e5-4ae1-4895-98d0-200b98b7107a"
+                },
+                {
+                    "description": "Reference field of R_MENU",
+                    "pos": {
+                        "x": 40.44,
+                        "y": 46.87
+                    },
+                    "uuid": "cde770c3-7bf3-45b4-ab1d-b4affe011bae"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "PCB text 'CHG_STAT (VIN DETECT)' on F.Silkscreen",
+                    "pos": {
+                        "x": 14.0,
+                        "y": 10.0
+                    },
+                    "uuid": "06df2b8e-4128-4f7f-a55c-24942873408c"
+                },
+                {
+                    "description": "Segment of J_BAT on F.Silkscreen",
+                    "pos": {
+                        "x": 18.3,
+                        "y": 6.8
+                    },
+                    "uuid": "a9e147e0-50b2-4496-8e01-415dea3f9f2e"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clearance",
+            "items": [
+                {
+                    "description": "Reference field of R_LED",
+                    "pos": {
+                        "x": 20.0,
+                        "y": 49.37
+                    },
+                    "uuid": "522fc1a5-cd48-4dba-aa9b-f478169cfe3d"
+                },
+                {
+                    "description": "Segment of R_LED on F.Silkscreen",
+                    "pos": {
+                        "x": 23.27,
+                        "y": 48.37
+                    },
+                    "uuid": "d6cd7708-ff1b-46a1-9196-305363b279a3"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_overlap"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'LEFT' on F.Silkscreen",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 30.0
+                    },
+                    "uuid": "2774da3e-2c8c-4d6e-b7cd-81b2e3ec0c8d"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_LEFT",
+                    "pos": {
+                        "x": 39.75,
+                        "y": 30.0
+                    },
+                    "uuid": "44f59ae7-0584-487d-9177-2ab271803475"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_DOWN on F.Silkscreen",
+                    "pos": {
+                        "x": 53.0,
+                        "y": 42.0
+                    },
+                    "uuid": "ecb0f56e-59f3-44a6-8b8a-2fc48e7fc7d2"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_DOWN",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 45.0
+                    },
+                    "uuid": "07c70bbf-08e4-40fb-8c0b-62d063fcaab4"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Reference field of MH2",
+                    "pos": {
+                        "x": 86.0,
+                        "y": 4.0
+                    },
+                    "uuid": "a3609355-99fe-477d-a26e-567403d923f9"
+                },
+                {
+                    "description": "NPTH pad of MH2",
+                    "pos": {
+                        "x": 86.0,
+                        "y": 4.0
+                    },
+                    "uuid": "73763c3b-9015-4752-9c77-61e8ea40451b"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'BAT_ADC (VBAT SENSE)' on F.Silkscreen",
+                    "pos": {
+                        "x": 79.0,
+                        "y": 29.0
+                    },
+                    "uuid": "f73218a2-d367-4509-88ef-dfa8ab62c950"
+                },
+                {
+                    "description": "PTH pad 2 [NET_RIGHT] of SW_RIGHT",
+                    "pos": {
+                        "x": 72.25,
+                        "y": 30.0
+                    },
+                    "uuid": "cf1edcc5-8464-411d-a0f4-c2f67d1a9597"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'RIGHT' on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 30.0
+                    },
+                    "uuid": "63c43596-fbe7-45e0-9956-ab0d1ccb11fa"
+                },
+                {
+                    "description": "PTH pad 2 [NET_RIGHT] of SW_RIGHT",
+                    "pos": {
+                        "x": 72.25,
+                        "y": 30.0
+                    },
+                    "uuid": "cf1edcc5-8464-411d-a0f4-c2f67d1a9597"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'RIGHT' on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 30.0
+                    },
+                    "uuid": "63c43596-fbe7-45e0-9956-ab0d1ccb11fa"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_RIGHT",
+                    "pos": {
+                        "x": 67.75,
+                        "y": 30.0
+                    },
+                    "uuid": "f0438a6d-5ec4-4112-8243-b0d0d5006bd8"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_RIGHT on F.Silkscreen",
+                    "pos": {
+                        "x": 67.0,
+                        "y": 27.0
+                    },
+                    "uuid": "88af41ec-19af-4678-b142-62d7b3e68788"
+                },
+                {
+                    "description": "PTH pad 2 [NET_RIGHT] of SW_RIGHT",
+                    "pos": {
+                        "x": 72.25,
+                        "y": 30.0
+                    },
+                    "uuid": "cf1edcc5-8464-411d-a0f4-c2f67d1a9597"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_RIGHT on F.Silkscreen",
+                    "pos": {
+                        "x": 67.0,
+                        "y": 27.0
+                    },
+                    "uuid": "88af41ec-19af-4678-b142-62d7b3e68788"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_RIGHT",
+                    "pos": {
+                        "x": 67.75,
+                        "y": 30.0
+                    },
+                    "uuid": "f0438a6d-5ec4-4112-8243-b0d0d5006bd8"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_RIGHT on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 30.0
+                    },
+                    "uuid": "a4993da9-e89e-4f9b-8f58-6774b3de88b6"
+                },
+                {
+                    "description": "PTH pad 2 [NET_RIGHT] of SW_RIGHT",
+                    "pos": {
+                        "x": 72.25,
+                        "y": 30.0
+                    },
+                    "uuid": "cf1edcc5-8464-411d-a0f4-c2f67d1a9597"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_RIGHT on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 30.0
+                    },
+                    "uuid": "a4993da9-e89e-4f9b-8f58-6774b3de88b6"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_RIGHT",
+                    "pos": {
+                        "x": 67.75,
+                        "y": 30.0
+                    },
+                    "uuid": "f0438a6d-5ec4-4112-8243-b0d0d5006bd8"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_OK on F.Silkscreen",
+                    "pos": {
+                        "x": 53.0,
+                        "y": 27.0
+                    },
+                    "uuid": "119ebd9e-4973-4327-a37f-fa2f3c210c95"
+                },
+                {
+                    "description": "PTH pad 2 [GND] of SW_OK",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 30.0
+                    },
+                    "uuid": "73c0312e-88ec-403f-ada5-8f4dcdbb9524"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'LEFT' on F.Silkscreen",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 30.0
+                    },
+                    "uuid": "2774da3e-2c8c-4d6e-b7cd-81b2e3ec0c8d"
+                },
+                {
+                    "description": "PTH pad 2 [NET_LEFT] of SW_LEFT",
+                    "pos": {
+                        "x": 44.25,
+                        "y": 30.0
+                    },
+                    "uuid": "625962f2-5ec3-4d14-8ca1-839ba7acbb0c"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_LEFT on F.Silkscreen",
+                    "pos": {
+                        "x": 39.0,
+                        "y": 27.0
+                    },
+                    "uuid": "92a6208c-9742-42d0-aa5c-0e0c83f71f5e"
+                },
+                {
+                    "description": "PTH pad 2 [NET_LEFT] of SW_LEFT",
+                    "pos": {
+                        "x": 44.25,
+                        "y": 30.0
+                    },
+                    "uuid": "625962f2-5ec3-4d14-8ca1-839ba7acbb0c"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_OK on F.Silkscreen",
+                    "pos": {
+                        "x": 53.0,
+                        "y": 27.0
+                    },
+                    "uuid": "119ebd9e-4973-4327-a37f-fa2f3c210c95"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_OK",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 30.0
+                    },
+                    "uuid": "c7826e32-977c-4001-b685-6d3c5485ec40"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_LEFT on F.Silkscreen",
+                    "pos": {
+                        "x": 39.0,
+                        "y": 27.0
+                    },
+                    "uuid": "92a6208c-9742-42d0-aa5c-0e0c83f71f5e"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_LEFT",
+                    "pos": {
+                        "x": 39.75,
+                        "y": 30.0
+                    },
+                    "uuid": "44f59ae7-0584-487d-9177-2ab271803475"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_LEFT on F.Silkscreen",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 30.0
+                    },
+                    "uuid": "d8ccc251-b48e-4d84-ba8b-b02af6503284"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_LEFT",
+                    "pos": {
+                        "x": 39.75,
+                        "y": 30.0
+                    },
+                    "uuid": "44f59ae7-0584-487d-9177-2ab271803475"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_LEFT on F.Silkscreen",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 30.0
+                    },
+                    "uuid": "d8ccc251-b48e-4d84-ba8b-b02af6503284"
+                },
+                {
+                    "description": "PTH pad 2 [NET_LEFT] of SW_LEFT",
+                    "pos": {
+                        "x": 44.25,
+                        "y": 30.0
+                    },
+                    "uuid": "625962f2-5ec3-4d14-8ca1-839ba7acbb0c"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_OK on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 30.0
+                    },
+                    "uuid": "18c365cd-27df-4920-92df-1c7279015c6e"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_OK",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 30.0
+                    },
+                    "uuid": "c7826e32-977c-4001-b685-6d3c5485ec40"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_OK on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 30.0
+                    },
+                    "uuid": "18c365cd-27df-4920-92df-1c7279015c6e"
+                },
+                {
+                    "description": "PTH pad 2 [GND] of SW_OK",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 30.0
+                    },
+                    "uuid": "73c0312e-88ec-403f-ada5-8f4dcdbb9524"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_UP on F.Silkscreen",
+                    "pos": {
+                        "x": 53.0,
+                        "y": 14.0
+                    },
+                    "uuid": "8e07aed3-9d9c-48e1-a7c8-000fa1930ba0"
+                },
+                {
+                    "description": "PTH pad 2 [NET_UP] of SW_UP",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 17.0
+                    },
+                    "uuid": "e503ebfe-8f2a-46cd-b877-44cb0e28414d"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_UP on F.Silkscreen",
+                    "pos": {
+                        "x": 53.0,
+                        "y": 14.0
+                    },
+                    "uuid": "8e07aed3-9d9c-48e1-a7c8-000fa1930ba0"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_UP",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 17.0
+                    },
+                    "uuid": "e73f2f77-3651-426e-a09a-68cebfd9cf69"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_UP on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 17.0
+                    },
+                    "uuid": "3629b9e7-f25e-4ae3-b2cd-2f8cdb8a2e3c"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_UP",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 17.0
+                    },
+                    "uuid": "e73f2f77-3651-426e-a09a-68cebfd9cf69"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_UP on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 17.0
+                    },
+                    "uuid": "3629b9e7-f25e-4ae3-b2cd-2f8cdb8a2e3c"
+                },
+                {
+                    "description": "PTH pad 2 [NET_UP] of SW_UP",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 17.0
+                    },
+                    "uuid": "e503ebfe-8f2a-46cd-b877-44cb0e28414d"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'DOWN' on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 45.0
+                    },
+                    "uuid": "1add14a4-89ee-4441-b166-d966c9ea7d44"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_DOWN",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 45.0
+                    },
+                    "uuid": "07c70bbf-08e4-40fb-8c0b-62d063fcaab4"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_MENU on F.Silkscreen",
+                    "pos": {
+                        "x": 39.0,
+                        "y": 49.0
+                    },
+                    "uuid": "c847dd12-5a49-4e6f-8050-07e9671ad21f"
+                },
+                {
+                    "description": "PTH pad 2 [NET_MENU] of SW_MENU",
+                    "pos": {
+                        "x": 44.25,
+                        "y": 52.0
+                    },
+                    "uuid": "20e8199f-0fa4-4337-b82a-3df615b3b87f"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'DOWN' on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 45.0
+                    },
+                    "uuid": "1add14a4-89ee-4441-b166-d966c9ea7d44"
+                },
+                {
+                    "description": "PTH pad 2 [NET_DOWN] of SW_DOWN",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 45.0
+                    },
+                    "uuid": "d79edb04-082f-44cd-9c8a-d29604fa23b2"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_DOWN on F.Silkscreen",
+                    "pos": {
+                        "x": 53.0,
+                        "y": 42.0
+                    },
+                    "uuid": "ecb0f56e-59f3-44a6-8b8a-2fc48e7fc7d2"
+                },
+                {
+                    "description": "PTH pad 2 [NET_DOWN] of SW_DOWN",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 45.0
+                    },
+                    "uuid": "d79edb04-082f-44cd-9c8a-d29604fa23b2"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_DOWN on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 45.0
+                    },
+                    "uuid": "be9d9897-ddc8-41da-a0e3-55debd4a13f1"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_DOWN",
+                    "pos": {
+                        "x": 53.75,
+                        "y": 45.0
+                    },
+                    "uuid": "07c70bbf-08e4-40fb-8c0b-62d063fcaab4"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_DOWN on F.Silkscreen",
+                    "pos": {
+                        "x": 56.0,
+                        "y": 45.0
+                    },
+                    "uuid": "be9d9897-ddc8-41da-a0e3-55debd4a13f1"
+                },
+                {
+                    "description": "PTH pad 2 [NET_DOWN] of SW_DOWN",
+                    "pos": {
+                        "x": 58.25,
+                        "y": 45.0
+                    },
+                    "uuid": "d79edb04-082f-44cd-9c8a-d29604fa23b2"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_EXIT on F.Silkscreen",
+                    "pos": {
+                        "x": 67.0,
+                        "y": 49.0
+                    },
+                    "uuid": "1d98f0b0-fb38-4a5e-b552-09c85e9b46de"
+                },
+                {
+                    "description": "PTH pad 2 [NET_EXIT] of SW_EXIT",
+                    "pos": {
+                        "x": 72.25,
+                        "y": 52.0
+                    },
+                    "uuid": "4b59e4eb-9d9c-4e36-abfc-5a6745508960"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_EXIT on F.Silkscreen",
+                    "pos": {
+                        "x": 67.0,
+                        "y": 49.0
+                    },
+                    "uuid": "1d98f0b0-fb38-4a5e-b552-09c85e9b46de"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_EXIT",
+                    "pos": {
+                        "x": 67.75,
+                        "y": 52.0
+                    },
+                    "uuid": "572323bb-3b1e-4e69-b4d0-aa0c16e30bf3"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_EXIT on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 52.0
+                    },
+                    "uuid": "d9e3177a-6a73-4747-90b2-51729902b2fe"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_EXIT",
+                    "pos": {
+                        "x": 67.75,
+                        "y": 52.0
+                    },
+                    "uuid": "572323bb-3b1e-4e69-b4d0-aa0c16e30bf3"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_EXIT on F.Silkscreen",
+                    "pos": {
+                        "x": 70.0,
+                        "y": 52.0
+                    },
+                    "uuid": "d9e3177a-6a73-4747-90b2-51729902b2fe"
+                },
+                {
+                    "description": "PTH pad 2 [NET_EXIT] of SW_EXIT",
+                    "pos": {
+                        "x": 72.25,
+                        "y": 52.0
+                    },
+                    "uuid": "4b59e4eb-9d9c-4e36-abfc-5a6745508960"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Reference field of MH4",
+                    "pos": {
+                        "x": 86.0,
+                        "y": 56.0
+                    },
+                    "uuid": "1fd9f89c-a37a-48b1-be7f-7b4cd488f7b2"
+                },
+                {
+                    "description": "NPTH pad of MH4",
+                    "pos": {
+                        "x": 86.0,
+                        "y": 56.0
+                    },
+                    "uuid": "0edd87fa-b748-40e6-8a3d-63af751a0c5c"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'MH-CD42 (VIN)' on F.Silkscreen",
+                    "pos": {
+                        "x": 9.0,
+                        "y": 8.5
+                    },
+                    "uuid": "0f5f3e16-4e87-4c66-b893-a3d3ef59b772"
+                },
+                {
+                    "description": "PTH pad 1 [VBAT] of J_BAT",
+                    "pos": {
+                        "x": 14.0,
+                        "y": 7.0
+                    },
+                    "uuid": "03a9926a-0a4c-452f-a032-dc0e6ab2db00"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "PCB text 'ESP32-S3 KEYPAD & POWER SHIELD' on F.Silkscreen",
+                    "pos": {
+                        "x": 24.0,
+                        "y": 5.0
+                    },
+                    "uuid": "40ee2270-46a5-40e7-a5d8-811bb1219d82"
+                },
+                {
+                    "description": "NPTH pad of MH1",
+                    "pos": {
+                        "x": 4.0,
+                        "y": 4.0
+                    },
+                    "uuid": "c6109819-0848-479d-a966-1e16525c8a29"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Reference field of MH1",
+                    "pos": {
+                        "x": 4.0,
+                        "y": 4.0
+                    },
+                    "uuid": "4fffcfab-5a66-420b-8015-72912a507b0c"
+                },
+                {
+                    "description": "NPTH pad of MH1",
+                    "pos": {
+                        "x": 4.0,
+                        "y": 4.0
+                    },
+                    "uuid": "c6109819-0848-479d-a966-1e16525c8a29"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Rectangle of SW_MENU on F.Silkscreen",
+                    "pos": {
+                        "x": 39.0,
+                        "y": 49.0
+                    },
+                    "uuid": "c847dd12-5a49-4e6f-8050-07e9671ad21f"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_MENU",
+                    "pos": {
+                        "x": 39.75,
+                        "y": 52.0
+                    },
+                    "uuid": "68480cba-9758-4a80-aa0f-18afecb7de5d"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_MENU on F.Silkscreen",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 52.0
+                    },
+                    "uuid": "e2db9c92-d69d-4b25-bc80-6cbc03f37672"
+                },
+                {
+                    "description": "PTH pad 1 [KEY_ADC] of SW_MENU",
+                    "pos": {
+                        "x": 39.75,
+                        "y": 52.0
+                    },
+                    "uuid": "68480cba-9758-4a80-aa0f-18afecb7de5d"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Circle of SW_MENU on F.Silkscreen",
+                    "pos": {
+                        "x": 42.0,
+                        "y": 52.0
+                    },
+                    "uuid": "e2db9c92-d69d-4b25-bc80-6cbc03f37672"
+                },
+                {
+                    "description": "PTH pad 2 [NET_MENU] of SW_MENU",
+                    "pos": {
+                        "x": 44.25,
+                        "y": 52.0
+                    },
+                    "uuid": "20e8199f-0fa4-4337-b82a-3df615b3b87f"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        },
+        {
+            "description": "Silkscreen clipped by solder mask",
+            "items": [
+                {
+                    "description": "Reference field of MH3",
+                    "pos": {
+                        "x": 4.0,
+                        "y": 56.0
+                    },
+                    "uuid": "4a6b8ab3-6e6b-41c0-8404-63e04ccd372e"
+                },
+                {
+                    "description": "NPTH pad of MH3",
+                    "pos": {
+                        "x": 4.0,
+                        "y": 56.0
+                    },
+                    "uuid": "414c81dc-cd71-4c62-80a4-f84a3b7c99c7"
+                }
+            ],
+            "severity": "warning",
+            "type": "silk_over_copper"
+        }
+    ]
+}

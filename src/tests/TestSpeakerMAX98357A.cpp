@@ -5,7 +5,7 @@
 
 namespace TestSpeakerMAX98357A {
 
-  static const i2s_port_t I2S_PORT = I2S_NUM_0;
+  static const i2s_port_t I2S_PORT = I2S_NUM_1;
   static const uint32_t SAMPLE_RATE = 44100; // 44.1kHz -> BCLK = 1.4112 MHz (~1.64V DC trên VOM)
 
   static bool driverInstalled = false;

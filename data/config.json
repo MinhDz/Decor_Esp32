@@ -1,9 +1,8 @@
 {
   "endpoint": "wss://api.tenclass.net/xiaozhi/v1/",
-  "token": "",
+  "token": "test-token",
   "mac": "e8:3d:c1:f1:88:24",
-  "bound": false,
+  "bound": true,
   "wit_token": "",
   "google_stt_key": ""
-}
 }

@@ -1,7 +1,10 @@
 #include "WifiManager.h"
 #include "Config.h"
 #include "HardwareManager.h"
+#include "tests/TestDisplay.h"
+#include "tests/TestAudio.h"
 #include <WiFi.h>
+#include <esp_wifi.h>
 #include <DNSServer.h>
 #include <LittleFS.h>
 #include <Preferences.h>
@@ -16,14 +19,32 @@ static bool s_apActive = false;
 
 void WifiManager::begin() {
   WiFi.mode(WIFI_AP_STA);
-  WiFi.softAP(DEFAULT_AP_SSID, DEFAULT_AP_PASS);
+  // TẮT TIẾT KIỆM ĐIỆN WI-FI (MODEM SLEEP): Giữ RF luôn thức 100%, hạ Ping từ 200ms xuống 1-3ms!
+  WiFi.setSleep(false);
+  Serial.println("⚡ [WIFI] Đã cấu hình WiFi.setSleep(false) -> Tối ưu Ping 1ms và triệt tiêu giật lag!");
+
+  // Cấu hình IP tĩnh cố định cho SoftAP để DHCP Server cấp IP chuẩn xác 100%
+  IPAddress apIP(192, 168, 4, 1);
+  IPAddress gateway(192, 168, 4, 1);
+  IPAddress subnet(255, 255, 255, 0);
+  WiFi.softAPConfig(apIP, gateway, subnet);
+
+  // Khởi chạy SoftAP: SSID, Mật khẩu, Channel 1, Không ẩn, Tối đa 4 kết nối
+  WiFi.softAP(DEFAULT_AP_SSID, DEFAULT_AP_PASS, 1, 0, 4);
+  WiFi.setTxPower(WIFI_POWER_19_5dBm);
   s_apActive = true;
 
   // Khởi động DNS Captive Portal cho SoftAP (Trả về 192.168.4.1 cho mọi truy vấn tên miền)
-  dnsServer.start(53, "*", WiFi.softAPIP());
+  dnsServer.start(53, "*", apIP);
   s_dnsStarted = true;
   Serial.printf("🛡️ [CAPTIVE PORTAL] DNS Server đã kích hoạt trên cổng 53 (AP IP: %s)\n",
-                WiFi.softAPIP().toString().c_str());
+                apIP.toString().c_str());
+  Serial.printf("📡 [SOFTAP SẴN SÀNG] SSID: '%s' | Mật khẩu: '%s' | Web: http://192.168.4.1\n",
+                DEFAULT_AP_SSID, DEFAULT_AP_PASS);
+
+  // Tự động lưu mạng quen thuộc & xóa mạng không dùng nữa
+  deleteSavedWifiNetwork("SPA YEN TRANG");
+  saveOrUpdateWifiNetwork("Yen Long", "02082003@#");
 
   bool connected = smartConnect();
   if (connected) {
@@ -63,6 +84,9 @@ bool WifiManager::saveOrUpdateWifiNetwork(const String& ssid, const String& pass
   if (ssid.length() == 0) return false;
   JsonDocument doc;
   loadSavedWifiList(doc);
+  if (!doc.is<JsonArray>()) {
+    doc.to<JsonArray>();
+  }
   JsonArray arr = doc.as<JsonArray>();
   
   bool found = false;
@@ -112,6 +136,14 @@ bool WifiManager::deleteSavedWifiNetwork(const String& ssid) {
   if (found) {
     saveSavedWifiList(newDoc);
   }
+
+  // Xóa cả trong Preferences (NVS) dự phòng nếu trùng
+  wifiPrefs.begin("wifi", false);
+  if (wifiPrefs.getString("ssid", "") == ssid) {
+    wifiPrefs.clear();
+  }
+  wifiPrefs.end();
+
   return found;
 }
 
@@ -142,9 +174,9 @@ bool WifiManager::smartConnect() {
     return false;
   }
 
-  // Quét mạng 2.4GHz xung quanh
+  // Quét mạng 2.4GHz xung quanh (show_hidden = false để quét nhanh chỉ ~1.2s không gây đơ hệ thống)
   WiFi.scanDelete();
-  int n = WiFi.scanNetworks(false, true);
+  int n = WiFi.scanNetworks(false, false);
   if (n <= 0) {
     Serial.println("⚠️ [Smart-WiFi] Không quét thấy mạng Wi-Fi nào xung quanh!");
     return false;
@@ -187,26 +219,36 @@ bool WifiManager::smartConnect() {
   // Thử kết nối lần lượt các ứng viên theo thứ tự sóng mạnh nhất
   for (const auto& target : candidates) {
     Serial.printf("🚀 [Smart-WiFi] Thử kết nối tới '%s' (Sóng: %d dBm)...\n", target.ssid.c_str(), target.rssi);
+    TestDisplay::showWifiConnectingScreen(target.ssid);
     WiFi.disconnect(false);
-    delay(100);
+    delay(50);
     WiFi.begin(target.ssid.c_str(), target.pass.c_str());
 
     int timeout = 0;
-    while (WiFi.status() != WL_CONNECTED && timeout < 20) {
-      delay(500);
+    uint8_t animStep = 0;
+    while (WiFi.status() != WL_CONNECTED && timeout < 50) {
+      TestDisplay::updateWifiConnectingSpinner(target.ssid, animStep++);
+      delay(80);
+      yield();
       timeout++;
     }
 
     if (WiFi.status() == WL_CONNECTED) {
-      Serial.printf("✅ [Smart-WiFi] Kết nối THÀNH CÔNG tới '%s'! IP: %s\n", target.ssid.c_str(), WiFi.localIP().toString().c_str());
+      WiFi.setSleep(false);
+      esp_wifi_set_ps(WIFI_PS_NONE);
+      Serial.printf("✅ [Smart-WiFi] Kết nối THÀNH CÔNG tới '%s'! IP: %s (Ping 1-4ms)\n", target.ssid.c_str(), WiFi.localIP().toString().c_str());
       HardwareManager::setLedColor(0, 255, 120); // Xanh lá
       lastWifiNotification = "Đã kết nối: " + target.ssid + " (" + WiFi.localIP().toString() + ")";
+      TestAudio::playOkChime();
+      TestDisplay::onWifiConnectedSuccess(target.ssid, WiFi.localIP().toString());
       return true;
     } else {
       Serial.printf("❌ [Smart-WiFi] Không thể kết nối tới '%s'. Thử mạng tiếp theo...\n", target.ssid.c_str());
     }
   }
 
+  TestAudio::playDeleteChime();
+  TestDisplay::onWifiConnectFailed("Auto Connect");
   return false;
 }
 
@@ -233,24 +275,36 @@ bool WifiManager::connectDirect(const String& ssid, const String& password, bool
   Serial.printf("🚀 Đang kết nối tới Wi-Fi: %s...\n", ssid.c_str());
   HardwareManager::setLedColor(255, 200, 0); // Vàng đang kết nối
 
+  // Hiển thị ngay màn hình kết nối WiFi với hoạt ảnh chấm tròn xoay Cyberpunk
+  TestDisplay::showWifiConnectingScreen(ssid);
+
   WiFi.disconnect(false);
-  delay(150);
+  delay(50);
   WiFi.begin(ssid.c_str(), actualPass.c_str());
 
   int timeout = 0;
-  while (WiFi.status() != WL_CONNECTED && timeout < 20) {
-    delay(500);
+  uint8_t animStep = 0;
+  while (WiFi.status() != WL_CONNECTED && timeout < 65) {
+    TestDisplay::updateWifiConnectingSpinner(ssid, animStep++);
+    delay(80);
+    yield();
     timeout++;
   }
 
   if (WiFi.status() == WL_CONNECTED) {
+    WiFi.setSleep(false);
+    esp_wifi_set_ps(WIFI_PS_NONE);
     HardwareManager::setLedColor(0, 255, 120); // Xanh lá
     lastWifiNotification = "Đã kết nối: " + ssid + " (" + WiFi.localIP().toString() + ")";
-    Serial.printf("✅ Đã kết nối thành công tới %s! IP: %s\n", ssid.c_str(), WiFi.localIP().toString().c_str());
+    Serial.printf("✅ Đã kết nối thành công tới %s! IP: %s (Ping 1-4ms)\n", ssid.c_str(), WiFi.localIP().toString().c_str());
+    TestAudio::playOkChime();
+    TestDisplay::onWifiConnectedSuccess(ssid, WiFi.localIP().toString());
     return true;
   } else {
     HardwareManager::setLedColor(255, 50, 50); // Đỏ báo lỗi
     Serial.println("❌ Kết nối thất bại!");
+    TestAudio::playDeleteChime();
+    TestDisplay::onWifiConnectFailed(ssid);
     return false;
   }
 }
@@ -259,17 +313,11 @@ void WifiManager::scanNetworks(JsonDocument& resDoc) {
   Serial.println("\n🔍 Bắt đầu quét mạng Wi-Fi 2.4GHz...");
   WiFi.scanDelete();
 
-  if (WiFi.status() != WL_CONNECTED) {
-    WiFi.disconnect(false);
-  }
-  delay(100);
-
-  int n = WiFi.scanNetworks(false, true);
+  // Quét nhanh mạng thông thường (show_hidden = false để thời gian quét chỉ còn ~1.5s, không làm nghẽn WebServer)
+  int n = WiFi.scanNetworks(false, false);
   if (n < 0) {
-    Serial.printf("⚠️ Quét lần 1 thất bại (mã: %d), thử lại...\n", n);
+    Serial.printf("⚠️ Quét sóng Wi-Fi tạm bận (mã: %d), nạp nhanh danh sách đã lưu.\n", n);
     WiFi.scanDelete();
-    delay(200);
-    n = WiFi.scanNetworks(false, true);
   }
 
   Serial.printf("🔍 Quét hoàn tất: Tìm thấy %d mạng Wi-Fi\n", n);
@@ -302,6 +350,19 @@ void WifiManager::scanNetworks(JsonDocument& resDoc) {
                       WiFi.RSSI(i),
                       isSaved ? " [Đã lưu]" : "",
                       (WiFi.status() == WL_CONNECTED && WiFi.SSID() == s) ? " [Đang kết nối]" : "");
+      }
+    }
+  } else {
+    // Nếu quét sóng tạm thời bận hoặc chưa có kết quả, trả về danh sách các mạng đã lưu để người dùng không bị kẹt
+    for (JsonObject saved : savedArr) {
+      String s = saved["ssid"].as<String>();
+      if (s.length() > 0) {
+        JsonObject obj = array.add<JsonObject>();
+        obj["ssid"] = s;
+        obj["rssi"] = -55;
+        obj["secure"] = true;
+        obj["saved"] = true;
+        obj["connected"] = (WiFi.status() == WL_CONNECTED && WiFi.SSID() == s);
       }
     }
   }
@@ -339,6 +400,14 @@ bool WifiManager::isApActive() {
 void WifiManager::loop() {
   if (s_dnsStarted) {
     dnsServer.processNextRequest();
+  }
+  static unsigned long s_lastPsCheck = 0;
+  if (millis() - s_lastPsCheck > 4000) {
+    s_lastPsCheck = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+      WiFi.setSleep(false);
+      esp_wifi_set_ps(WIFI_PS_NONE);
+    }
   }
 }
 

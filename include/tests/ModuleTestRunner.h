@@ -16,9 +16,9 @@
 #define ENABLE_SOLO_MAX98357A   0   // [CHỜ MODULE MỚI] Module Loa I2S MAX98357A
 #define ENABLE_TEST_DISPLAY     1   // [ĐANG BẬT] Màn hình ST7789 (4 Chế độ: Chờ / Biểu cảm / PC Status / Kiểm tra DIO & Audio)
 #define ENABLE_TEST_BUTTONS     1   // [ĐANG BẬT] Cụm 7 Phím Bấm DIO INPUT_PULLUP (16, 17, 18, 21, 38, 47, 45)
-#define ENABLE_TEST_SENSORS     1   // [ĐANG BẬT] Cảm biến SHT31 (SDA=8, SCL=9) & Chạm TTP223 (SIG=7)
+#define ENABLE_TEST_SENSORS     1   // [ĐANG BẬT] Cảm biến SHT31 (SDA=8, SCL=9), Chạm TTP223 (SIG=20), Pin ADC (GPIO 2), Sạc MH-CD42 (GPIO 46)
 #define ENABLE_TEST_AUDIO       1   // [ĐANG BẬT] Thu âm Mic INMP441 (SCK=4, WS=5, SD=6) đã cân chỉnh chuẩn
-#define ENABLE_TEST_WINDMILL    0   // [CHỜ NỐI]  L298N Mini (Motor IN1=GPIO 1, LED Edison IN3=GPIO 2)
+#define ENABLE_TEST_WINDMILL    1   // [ĐÃ BẬT]  L298N Mini (Motor IN1=GPIO 1, LED Edison L=GPIO 47, Edison R=GPIO 21)
 #define ENABLE_TEST_SDCARD      0   // [CHỜ NỐI]  Thẻ nhớ Micro SD SPI riêng (SCK=39, MISO=40, MOSI=41, CS=42)
 
 namespace ModuleTestRunner {

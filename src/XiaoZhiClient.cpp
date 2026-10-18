@@ -1,11 +1,13 @@
 #include "XiaoZhiClient.h"
 #include "Config.h"
+#include "tests/TestAudio.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 #include <Preferences.h>
 #include <LittleFS.h>
 #include "esp_websocket_client.h"
+#include <opus.h>
 
 static Preferences sysPrefs;
 static String s_lastAuthCode = "";
@@ -13,6 +15,32 @@ static esp_websocket_client_handle_t s_wsClient = nullptr;
 static bool s_wsConnected = false;
 static String s_wsUri = "";
 static String s_wsHeaders = "";
+static String s_sessionId = "";
+static String s_lastSttText = "";
+static String s_lastLlmText = "";
+static String s_lastTtsSentence = "";
+static String s_lastAiFullReply = "";
+static String s_lastEmotion = "happy";
+static volatile bool s_sttReceived = false;
+static volatile bool s_llmReceived = false;
+static volatile bool s_ttsReceived = false;
+static volatile bool s_ttsFinished = false;
+static volatile uint32_t s_lastAiReplyTime = 0;
+
+static OpusDecoder* s_opusDecoder = nullptr;
+static int16_t s_pcmDecodeBuf[1920]; // Tối đa 120ms âm thanh @ 16000Hz Mono
+
+static void ensureOpusDecoder() {
+  if (s_opusDecoder == nullptr) {
+    int err = OPUS_OK;
+    s_opusDecoder = opus_decoder_create(16000, 1, &err);
+    if (err == OPUS_OK && s_opusDecoder != nullptr) {
+      Serial.println("✅ [OPUS] Đã khởi tạo Opus Decoder 16000Hz Mono cho XiaoZhi Cloud TTS!");
+    } else {
+      Serial.printf("❌ [OPUS] Lỗi khởi tạo Opus Decoder (err=%d)\n", err);
+    }
+  }
+}
 
 
 String XiaoZhiClient::getOrCreateDeviceUuid() {
@@ -44,13 +72,15 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
   }
 
   String mac = WiFi.macAddress();
+  mac.toLowerCase();
   String uuid = getOrCreateDeviceUuid();
 
   WiFiClientSecure client;
   client.setInsecure();
-  client.setTimeout(10000);
+  client.setTimeout(2500);
 
   HTTPClient http;
+  http.setTimeout(2500);
   http.begin(client, XIAOZHI_OTA_URL);
   http.setUserAgent(XIAOZHI_USER_AGENT);
   http.addHeader("Content-Type", "application/json");
@@ -241,14 +271,18 @@ String XiaoZhiClient::getStoredMac() {
       if (!deserializeJson(doc, f)) {
         f.close();
         if (doc["mac"].is<const char*>() && strlen(doc["mac"]) > 0) {
-          return String(doc["mac"].as<const char*>());
+          String m = String(doc["mac"].as<const char*>());
+          m.toLowerCase();
+          return m;
         }
       } else {
         f.close();
       }
     }
   }
-  return WiFi.macAddress();
+  String m = WiFi.macAddress();
+  m.toLowerCase();
+  return m;
 }
 
 String XiaoZhiClient::getStoredEndpoint() {
@@ -402,7 +436,7 @@ String XiaoZhiClient::askXiaoZhiAI(const String& userText, String& outEmotion, f
   return fallback;
 }
 
-static String stripVietnameseToAscii(const String& s) {
+String XiaoZhiClient::stripVietnameseToAscii(const String& s) {
   String r = s;
   const char* from[] = {
     "á","à","ả","ã","ạ","ă","ắ","ằ","ẳ","ẵ","ặ","â","ấ","ầ","ẩ","ẫ","ậ",
@@ -434,7 +468,63 @@ static String stripVietnameseToAscii(const String& s) {
   for (size_t i = 0; i < n; i++) {
     r.replace(from[i], to[i]);
   }
-  return r;
+
+  // Lọc sạch toàn bộ byte ngoài bảng ASCII chuẩn (32..126, '\n') để tránh lỗi font màn hình ST7789
+  String clean = "";
+  clean.reserve(r.length());
+  for (size_t i = 0; i < r.length(); i++) {
+    uint8_t c = (uint8_t)r[i];
+    if (c == '\n' || (c >= 32 && c <= 126)) {
+      clean += (char)c;
+    }
+  }
+  return clean;
+}
+
+String XiaoZhiClient::detectEmotionFromText(const String& text) {
+  if (text.length() == 0) return "";
+
+  // 1. Kiểm tra các mã Emoji UTF-8 phổ biến trả về từ mô hình LLM XiaoZhi:
+  if (text.indexOf("😊") >= 0 || text.indexOf("😄") >= 0 || text.indexOf("😃") >= 0 ||
+      text.indexOf("😀") >= 0 || text.indexOf("😆") >= 0 || text.indexOf("🥰") >= 0 ||
+      text.indexOf("🤗") >= 0 || text.indexOf("❤️") >= 0 || text.indexOf("💖") >= 0) {
+    return "happy";
+  }
+  if (text.indexOf("😂") >= 0 || text.indexOf("🤣") >= 0 || text.indexOf("😹") >= 0) {
+    return "laughing";
+  }
+  if (text.indexOf("😉") >= 0 || text.indexOf("😜") >= 0 || text.indexOf("😝") >= 0 || text.indexOf("😋") >= 0) {
+    return "winking";
+  }
+  if (text.indexOf("😎") >= 0 || text.indexOf("😏") >= 0) {
+    return "cool";
+  }
+  if (text.indexOf("🤔") >= 0 || text.indexOf("🧐") >= 0 || text.indexOf("🤨") >= 0) {
+    return "thinking";
+  }
+  if (text.indexOf("😮") >= 0 || text.indexOf("😲") >= 0 || text.indexOf("😱") >= 0 || text.indexOf("😳") >= 0) {
+    return "confused";
+  }
+  if (text.indexOf("😴") >= 0 || text.indexOf("🥱") >= 0 || text.indexOf("💤") >= 0) {
+    return "sleepy";
+  }
+  if (text.indexOf("😢") >= 0 || text.indexOf("😭") >= 0 || text.indexOf("🥺") >= 0 || text.indexOf("😞") >= 0) {
+    return "sad";
+  }
+  if (text.indexOf("😡") >= 0 || text.indexOf("😠") >= 0 || text.indexOf("🤬") >= 0) {
+    return "angry";
+  }
+
+  // 2. Kiểm tra các thẻ cảm xúc dạng văn bản [EMOTION]
+  if (text.indexOf("[HAPPY]") >= 0) return "happy";
+  if (text.indexOf("[WINK]") >= 0) return "winking";
+  if (text.indexOf("[COOL]") >= 0) return "cool";
+  if (text.indexOf("[CONFUSED]") >= 0) return "confused";
+  if (text.indexOf("[SLEEPY]") >= 0) return "sleepy";
+  if (text.indexOf("[ANGRY]") >= 0) return "angry";
+  if (text.indexOf("[THINKING]") >= 0) return "thinking";
+
+  return "";
 }
 
 String XiaoZhiClient::transcribeMicAudioPcm16(const int16_t* pcmSamples, size_t sampleCount, uint32_t sampleRate, String& outUtf8Transcript) {
@@ -461,9 +551,8 @@ String XiaoZhiClient::transcribeMicAudioPcm16(const int16_t* pcmSamples, size_t 
                 (unsigned)sampleCount, (unsigned)(sampleCount * 2), (unsigned)sampleRate,
                 (unsigned)peak, (unsigned)avgAbs);
 
-  // Đọc cấu hình token STT từ /config.json (Hỗ trợ Wit.ai và Google Speech API)
+  // Đọc cấu hình token STT từ /config.json (Chỉ dùng Wit.ai nếu có, cô lập hoàn toàn Google STT)
   String witToken = "";
-  String googleKey = "";
   if (LittleFS.exists(FILE_CONFIG)) {
     File f = LittleFS.open(FILE_CONFIG, "r");
     if (f) {
@@ -474,15 +563,12 @@ String XiaoZhiClient::transcribeMicAudioPcm16(const int16_t* pcmSamples, size_t 
         } else if (doc["stt_key"].is<const char*>()) {
           witToken = doc["stt_key"].as<String>();
         }
-        if (doc["google_stt_key"].is<const char*>()) {
-          googleKey = doc["google_stt_key"].as<String>();
-        }
       }
       f.close();
     }
   }
 
-  // 1. Ưu tiên Wit.ai Speech API nếu có token (Hỗ trợ tiếng Việt xuất sắc, miễn phí, nhận diện trực tiếp PCM 16kHz Little-Endian)
+  // 1. Dùng Wit.ai Speech API nếu có cấu hình wit_token
   if (witToken.length() > 0) {
     Serial.println("🎙️ [STT] Đang gửi PCM lên Wit.ai Speech-to-Text API...");
     WiFiClientSecure witClient;
@@ -516,40 +602,17 @@ String XiaoZhiClient::transcribeMicAudioPcm16(const int16_t* pcmSamples, size_t 
     }
   }
 
-  // 2. Google Speech API v2 nếu có custom key
+  // 2. Google Speech API v2 (ĐÃ CÔ LẬP / COMMENT THEO YÊU CẦU NGƯỜI DÙNG: Loại bỏ Google STT)
+  /*
   if (googleKey.length() > 0) {
     String sttUrl = "http://www.google.com/speech-api/v2/recognize?output=json&lang=vi-VN&key=" + googleKey;
     HTTPClient http;
     http.begin(sttUrl);
-    http.setTimeout(7500);
-    String contentType = "audio/l16; rate=" + String(sampleRate) + "; channels=1";
-    http.addHeader("Content-Type", contentType);
-
-    int code = http.POST((uint8_t*)pcmSamples, sampleCount * sizeof(int16_t));
-    String resp = (code > 0) ? http.getString() : "";
-    http.end();
-
-    Serial.printf("🎙️ [STT] HTTP Code=%d\n", code);
-    if (code == 200 && resp.length() > 0) {
-      int idx = resp.indexOf("\"transcript\":\"");
-      if (idx >= 0) {
-        idx += 14;
-        int endIdx = resp.indexOf("\"", idx);
-        if (endIdx > idx) {
-          outUtf8Transcript = resp.substring(idx, endIdx);
-          outUtf8Transcript.trim();
-          String asciiText = stripVietnameseToAscii(outUtf8Transcript);
-          Serial.printf("✅ [STT THÀNH CÔNG] UTF-8: \"%s\" -> ASCII: \"%s\"\n",
-                        outUtf8Transcript.c_str(), asciiText.c_str());
-          return asciiText;
-        }
-      }
-    }
-  } else if (witToken.length() == 0) {
-    Serial.println("ℹ️ [STT] Khóa Google STT mặc định đã hết hạn (Google trả về 403 Forbidden).");
-    Serial.println("💡 Để dùng STT từ Mic INMP441, hãy thêm \"wit_token\" (Wit.ai miễn phí) hoặc \"google_stt_key\" vào /config.json");
+    ...
   }
+  */
 
+  Serial.println("ℹ️ [STT] Google STT đã được cô lập. Âm thanh sẽ được truyền trực tiếp qua XiaoZhi Hub WebSocket!");
   return "";
 }
 
@@ -562,24 +625,153 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
   switch (event_id) {
     case WEBSOCKET_EVENT_CONNECTED: {
       s_wsConnected = true;
+      ensureOpusDecoder();
+      if (s_opusDecoder) {
+        opus_decoder_ctl(s_opusDecoder, OPUS_RESET_STATE);
+      }
       Serial.println("\n=======================================================");
       Serial.println("🟢 [XIAOZHI WS] ĐÃ KẾT NỐI THÀNH CÔNG VỚI XIAOZHI CLOUD!");
       Serial.println("🌐 [XIAOZHI HUB] Thiết bị hiện đang ONLINE trên Hub (xiaozhi.me)!");
       Serial.println("=======================================================");
-      // Gửi bản tin hello theo chuẩn giao thức XiaoZhi Cloud v2
-      const char* hello = "{\"type\":\"hello\",\"version\":2,\"transport\":\"websocket\",\"audio_params\":{\"format\":\"pcm\",\"sample_rate\":16000,\"channels\":1}}";
-      esp_websocket_client_send_text(s_wsClient, hello, strlen(hello), portMAX_DELAY);
+      // Gửi bản tin hello theo chuẩn giao thức XiaoZhi Cloud Protocol v1 (Hỗ trợ Audio format PCM/Opus)
+      const char* hello = "{\"type\":\"hello\",\"version\":1,\"transport\":\"websocket\",\"audio_params\":{\"format\":\"pcm\",\"sample_rate\":16000,\"channels\":1,\"frame_duration\":60}}";
+      esp_websocket_client_send_text(s_wsClient, hello, strlen(hello), pdMS_TO_TICKS(1500));
       break;
     }
     case WEBSOCKET_EVENT_DISCONNECTED:
       s_wsConnected = false;
-      Serial.println("🟡 [XIAOZHI WS] Mất kết nối WebSocket tới XiaoZhi Cloud. Đang tự động kết nối lại...");
+      Serial.println("🟡 [XIAOZHI WS] Mất kết nối WebSocket tới XiaoZhi Cloud.");
       break;
     case WEBSOCKET_EVENT_DATA:
       if (data && data->data_len > 0) {
-        if (data->op_code == 0x01) { // Text frame
+        if (data->op_code == 0x01) { // Text frame JSON
           String msg = String(data->data_ptr).substring(0, data->data_len);
           Serial.printf("📩 [XIAOZHI WS RCV]: %s\n", msg.c_str());
+
+          JsonDocument doc;
+          DeserializationError err = deserializeJson(doc, msg);
+          if (!err) {
+            // 1. Trích xuất thuộc tính emotion / emoji tổng quát từ MỌI frame JSON
+            if (doc["emotion"].is<const char*>()) {
+              String em = doc["emotion"].as<String>();
+              em.toLowerCase();
+              em.trim();
+              if (em.length() > 0) {
+                s_lastEmotion = em;
+                Serial.printf("🎭 [XIAOZHI WS EMOTION]: %s\n", s_lastEmotion.c_str());
+              }
+            } else if (doc["emoji"].is<const char*>()) {
+              String em = doc["emoji"].as<String>();
+              em.toLowerCase();
+              em.trim();
+              if (em.length() > 0) {
+                s_lastEmotion = em;
+                Serial.printf("🎭 [XIAOZHI WS EMOJI]: %s\n", s_lastEmotion.c_str());
+              }
+            }
+
+            const char* type = doc["type"] | "";
+            if (strcmp(type, "hello") == 0) {
+              if (doc["session_id"].is<const char*>()) {
+                s_sessionId = doc["session_id"].as<String>();
+                Serial.printf("🤝 [XIAOZHI WS HELLO ACK] Session ID: %s\n", s_sessionId.c_str());
+              }
+              if (doc["audio_params"]["format"].is<const char*>()) {
+                Serial.printf("🎧 [XIAOZHI SERVER AUDIO]: Format=%s | Rate=%d Hz\n",
+                              doc["audio_params"]["format"].as<const char*>(),
+                              doc["audio_params"]["sample_rate"].as<int>());
+              }
+            } else if (strcmp(type, "stt") == 0) {
+              const char* txt = doc["text"] | "";
+              if (strlen(txt) > 0) {
+                s_lastSttText = String(txt);
+                s_sttReceived = true;
+                Serial.printf("🎤 [XIAOZHI WS STT]: \"%s\"\n", s_lastSttText.c_str());
+              }
+            } else if (strcmp(type, "llm") == 0) {
+              if (doc["text"].is<const char*>()) {
+                const char* txt = doc["text"].as<const char*>();
+                if (strlen(txt) > 0) {
+                  s_lastLlmText = String(txt);
+                  s_llmReceived = true;
+                  s_lastAiReplyTime = millis();
+                  Serial.printf("🤖 [XIAOZHI WS LLM TEXT]: \"%s\"\n", s_lastLlmText.c_str());
+                  String emoFromTxt = XiaoZhiClient::detectEmotionFromText(s_lastLlmText);
+                  if (emoFromTxt.length() > 0) {
+                    s_lastEmotion = emoFromTxt;
+                    Serial.printf("🎭 [XIAOZHI EMOTION FROM LLM TEXT]: %s\n", s_lastEmotion.c_str());
+                  }
+                }
+              }
+            } else if (strcmp(type, "tts") == 0) {
+              const char* st = doc["state"] | "";
+              if (doc["text"].is<const char*>()) {
+                const char* txt = doc["text"].as<const char*>();
+                if (strlen(txt) > 0) {
+                  // Tránh trùng lặp câu nếu server gửi lại cùng đoạn text trong các frame liên tiếp
+                  if (String(txt) != s_lastTtsSentence || (millis() - s_lastAiReplyTime > 1500)) {
+                    s_lastTtsSentence = String(txt);
+                    if (s_lastAiFullReply.length() > 0) {
+                      s_lastAiFullReply += " ";
+                    }
+                    s_lastAiFullReply += String(txt);
+                    s_ttsReceived = true;
+                    s_lastAiReplyTime = millis();
+                    Serial.printf("🔊 [XIAOZHI WS TTS ACCUM]: \"%s\" (Toàn bộ: \"%s\")\n", txt, s_lastAiFullReply.c_str());
+                    String emoFromTxt = XiaoZhiClient::detectEmotionFromText(String(txt));
+                    if (emoFromTxt.length() > 0) {
+                      s_lastEmotion = emoFromTxt;
+                      Serial.printf("🎭 [XIAOZHI EMOTION FROM TTS]: %s\n", s_lastEmotion.c_str());
+                    }
+                  }
+                }
+              }
+              if (strcmp(st, "start") == 0 || strcmp(st, "sentence_start") == 0) {
+                if (s_opusDecoder) {
+                  opus_decoder_ctl(s_opusDecoder, OPUS_RESET_STATE);
+                }
+                TestAudio::resetStreamPcm();
+              }
+              if (strcmp(st, "stop") == 0) {
+                s_ttsFinished = true;
+                Serial.println("⏹️ [XIAOZHI WS TTS STOP]: Máy chủ đã gửi xong toàn bộ chuỗi câu thoại TTS.");
+              }
+            }
+          }
+        } else if (data->op_code == 0x02) { // Binary frame: Opus compressed audio từ XiaoZhi TTS
+          if (data->data_len > 0 && data->data_ptr != nullptr) {
+            static uint32_t s_binFrames = 0;
+            s_binFrames++;
+
+            ensureOpusDecoder();
+            int decodedSamples = -1;
+            if (s_opusDecoder != nullptr) {
+              decodedSamples = opus_decode(
+                s_opusDecoder,
+                (const unsigned char*)data->data_ptr,
+                data->data_len,
+                s_pcmDecodeBuf,
+                1920,
+                0
+              );
+            }
+
+            if (decodedSamples > 0) {
+              if (s_binFrames <= 3 || s_binFrames % 25 == 0) {
+                Serial.printf("🔊 [XIAOZHI OPUS RX] Frame #%u | Opus: %d bytes -> Giải mã %d mẫu PCM 16kHz -> MAX98357A\n",
+                              s_binFrames, data->data_len, decodedSamples);
+              }
+              TestAudio::playStreamPcm(s_pcmDecodeBuf, (size_t)decodedSamples);
+            } else {
+              // Fallback dự phòng nếu khung nhị phân là PCM 16-bit thô
+              size_t sampleCount = data->data_len / sizeof(int16_t);
+              if (s_binFrames <= 3 || s_binFrames % 25 == 0) {
+                Serial.printf("🔊 [XIAOZHI PCM RX] Frame #%u | %d bytes (Opus err=%d) -> %u mẫu PCM -> MAX98357A\n",
+                              s_binFrames, data->data_len, decodedSamples, (unsigned)sampleCount);
+              }
+              TestAudio::playStreamPcm((const int16_t*)data->data_ptr, sampleCount);
+            }
+          }
         }
       }
       break;
@@ -592,14 +784,20 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
 }
 
 void XiaoZhiClient::startWebSocket() {
-  if (s_wsClient != nullptr) {
-    return;
-  }
   if (WiFi.status() != WL_CONNECTED) {
     return;
   }
   if (!isDeviceBound()) {
     return;
+  }
+
+  // Nếu client cũ đã tồn tại: kiểm tra xem còn kết nối không
+  if (s_wsClient != nullptr) {
+    if (esp_websocket_client_is_connected(s_wsClient) && s_wsConnected) {
+      return; // Vẫn đang kết nối tốt, không tạo lại
+    }
+    // Socket bị ngắt hoặc mất kết nối -> Dọn dẹp triệt để trước khi tạo mới
+    stopWebSocket();
   }
 
   String endpoint = getStoredEndpoint();
@@ -611,13 +809,14 @@ void XiaoZhiClient::startWebSocket() {
     token = "test-token";
   }
   String mac = getStoredMac();
+  mac.toLowerCase(); // Bắt buộc viết thường để khớp với cơ sở dữ liệu XiaoZhi Hub!
   String uuid = getOrCreateDeviceUuid();
 
   s_wsUri = endpoint;
   s_wsHeaders = "Authorization: Bearer " + token + "\r\n"
               + "Device-Id: " + mac + "\r\n"
               + "Client-Id: " + uuid + "\r\n"
-              + "Protocol-Version: 2\r\n";
+              + "Protocol-Version: 1\r\n";
 
   // DigiCert Global Root G2 CA PEM (xác thực chứng chỉ SSL api.tenclass.net)
   static const char XIAOZHI_CA_PEM[] =
@@ -650,14 +849,15 @@ void XiaoZhiClient::startWebSocket() {
   ws_cfg.user_agent = XIAOZHI_USER_AGENT;
   ws_cfg.cert_pem = XIAOZHI_CA_PEM;
   ws_cfg.skip_cert_common_name_check = true;
-  ws_cfg.ping_interval_sec = 10;
-  ws_cfg.pingpong_timeout_sec = 10;
-  ws_cfg.task_stack = 6144;
-  ws_cfg.buffer_size = 2048;
+  ws_cfg.ping_interval_sec = 15;
+  ws_cfg.pingpong_timeout_sec = 60;
+  ws_cfg.disable_pingpong_discon = true; // Tránh tự động ngắt kết nối do độ trễ Ping/Pong
+  ws_cfg.task_stack = 12288;
+  ws_cfg.buffer_size = 4096;
 
   Serial.println("\n🚀 [XIAOZHI WS] Đang mở kết nối nền WebSocket tới XiaoZhi Cloud...");
   Serial.printf("🌐 Endpoint : %s\n", s_wsUri.c_str());
-  Serial.printf("📡 Device-Id: %s\n", mac.c_str());
+  Serial.printf("📡 Device-Id: %s (Lowercase)\n", mac.c_str());
 
   s_wsClient = esp_websocket_client_init(&ws_cfg);
   if (!s_wsClient) {
@@ -684,10 +884,15 @@ void XiaoZhiClient::stopWebSocket() {
     s_wsClient = nullptr;
     s_wsConnected = false;
   }
+  if (s_opusDecoder != nullptr) {
+    opus_decoder_destroy(s_opusDecoder);
+    s_opusDecoder = nullptr;
+  }
 }
 
 bool XiaoZhiClient::isWebSocketConnected() {
-  return (s_wsClient != nullptr && s_wsConnected);
+  if (s_wsClient == nullptr) return false;
+  return (esp_websocket_client_is_connected(s_wsClient) && s_wsConnected);
 }
 
 void XiaoZhiClient::loopWebSocket() {
@@ -697,7 +902,8 @@ void XiaoZhiClient::loopWebSocket() {
   s_lastWsCheck = now;
 
   if (WiFi.status() == WL_CONNECTED && isDeviceBound()) {
-    if (!s_wsClient) {
+    if (!isWebSocketConnected()) {
+      Serial.println("🔄 [XIAOZHI WS] Kết nối WebSocket bị ngắt. Đang tự động kết nối lại...");
       startWebSocket();
     }
   } else {
@@ -706,6 +912,175 @@ void XiaoZhiClient::loopWebSocket() {
     }
   }
 }
+
+String XiaoZhiClient::getSessionId() {
+  return s_sessionId;
+}
+
+String XiaoZhiClient::getLastSttText() {
+  return s_lastSttText;
+}
+
+String XiaoZhiClient::getLastLlmReply() {
+  if (s_lastAiFullReply.length() > 0) {
+    return s_lastAiFullReply;
+  }
+  if (s_lastLlmText.length() > 0 && s_lastLlmText != "😊") {
+    return s_lastLlmText;
+  }
+  if (s_lastTtsSentence.length() > 0) {
+    return s_lastTtsSentence;
+  }
+  return s_lastLlmText;
+}
+
+String XiaoZhiClient::getLastEmotion() {
+  return s_lastEmotion;
+}
+
+bool XiaoZhiClient::isTtsFinished() {
+  return s_ttsFinished;
+}
+
+uint32_t XiaoZhiClient::getLastAiReplyTime() {
+  return s_lastAiReplyTime;
+}
+
+void XiaoZhiClient::clearLastTurn() {
+  s_lastSttText = "";
+  s_lastLlmText = "";
+  s_lastTtsSentence = "";
+  s_lastAiFullReply = "";
+  s_lastEmotion = "";
+  s_sttReceived = false;
+  s_llmReceived = false;
+  s_ttsReceived = false;
+  s_ttsFinished = false;
+  s_lastAiReplyTime = 0;
+}
+
+bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleCount, uint32_t sampleRate,
+                                      String& outUserText, String& outAiReply, String& outEmotion,
+                                      XiaoZhiProgressCallback onProgress) {
+  outUserText = "";
+  outAiReply = "";
+  outEmotion = "happy";
+
+  if (!pcmSamples || sampleCount < 800) {
+    Serial.println("⚠️ [XIAOZHI AUDIO] Dữ liệu PCM quá ngắn, bỏ qua.");
+    return false;
+  }
+
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println("⚠️ [XIAOZHI AUDIO] Chưa kết nối Wi-Fi.");
+    return false;
+  }
+
+  // Khởi động lại WebSocket nếu chưa kết nối
+  if (!isWebSocketConnected()) {
+    Serial.println("🔄 [XIAOZHI AUDIO] WebSocket chưa kết nối, đang thiết lập lại kết nối tới XiaoZhi Cloud...");
+    stopWebSocket();
+    startWebSocket();
+    uint32_t t0 = millis();
+    while (!isWebSocketConnected() && (millis() - t0 < 4000)) {
+      delay(50);
+    }
+  }
+
+  if (!isWebSocketConnected() || !s_wsClient) {
+    Serial.println("❌ [XIAOZHI AUDIO] Không thể kết nối tới XiaoZhi WebSocket!");
+    return false;
+  }
+
+  // Đặt lại dữ liệu hội thoại cho lượt mới
+  clearLastTurn();
+
+  // 1. Gửi listen start
+  String sid = s_sessionId.length() > 0 ? s_sessionId : "";
+  String startMsg = "{\"session_id\":\"" + sid + "\",\"type\":\"listen\",\"state\":\"start\",\"mode\":\"manual\"}";
+  int retStart = esp_websocket_client_send_text(s_wsClient, startMsg.c_str(), startMsg.length(), pdMS_TO_TICKS(1500));
+  if (retStart < 0) {
+    Serial.println("❌ [XIAOZHI AUDIO] Gửi listen start thất bại!");
+    return false;
+  }
+  Serial.printf("🎤 [XIAOZHI AUDIO] Bắt đầu truyền %u mẫu PCM (%.1f giây @ %u Hz) qua WebSocket...\n",
+                (unsigned)sampleCount, (float)sampleCount / sampleRate, (unsigned)sampleRate);
+
+  // 2. Truyền các khung âm thanh PCM (960 mẫu = 1920 byte @ 16kHz tương đương 60ms)
+  const uint8_t* bytePtr = (const uint8_t*)pcmSamples;
+  size_t totalBytes = sampleCount * sizeof(int16_t);
+  const size_t FRAME_BYTES = 960 * sizeof(int16_t); // 1920 byte
+
+  size_t offset = 0;
+  bool sendOk = true;
+  while (offset < totalBytes && isWebSocketConnected()) {
+    size_t chunk = (totalBytes - offset > FRAME_BYTES) ? FRAME_BYTES : (totalBytes - offset);
+    int bSent = esp_websocket_client_send_bin(s_wsClient, (const char*)(bytePtr + offset), chunk, pdMS_TO_TICKS(1000));
+    if (bSent < 0) {
+      Serial.printf("❌ [XIAOZHI AUDIO] Gửi khung nhị phân thất bại tại offset %u!\n", (unsigned)offset);
+      sendOk = false;
+      break;
+    }
+    offset += chunk;
+    delay(5);
+  }
+
+  // 3. Gửi listen stop
+  if (sendOk && isWebSocketConnected()) {
+    String stopMsg = "{\"session_id\":\"" + sid + "\",\"type\":\"listen\",\"state\":\"stop\"}";
+    esp_websocket_client_send_text(s_wsClient, stopMsg.c_str(), stopMsg.length(), pdMS_TO_TICKS(1500));
+    Serial.println("⏹️ [XIAOZHI AUDIO] Đã kết thúc truyền âm thanh. Đang chờ XiaoZhi Hub phản hồi...");
+  } else {
+    Serial.println("⚠️ [XIAOZHI AUDIO] Quá trình gửi âm thanh bị gián đoạn do mất kết nối socket.");
+    return false;
+  }
+
+  // 4. Chờ nhận phản hồi STT và LLM/TTS từ server (tối đa 12.0s để nhận trọn vẹn toàn bộ các câu thoại)
+  uint32_t waitStart = millis();
+  while ((millis() - waitStart < 12000) && isWebSocketConnected()) {
+    String currentPartial = (s_lastAiFullReply.length() > 0) ? s_lastAiFullReply : s_lastLlmText;
+    if (onProgress) {
+      onProgress(s_lastSttText, currentPartial, s_lastEmotion, false);
+    }
+
+    // Nếu máy chủ đã phát tín hiệu kết thúc TTS (type: tts, state: stop) -> đã hoàn tất trọn vẹn toàn bộ chuỗi câu
+    if ((s_ttsReceived || s_llmReceived) && s_ttsFinished) {
+      Serial.println("✅ [XIAOZHI AUDIO] Máy chủ đã gửi xong toàn bộ câu thoại (TTS STOP). Hoàn tất nhận phản hồi.");
+      break;
+    }
+    // Nếu đã nhận được câu trả lời nhưng chưa có tín hiệu stop, chờ tối thiểu 3.2 giây không có câu mới từ server
+    if ((s_ttsReceived || s_llmReceived) && s_lastAiReplyTime > 0 && (millis() - s_lastAiReplyTime >= 3200)) {
+      Serial.println("⏱️ [XIAOZHI AUDIO] Đã qua 3.2s không có thêm câu thoại mới từ máy chủ. Kết thúc chờ đồng bộ.");
+      break;
+    }
+
+    delay(30);
+  }
+
+  if (s_sttReceived && s_lastSttText.length() > 0) {
+    outUserText = s_lastSttText;
+  }
+
+  if (s_lastAiFullReply.length() > 0) {
+    outAiReply = s_lastAiFullReply;
+  } else if (s_lastLlmText.length() > 0 && s_lastLlmText != "😊") {
+    outAiReply = s_lastLlmText;
+  } else if (s_lastTtsSentence.length() > 0) {
+    outAiReply = s_lastTtsSentence;
+  }
+
+  outEmotion = (s_lastEmotion.length() > 0) ? s_lastEmotion : "happy";
+
+  if (onProgress) {
+    onProgress(outUserText, outAiReply, outEmotion, true);
+  }
+
+  Serial.printf("✨ [XIAOZHI RESULT] STT: \"%s\" | AI: \"%s\" | Emotion: %s\n",
+                outUserText.c_str(), outAiReply.c_str(), outEmotion.c_str());
+
+  return (outUserText.length() > 0 || outAiReply.length() > 0);
+}
+
 
 
 

@@ -1,6 +1,5 @@
 // ============================================================================
-// BỘ BIỂU TƯỢNG MÈO GOME CHIBI (ANIME THEME - 36x36 PIXELS RGB565)
-// Tự động trích xuất & tối ưu hoá từ assets/icons/gome/
+// BỘ BIỂU TƯỢNG GOME CHIBI (ANIME THEME - 36x36 PIXELS RGB565)
 // Màu chủ đạo: Xanh Cyan/Sky Blue, Trắng, Hồng Chibi
 // ============================================================================
 

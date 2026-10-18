@@ -22,13 +22,13 @@ namespace TestButtons {
     { "LEFT (Trái)",  "LF", "4.7 kOhm",     1.05f,  830, 1340 }, // Chuẩn: 0.90V - 1.20V (~1.05V)
     { "RIGHT (Phải)", "RT", "10 kOhm",      1.65f, 1350, 1940 }, // Chuẩn: 1.45V - 1.85V (~1.65V)
     { "MENU",         "MN", "20 kOhm",      2.18f, 1920, 2325 }, // Thực tế 3.27V: ~2.18V (1.92V - 2.32V)
-    { "EXIT",         "EX", "47 kOhm",      2.65f, 2330, 3040 }  // Thực tế 3.27V + ADC S3: ~2.36V - 2.90V (2.33V - 3.04V)
+    { "EXIT",         "EX", "47 kOhm",      2.65f, 2330, 2850 }  // Thực tế 3.27V + ADC S3: ~2.36V - 2.75V (2.33V - 2.85V)
   };
 
   static uint8_t activeAdcPin = PIN_ADC_KEYPAD; // Mặc định GPIO 3 (ADC1_CH2)
   static int lastAdcRaw = 4095;
   static int lastAdcMv  = 3300;
-  static int activeBtnIndex = -1;     // -1 = Không bấm (Hở mạch > 3.04V)
+  static int activeBtnIndex = -1;     // -1 = Không bấm (Hở mạch > 2.88V)
   static int candidateBtnIndex = -1;
   static int prevSettledMv = 3300;
   static unsigned long candidateStartMs = 0;
@@ -66,8 +66,8 @@ namespace TestButtons {
 
   // Phân loại nút bấm từ điện áp mV theo đúng bảng thiết kế
   static int classifyButtonFromMv(int mv) {
-    if (mv >= 3045) {
-      return -1; // Không bấm (> 3.045V ~ 3.30V)
+    if (mv >= 2880) {
+      return -1; // Không bấm (> 2.88V ~ 3.30V mức nghỉ hở mạch)
     }
     for (int i = 0; i < 7; i++) {
       if (mv >= BUTTON_SPECS[i].minMv && mv <= BUTTON_SPECS[i].maxMv) {
@@ -98,14 +98,14 @@ namespace TestButtons {
     Serial.println("  ------------------------------------------------------------------------------");
     Serial.println("  Nút bấm        | Điện trở (R)  | Điện áp lý thuyết | Giá trị ADC | Ngưỡng nhận diện");
     Serial.println("  ---------------+---------------+-------------------+-------------+-----------------");
-    Serial.println("  Không bấm      | Hở mạch (∞)   | 3.30 V            | 4000 - 4095 | > 3.00 V");
+    Serial.println("  Không bấm      | Hở mạch (∞)   | 3.30 V            | 4000 - 4095 | > 2.88 V");
     Serial.println("  Nút 1: OK      | 0 Ohm (GND)   | 0.00 V            |    0 - 100  | < 0.17 V");
     Serial.println("  Nút 2: UP      | 1.0 kOhm      | 0.30 V            |  350 - 420  | 0.18 V - 0.46 V");
     Serial.println("  Nút 3: DOWN    | 2.2 kOhm      | 0.60 V            |  700 - 800  | 0.47 V - 0.82 V");
     Serial.println("  Nút 4: LEFT    | 4.7 kOhm      | 1.05 V            | 1250 - 1380 | 0.83 V - 1.34 V");
     Serial.println("  Nút 5: RIGHT   | 10 kOhm       | 1.65 V            | 2000 - 2100 | 1.35 V - 1.94 V");
-    Serial.println("  Nút 6: MENU    | 20 kOhm       | 2.27 V            | 2750 - 2880 | 1.95 V - 2.48 V");
-    Serial.println("  Nút 7: EXIT    | 47 kOhm       | 2.72 V            | 3300 - 3450 | 2.49 V - 2.96 V");
+    Serial.println("  Nút 6: MENU    | 20 kOhm       | 2.27 V            | 2750 - 2880 | 1.95 V - 2.32 V");
+    Serial.println("  Nút 7: EXIT    | 47 kOhm       | 2.72 V            | 3300 - 3450 | 2.33 V - 2.85 V");
     Serial.println("  ------------------------------------------------------------------------------");
     Serial.println("  💡 Phím tắt Serial: Gõ [b] để xem trực tiếp Điện áp & ADC, gõ [4] để mở màn hình DIO/ADC");
     Serial.println("================================================================================");
@@ -118,30 +118,32 @@ namespace TestButtons {
 
     analogReadResolution(12);
     analogSetPinAttenuation(activeAdcPin, ADC_11db); // Đọc toàn dải 0.00V .. 3.30V
-    pinMode(activeAdcPin, INPUT);
+    pinMode(activeAdcPin, INPUT); // Sử dụng trở kéo lên 10kOhm phần cứng chuẩn xác
 
     readFilteredAdc(lastAdcRaw, lastAdcMv);
     printAdcTableGuide();
   }
 
   void loop() {
+    static unsigned long s_lastAdcReadMs = 0;
+    unsigned long now = millis();
+    if (now - s_lastAdcReadMs < 15) {
+      return; // Đọc ADC mỗi 15ms (~66Hz): Cực nhạy nhưng giải phóng 95% CPU cho Core 1 và WebServer
+    }
+    s_lastAdcReadMs = now;
+
     int raw = 0, mv = 0;
     readFilteredAdc(raw, mv);
     lastAdcRaw = raw;
     lastAdcMv  = mv;
 
     int detected = classifyButtonFromMv(mv);
-    unsigned long now = millis();
 
-    // Kiểm tra độ ổn định điện áp (Settling Filter: chênh lệch giữa 2 lần đọc < 55mV trong 35ms)
-    int deltaMv = abs(mv - prevSettledMv);
-    prevSettledMv = mv;
-
-    if (detected != candidateBtnIndex || deltaMv > 65) {
+    if (detected != candidateBtnIndex) {
       candidateBtnIndex = detected;
       candidateStartMs  = now;
-    } else if (now - candidateStartMs >= 35) {
-      // Trạng thái nút bấm đã ổn định sau 35ms!
+    } else if (now - candidateStartMs >= 30) {
+      // Trạng thái nút bấm đã ổn định sau 30ms (2 chu kỳ lấy mẫu liên tiếp)!
       if (activeBtnIndex != candidateBtnIndex) {
         int prevBtn = activeBtnIndex;
         activeBtnIndex = candidateBtnIndex;
@@ -205,6 +207,36 @@ namespace TestButtons {
       return true;
     }
     return false;
+  }
+
+  void injectButtonPress(int idx) {
+    if (idx < 0 || idx >= 7) return;
+    activeBtnIndex = idx;
+    const AdcButtonSpec& spec = BUTTON_SPECS[idx];
+    lastAdcMv  = (spec.minMv + spec.maxMv) / 2;
+    lastAdcRaw = (lastAdcMv * 4095) / 3300;
+    char buf[48];
+    snprintf(buf, sizeof(buf), "%s (%.2fV|%d)", spec.shortCode, lastAdcMv / 1000.0f, lastAdcRaw);
+    lastButtonStr = String(buf);
+    buttonActionTriggered = true;
+
+    Serial.printf("🌐 [WEB VIRTUAL KEYPAD] Nhận lệnh bấm phím từ Web: %-13s | Trở: %-11s | Mô phỏng: %.2fV (%4dmV)\n",
+                  spec.name, spec.resistorLabel, lastAdcMv / 1000.0f, lastAdcMv);
+
+    // Gửi trực tiếp sự kiện sang màn hình ST7789
+    TestDisplay::onKeypadEvent(idx);
+  }
+
+  void injectButtonRelease() {
+    if (activeBtnIndex >= 0) {
+      int prev = activeBtnIndex;
+      activeBtnIndex = -1;
+      buttonActionTriggered = false;
+      lastAdcMv = 3300;
+      lastAdcRaw = 4095;
+      lastButtonStr = "NONE (3.30V)";
+      Serial.printf("⚪ [WEB VIRTUAL KEYPAD] Nhả phím ảo (Nút %d)\n", prev);
+    }
   }
 
 }

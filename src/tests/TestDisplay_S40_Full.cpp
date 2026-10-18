@@ -5,6 +5,7 @@
 #include "tests/TestButtons.h"
 #include "tests/TestSDCard.h"
 #include "tests/TestWindmill.h"
+#include "CobLedController.h"
 #include "Config.h"
 #include "WifiManager.h"
 #include "PcStatsManager.h"
@@ -12,6 +13,7 @@
 #include "XiaoZhiClient.h"
 #include "GomeIcons.h"
 #include "OtaManager.h"
+#include "HardwareManager.h"
 #include <SPI.h>
 #include <WiFi.h>
 #include <LittleFS.h>
@@ -612,6 +614,7 @@ namespace TestDisplay {
   static String s40AiMacStr = "";
   static String s40AiBindStatus = "Dang dong bo voi XiaoZhi Cloud...";
   static unsigned long s40AiLastOtpPollMs = 0;
+  static uint32_t s40AiTurnId = 1;
 
   static String s40ToastMsg = "";
   static unsigned long s40ToastExpireMs = 0;
@@ -648,6 +651,15 @@ namespace TestDisplay {
       TestAudio::setMicSensitivityMode(micSensitivityMode);
       int wmMod              = p.getInt("wm_mod", 0) % 5;
       TestWindmill::setMode(wmMod);
+      int edL                = p.getInt("ed_l", 2) % 6; // Mặc định 50%
+      int edR                = p.getInt("ed_r", 2) % 6; // Mặc định 50%
+      TestWindmill::setEdisonLeftMode(edL);
+      TestWindmill::setEdisonRightMode(edR);
+      bool fl                = p.getBool("fl_en", true);
+      int cobMod             = p.getInt("cob_mod", 1);
+      CobLeds::init(fl);
+      CobLeds::setCurrentMode(cobMod);
+      TestWindmill::setFlowingLeds(fl);
       p.end();
     }
   }
@@ -661,6 +673,10 @@ namespace TestDisplay {
       p.putBool("kbeep", keyBeepEnabled);
       p.putInt("msens", micSensitivityMode);
       p.putInt("wm_mod", TestWindmill::getMode());
+      p.putInt("ed_l", TestWindmill::getEdisonLeftMode());
+      p.putInt("ed_r", TestWindmill::getEdisonRightMode());
+      p.putBool("fl_en", CobLeds::isOn());
+      p.putInt("cob_mod", CobLeds::getCurrentMode());
       p.end();
     }
   }
@@ -684,6 +700,7 @@ namespace TestDisplay {
     String bgMode      = "image";  // "image", "gradient-cyber", "gradient-nebula", "gradient-sunset", "solid-black"
     String bgImage     = "";
     int dimOverlay     = 35;       // Độ tối lớp phủ nền (0..85%)
+    String clockColorHex = "#38bdf8";
   };
 
   static StandbyConfig stCfg;
@@ -859,7 +876,8 @@ namespace TestDisplay {
         if (!err) {
           stCfg.theme       = doc["theme"] | "cyberpunk";
           stCfg.clockStyle  = doc["clock_style"] | "digital";
-          stCfg.clockColor  = hexToRgb565(doc["clock_color"] | "#38bdf8", C_NEON_CYAN);
+          stCfg.clockColorHex = doc["clock_color"] | "#38bdf8";
+          stCfg.clockColor  = hexToRgb565(stCfg.clockColorHex, C_NEON_CYAN);
           stCfg.clockFormat = doc["clock_format"] | "24h";
           stCfg.showSeconds = doc["show_seconds"] | true;
           stCfg.clockPos    = doc["clock_pos"] | "center";
@@ -2282,9 +2300,35 @@ namespace TestDisplay {
     }
   }
 
-  static void showSymbianToast(const String& msg, unsigned long durationMs = 2000) {
+  void showSymbianToast(const String& msg, unsigned long durationMs) {
     s40ToastMsg = msg;
     s40ToastExpireMs = millis() + durationMs;
+  }
+
+  static void drawGlobalToastIfNeeded() {
+    if (!tft) return;
+    static bool s_toastActiveOnScreen = false;
+    if (s40ToastMsg.length() > 0) {
+      if (millis() < s40ToastExpireMs) {
+        int w = tft->width();
+        int h = tft->height();
+        tft->fillRoundRect(14, h - 54, w - 28, 26, 6, C_NEON_GREEN);
+        tft->drawRoundRect(14, h - 54, w - 28, 26, 6, C_WHITE);
+        tft->setTextColor(C_BLACK, C_NEON_GREEN);
+        tft->setTextSize(1);
+        String cleanMsg = toCleanAscii(s40ToastMsg);
+        int tx = (w - vnStrLen(cleanMsg) * 6) / 2;
+        tft->setCursor(max(18, tx), h - 45);
+        tft->print(cleanMsg);
+        s_toastActiveOnScreen = true;
+      } else {
+        s40ToastMsg = "";
+        if (s_toastActiveOnScreen) {
+          s_toastActiveOnScreen = false;
+          refreshActiveScreen();
+        }
+      }
+    }
   }
 
   // Vẽ biểu tượng đồ họa cho từng mục trong Menu Symbian S40 (Lưới 4x3 = 12 Biểu Tượng, tự động đổi tông màu theo Chủ Đề!)
@@ -2893,12 +2937,14 @@ namespace TestDisplay {
   static int lastDrawnSettingsCursor = -1;
   static int lastDrawnSettingsFirstRow = -1;
 
+  static const int S40_SETTINGS_COUNT = 14;
+
   static void drawSingleSettingsRow(int idx, int vis, bool sel) {
-    if (!tft || idx < 0 || idx >= 11 || vis < 0 || vis >= 7) return;
+    if (!tft || idx < 0 || idx >= S40_SETTINGS_COUNT || vis < 0 || vis >= 7) return;
     int w = tft->width();
     int ry = 30 + vis * 37;
 
-    int spkVol = TestAudio::getSpeakerVolumePct();
+    int spkVol = TestAudio::getNotifyVolumePct();
     const char* micSensNames[3] = { "Thấp", "Tiêu chuẩn", "Cao" };
     const char* aodStyleLabels[4] = {
       "Tắt (Tắt màn hình)",
@@ -2907,21 +2953,24 @@ namespace TestDisplay {
       "3. Đồng hồ kim (Analog)"
     };
 
-    const char* labels[11] = {
+    const char* labels[14] = {
       "1. Phong cách Giao diện",
       "2. Độ sáng màn hình",
       "3. Thời gian tắt màn hình",
       "4. Màn hình khóa (AOD)",
-      "5. Âm lượng hệ thống",
+      "5. Âm lượng thông báo",
       "6. Âm báo phím bấm",
       "7. Nhạc chuông báo thức",
       "8. Độ nhạy Micro thu âm",
       "9. Biểu cảm Trợ lý AI",
       "10. Biểu đồ Sóng âm & Cảm biến",
-      "11. Động cơ & Vành đèn (L298N)"
+      "11. Cối xay gió L298N (G1)",
+      "12. LED Edison Trái (G47)",
+      "13. LED Edison Phải (G21)",
+      "14. LED Nước Chảy COB (G18/38)"
     };
 
-    String values[11] = {
+    String values[14] = {
       String(curTheme().name),
       String(screenBrightnessPct) + "%",
       String(TIMEOUT_LABELS[screenTimeoutIdx % 6]),
@@ -2932,7 +2981,10 @@ namespace TestDisplay {
       String(micSensNames[micSensitivityMode % 3]),
       getEmojiStateName(),
       "Bấm OK để mở ->",
-      String(TestWindmill::getModeName())
+      String(TestWindmill::getModeName()),
+      String(TestWindmill::getEdisonLeftModeName()),
+      String(TestWindmill::getEdisonRightModeName()),
+      String(CobLeds::getModeName())
     };
 
     tft->fillRect(6, ry, w - 12, 34, C_DARK_BG);
@@ -3006,9 +3058,23 @@ namespace TestDisplay {
 
     for (int vis = 0; vis < 7; vis++) {
       int idx = firstRow + vis;
-      if (idx >= 10) break;
+      if (idx >= S40_SETTINGS_COUNT) {
+        int ry = 30 + vis * 37;
+        tft->fillRect(6, ry, w - 12, 34, C_DARK_BG);
+        continue;
+      }
       drawSingleSettingsRow(idx, vis, idx == s40SettingsCursor);
     }
+
+    // Thanh cuộn chỉ báo vị trí danh sách cài đặt bên mép phải
+    int sbX = w - 4;
+    int sbY = 30;
+    int sbH = 7 * 37 - 3;
+    tft->drawFastVLine(sbX, sbY, sbH, 0x2124);
+    int thumbH = max(16, (sbH * 7) / S40_SETTINGS_COUNT);
+    int thumbY = sbY + ((sbH - thumbH) * s40SettingsCursor) / (S40_SETTINGS_COUNT - 1);
+    tft->fillRoundRect(sbX - 1, thumbY, 3, thumbH, 1, C_NEON_CYAN);
+
     lastDrawnSettingsCursor = s40SettingsCursor;
     lastDrawnSettingsFirstRow = firstRow;
   }
@@ -3635,7 +3701,73 @@ namespace TestDisplay {
     drawQrContentCard(w, true);
   }
 
-  static String s40AiEmotionTag = "HAPPY";
+  // Chuyển đổi toàn diện tất cả các chuẩn emotion của XiaoZhi Cloud & ngữ cảnh hội thoại sang 12 trạng thái mắt
+  static uint8_t mapAiEmotionToEyeState(const String& emoTag, const String& textContext = "") {
+    String e = emoTag;
+    e.toLowerCase();
+    e.trim();
+
+    // 1. Phân loại theo emotion tag chính thức của XiaoZhi Cloud
+    if (e == "happy" || e == "laughing" || e == "funny" || e == "loving" || e == "delicious" || e == "confident" || e == "excited" || e == "pleased") {
+      return 2; // HAPPY (Mắt cười xanh lá ^ ^)
+    }
+    if (e == "wink" || e == "winking" || e == "wink-left" || e == "playful" || e == "kissy") {
+      return 9; // WINK LEFT (Nháy mắt trái)
+    }
+    if (e == "wink-right") {
+      return 10; // WINK RIGHT (Nháy mắt phải)
+    }
+    if (e == "cool" || e == "relaxed" || e == "chill") {
+      return 0; // IDLE / COOL
+    }
+    if (e == "neutral" || e == "idle" || e == "normal") {
+      return 0; // IDLE
+    }
+    if (e == "thinking" || e == "pondering" || e == "curious") {
+      return 5; // LOOK UP (Nhìn lên suy nghĩ)
+    }
+    if (e == "confused" || e == "puzzled" || e == "surprised" || e == "shocked" || e == "silly") {
+      return 8; // CONFUSED (Mắt xoáy vàng @@)
+    }
+    if (e == "sad" || e == "crying" || e == "embarrassed" || e == "shy") {
+      return 6; // LOOK DOWN (Nhìn xuống buồn/ngại)
+    }
+    if (e == "angry" || e == "mad" || e == "furious") {
+      return 7; // ANGRY (Mắt giận >_< hồng tím)
+    }
+    if (e == "sleepy" || e == "tired" || e == "bored") {
+      return 11; // SLEEPY (Buồn ngủ tím)
+    }
+    if (e == "left" || e == "look-left") {
+      return 3; // LOOK LEFT
+    }
+    if (e == "right" || e == "look-right") {
+      return 4; // LOOK RIGHT
+    }
+    if (e == "up") {
+      return 5; // LOOK UP
+    }
+    if (e == "down") {
+      return 6; // LOOK DOWN
+    }
+
+    // 2. Nếu emotion tag chưa rõ, phân tích ngữ cảnh từ câu trả lời (ASCII hoặc tiếng Việt)
+    if (textContext.length() > 0) {
+      String t = textContext;
+      t.toLowerCase();
+      if (t.indexOf("haha") >= 0 || t.indexOf("hihi") >= 0 || t.indexOf("vui") >= 0) return 2;
+      if (t.indexOf("nhac") >= 0 || t.indexOf("bai hat") >= 0 || t.indexOf("nghe") >= 0) return 2;
+      if (t.indexOf("suy nghi") >= 0 || t.indexOf("cho chut") >= 0 || t.indexOf("de xem") >= 0) return 5;
+      if (t.indexOf("khong ro") >= 0 || t.indexOf("chua ro") >= 0 || t.indexOf("khong hieu") >= 0 || t.indexOf("boi roi") >= 0) return 8;
+      if (t.indexOf("xin loi") >= 0 || t.indexOf("buon") >= 0 || t.indexOf("that tiec") >= 0) return 6;
+      if (t.indexOf("ngu") >= 0 || t.indexOf("chuc ngu ngon") >= 0) return 11;
+      if (t.indexOf("canh bao") >= 0 || t.indexOf("nguy hiem") >= 0) return 7;
+    }
+
+    return 2; // Mặc định vui vẻ (HAPPY)
+  }
+
+  static String s40AiEmotionTag = "IDLE";
   static bool s40AiAutoScroll = true;
   static int& s40MemPopupCursor = s40MemOptionCursor;
   static unsigned long& s40AiStateChangeMs = s40AiStateStartMs;
@@ -3727,59 +3859,53 @@ namespace TestDisplay {
     tft->setTextSize(1);
     if (s40AiState == AI_STATE_IDLE) {
       tft->setTextColor(C_NEON_CYAN, 0x0862);
-      tft->setCursor(14, 203);
-      tft->print("SẴN SÀNG TRÒ CHUYỆN CÙNG BẠN");
+      tft->setCursor(14, 204);
+      tft->print("TRO LY XIAOZHI SAN SANG");
 
       tft->setTextColor(C_YELLOW, 0x0862);
-      tft->setCursor(14, 220);
-      tft->print("Bấm phím [OK] và nói Tiếng Việt");
-      tft->setCursor(14, 234);
-      tft->print("vào Micro (cách khoảng 10 - 25cm).");
+      tft->setCursor(14, 222);
+      tft->print("Bam [OK] de bat dau tro chuyen.");
 
       tft->setTextColor(C_WHITE, 0x0862);
-      tft->setCursor(14, 252);
-      tft->print("* Nhận diện giọng nói thông minh");
-      tft->setCursor(14, 266);
-      tft->print("* Tự động trả lời & biểu cảm mắt");
-      tft->setCursor(14, 280);
-      tft->print("* Phản hồi trực tiếp bằng Tiếng Việt");
+      tft->setCursor(14, 240);
+      tft->print("XiaoZhi se lang nghe & tra loi ban.");
+      tft->setCursor(14, 256);
+      tft->print("Bieu cam va giong noi song dong.");
+
+      tft->setTextColor(C_SLATE, 0x0862);
+      tft->setCursor(14, 274);
+      tft->print("Phim [Len/Xuong]: Chinh am luong");
     } else if (s40AiState == AI_STATE_LISTENING) {
-      int peak = TestAudio::getLastMicLevelPct();
-      float recSec = TestAudio::getRecordedDurationSec();
-      int maxVu = TestAudio::getRecordedMaxVuPct();
-
       tft->setTextColor(C_NEON_GREEN, 0x0862);
-      tft->setCursor(14, 203);
-      tft->printf("ĐANG LẮNG NGHE... (Âm lượng: %d%%)", peak);
+      tft->setCursor(14, 204);
+      tft->print("DANG LANG NGHE BAN NOI...");
 
       tft->setTextColor(C_WHITE, 0x0862);
-      tft->setCursor(14, 220);
-      tft->printf("Thời gian thu: %.1f / 8.0 giây", recSec);
-      tft->setCursor(14, 235);
-      tft->printf("Độ lớn giọng nói: %d%%", maxVu);
+      tft->setCursor(14, 224);
+      tft->print("Ban hay noi cau hoi vao Micro.");
 
-      tft->setCursor(14, 252);
+      tft->setCursor(14, 246);
       if (s40AiSpeechDetected) {
         tft->setTextColor(C_NEON_GREEN, 0x0862);
-        tft->print(">> Đã nhận diện được tiếng nói!");
+        tft->print(">> Da nhan duoc tieng noi...");
       } else {
         tft->setTextColor(C_YELLOW, 0x0862);
-        tft->print(">> Hãy nói rõ ràng vào Micro...");
+        tft->print(">> Dang cho giong noi cua ban...");
       }
 
       tft->setTextColor(C_SLATE, 0x0862);
-      tft->setCursor(14, 272);
-      tft->print("Ngừng nói 1.6s hoặc bấm [OK] gửi ngay");
+      tft->setCursor(14, 270);
+      tft->print("Bam [OK] de gui ngay hoac ngung noi.");
     } else if (s40AiState == AI_STATE_THINKING) {
       tft->setTextColor(C_YELLOW, 0x0862);
-      tft->setCursor(14, 203);
-      tft->print("Nội dung bạn vừa nói:");
+      tft->setCursor(14, 204);
+      tft->print("Cau hoi cua ban:");
 
       String userLines[3];
       int nUser = wrapTextWordBoundary("\"" + s40AiUserSpeechText + "\"", 34, userLines, 3);
       tft->setTextColor(C_WHITE, 0x0862);
       for (int i = 0; i < nUser && i < 3; i++) {
-        tft->setCursor(14, 219 + i * 14);
+        tft->setCursor(14, 222 + i * 14);
         tft->print(userLines[i]);
       }
 
@@ -3787,27 +3913,50 @@ namespace TestDisplay {
       tft->drawRoundRect(12, 266, W - 24, 22, 5, C_NEON_PINK);
       tft->setTextColor(C_NEON_PINK, 0x2008);
       tft->setCursor(18, 273);
-      tft->print(s40AiSttPhaseMsg.length() > 0 ? s40AiSttPhaseMsg : ">> Trợ lý XiaoZhi đang suy nghĩ...");
+      tft->print(s40AiSttPhaseMsg.length() > 0 ? s40AiSttPhaseMsg : ">> XiaoZhi dang suy nghi...");
     } else if (s40AiState == AI_STATE_REPLYING) {
       tft->setTextColor(C_NEON_CYAN, 0x0862);
-      tft->setCursor(12, 202);
-      tft->printf("XiaoZhi [%s]:", s40AiEmotionTag.c_str());
+      tft->setCursor(14, 203);
+      tft->print("TRO CHUYEN CUNG XIAOZHI");
 
       int visibleRows = 5;
       int maxStart = (s40AiTotalLines > visibleRows) ? (s40AiTotalLines - visibleRows) : 0;
       if (s40AiScrollLine > maxStart) s40AiScrollLine = maxStart;
       if (s40AiScrollLine < 0) s40AiScrollLine = 0;
 
-      tft->setTextColor(C_SLATE, 0x0862);
-      tft->setCursor(W - 64, 202);
-      tft->printf("D%d/%d", s40AiScrollLine + 1, s40AiTotalLines);
+      // Đường phân cách mờ dưới tiêu đề hộp thoại
+      tft->drawFastHLine(10, 213, W - 20, 0x18e3);
 
-      tft->setTextColor(C_WHITE, 0x0862);
       for (int r = 0; r < visibleRows; r++) {
         int lineIdx = s40AiScrollLine + r;
         if (lineIdx < s40AiTotalLines) {
-          tft->setCursor(12, 216 + r * 14);
-          tft->print(s40AiWrappedLines[lineIdx]);
+          String curLine = s40AiWrappedLines[lineIdx];
+          int curY = 216 + r * 14;
+          if (curLine.startsWith("Ban:")) {
+            tft->setTextColor(C_YELLOW, 0x0862);
+            tft->setCursor(12, curY);
+            tft->print("Ban:");
+            tft->setTextColor(0xFFE0, 0x0862); // Vàng sáng cho lời nói người dùng
+            tft->print(curLine.substring(4));
+          } else if (curLine.startsWith("XiaoZhi:")) {
+            tft->setTextColor(C_NEON_CYAN, 0x0862);
+            tft->setCursor(12, curY);
+            tft->print("XiaoZhi:");
+            tft->setTextColor(C_WHITE, 0x0862); // Trắng sáng cho phản hồi AI
+            tft->print(curLine.substring(8));
+          } else {
+            // Xác định dòng này là lời của Ban hay XiaoZhi
+            bool isAi = false;
+            for (int k = 0; k <= lineIdx; k++) {
+              if (s40AiWrappedLines[k].indexOf("XiaoZhi:") >= 0) {
+                isAi = true;
+                break;
+              }
+            }
+            tft->setTextColor(isAi ? C_WHITE : 0xFFE0, 0x0862);
+            tft->setCursor(12, curY);
+            tft->print(curLine);
+          }
         }
       }
 
@@ -3837,19 +3986,19 @@ namespace TestDisplay {
     tft->setCursor(12, 171);
     if (s40AiState == AI_STATE_IDLE) {
       tft->setTextColor(C_NEON_CYAN, C_CARD_BG);
-      tft->print("MICRO: SẴN SÀNG");
+      tft->print("SAN SANG");
     } else if (s40AiState == AI_STATE_LISTENING) {
       tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
-      tft->print(s40AiSpeechDetected ? "MICRO: ĐÃ BẮT GIỌNG!" : "MICRO: ĐANG LẮNG NGHE...");
+      tft->print(s40AiSpeechDetected ? "DA BAT GIONG!" : "DANG LANG NGHE...");
     } else if (s40AiState == AI_STATE_THINKING) {
       tft->setTextColor(C_NEON_PINK, C_CARD_BG);
-      tft->print("XIAOZHI ĐANG SUY NGHĨ");
+      tft->print("DANG SUY NGHI...");
     } else {
-      tft->setTextColor(C_YELLOW, C_CARD_BG);
-      tft->printf("CUỘN TỰ ĐỘNG (%s)", s40AiAutoScroll ? "BẬT" : "DỪNG");
+      tft->setTextColor(C_NEON_CYAN, C_CARD_BG);
+      tft->print("DANG TRA LOI...");
     }
 
-    int barX = 128, barY = 171, barW = 96, barH = 7;
+    int barX = 138, barY = 171, barW = 86, barH = 7;
     tft->fillRect(barX, barY, barW, barH, 0x0841);
     int fillW = constrain((peak * barW) / 100, 2, barW);
     uint16_t vuCol = (peak > 60) ? C_NEON_PINK : ((peak > 14) ? C_NEON_GREEN : C_NEON_CYAN);
@@ -3860,14 +4009,20 @@ namespace TestDisplay {
     if (WiFi.status() == WL_CONNECTED) {
       if (XiaoZhiClient::isWebSocketConnected()) {
         tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
-        tft->print("HUB: ONLINE | WS CONNECTED");
+        tft->print("DA KET NOI");
       } else {
         tft->setTextColor(C_YELLOW, C_CARD_BG);
-        tft->print("HUB: DANG DONG BO WEBSOCKET...");
+        tft->print("DANG KET NOI...");
       }
     } else {
-      tft->print("CANH BAO: Can WiFi de ket noi");
+      tft->setTextColor(C_NEON_AMBER, C_CARD_BG);
+      tft->print("CHUA CO WI-FI");
     }
+
+    // Hiển thị âm lượng thoại XiaoZhi AI ở góc phải thanh trạng thái
+    tft->setTextColor(C_NEON_CYAN, C_CARD_BG);
+    tft->setCursor(W - 74, 182);
+    tft->printf("AM:%3d%%", TestAudio::getXiaoZhiVolumePct());
   }
 
   static void drawXiaoZhiBindingScreen() {
@@ -3931,7 +4086,7 @@ namespace TestDisplay {
   static void drawXiaoZhiAssistantScreen(bool fullRedraw);
 
   static void enterXiaoZhiAssistantMode(bool forceBinding = false) {
-    currentMode = 11;
+    currentMode = 1;
     s40AiMacStr = WiFi.macAddress();
     if (forceBinding) {
       XiaoZhiClient::unbindDevice();
@@ -3946,7 +4101,9 @@ namespace TestDisplay {
 
     if (!forceBinding && XiaoZhiClient::isDeviceBound()) {
       s40AiState = AI_STATE_IDLE;
-      s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de hoi thoai.";
+      eyeState = 0;
+      s40AiEmotionTag = "IDLE";
+      s40AiReplyText = "Xin chao! Toi la Tro ly XiaoZhi AI.\nBam [OK] de bat dau tro chuyen.";
       drawXiaoZhiAssistantScreen(true);
     } else {
       s40AiState = AI_STATE_BINDING;
@@ -3983,30 +4140,36 @@ namespace TestDisplay {
       drawXiaoZhiConversationBoxOnly();
 
       if (s40AiState == AI_STATE_IDLE) {
-        drawSymbianSoftkeys("Thu am(OK)", "Lien ket(Menu)", "Thoat");
+        drawSymbianSoftkeys("Noi(OK)", "Am luong", "Thoat");
       } else if (s40AiState == AI_STATE_LISTENING) {
-        drawSymbianSoftkeys("Gui(OK)", "Dang thu...", "Huy(Exit)");
+        drawSymbianSoftkeys("Gui(OK)", "Dang nghe...", "Huy");
       } else if (s40AiState == AI_STATE_THINKING) {
-        drawSymbianSoftkeys("Dang xu ly", "...", "Thoat");
+        drawSymbianSoftkeys("Cho...", "Dang nghi...", "Thoat");
       } else {
-        drawSymbianSoftkeys("Noi tiep(OK)", "Phat lai(Trai)", "Thoat");
+        drawSymbianSoftkeys("Noi tiep(OK)", "Am luong", "Thoat");
       }
     } else {
       drawXiaoZhiAssistantStatusStrip();
     }
   }
 
-  // Bắt đầu thu âm thực tế từ Mic INMP441 (8,000 Hz 16-bit Mono PCM)
+  // Bắt đầu thu âm thực tế từ Mic INMP441 (16,000 Hz 16-bit Mono PCM)
   static void startXiaoZhiListening() {
-    TestAudio::startVoiceRecording();
+    XiaoZhiClient::clearLastTurn();
+    s40AiTurnId++;
     s40AiState = AI_STATE_LISTENING;
     s40AiStateChangeMs = millis();
     s40AiSpeechDetected = false;
     s40AiLastVoiceMs = millis();
     eyeState = 2; // Mắt vui vẻ chăm chú lắng nghe
     lastExternalEmojiSync = millis();
-    Serial.println("🎤 [XIAOZHI AI] Bắt đầu thu âm giọng nói thực tế từ Mic INMP441 (Không dùng câu mẫu)...");
+
+    // 1. Cập nhật giao diện màn hình TRƯỚC khi bật thu âm (tránh nghẽn DMA I2S do SPI vẽ màn hình)
     drawXiaoZhiAssistantScreen(true);
+
+    // 2. Bắt đầu thu âm NGAY SAU KHI màn hình đã vẽ xong (không bỏ lỡ bất kỳ mili-giây âm thanh đầu nào)
+    TestAudio::startVoiceRecording();
+    Serial.println("🎤 [XIAOZHI AI] Bắt đầu thu âm giọng nói thực tế từ Mic INMP441 (Không dùng câu mẫu)...");
   }
 
   // Dừng thu âm -> Gửi PCM 16-bit lên Google Speech-to-Text (vi-VN) -> Hiện câu nói nhận diện được -> Gửi XiaoZhi AI
@@ -4028,8 +4191,7 @@ namespace TestDisplay {
     if (maxVu < 4 || sampleCount < 2000) {
       s40AiEmotionTag = "CONFUSED";
       eyeState = 8;
-      s40AiReplyText = "Chua phat hien tieng noi tren Mic INMP441 (Da thu " + String(recSec, 1) +
-                       "s, Max VU: " + String(maxVu) + "%).\nBan hay bam [OK] noi to cach Mic 10-20cm, hoac bam [TRAI] de nghe loa!";
+      s40AiReplyText = "XiaoZhi chua nghe ro cau noi.\nBan hay bam [OK] va noi lai nhe!";
       s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
       s40AiScrollLine = 0;
       s40AiAutoScroll = true;
@@ -4039,31 +4201,107 @@ namespace TestDisplay {
       return;
     }
 
-    // 2. Hiển thị trạng thái ĐANG NHẬN DIỆN GIỌNG NÓI (STT) lên khung 1/3 màn hình
+    // 2. Hiển thị trạng thái ĐANG XỬ LÝ CÂU NÓI
     s40AiState = AI_STATE_THINKING;
     s40AiStateChangeMs = millis();
-    eyeState = 8;
+    s40AiEmotionTag = "THINKING";
+    eyeState = 5; // LOOK UP (Mắt nhìn lên suy nghĩ)
     lastExternalEmojiSync = millis();
-    s40AiUserSpeechText = "Dang phan tich " + String(recSec, 1) + "s am thanh (" +
-                          String((unsigned)((sampleCount * 2) / 1024)) + "KB PCM, MaxVU " + String(maxVu) + "%)...";
-    s40AiSttPhaseMsg = ">> Dang nhan dien giong noi (STT)...";
+    s40AiUserSpeechText = "Dang lang nghe cau hoi...";
+    s40AiSttPhaseMsg = ">> XiaoZhi dang suy nghi tra loi...";
 
     drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
     drawXiaoZhiAssistantStatusStrip();
     drawXiaoZhiConversationBoxOnly();
-    drawSymbianSoftkeys("Nhan dien", "Google STT", "Thoat");
+    drawSymbianSoftkeys("Cho...", "Dang nghi...", "Thoat");
 
-    // 3. Gửi dữ liệu PCM 16-bit 16,000Hz thực tế từ INMP441 lên Google Speech API (vi-VN)
-    String rawUtf8 = "";
-    String recognizedAscii = XiaoZhiClient::transcribeMicAudioPcm16(pcm, sampleCount, TestAudio::getRecordSampleRate(), rawUtf8);
+    // 3. Gửi trực tiếp âm thanh thuần PCM 16-bit 16,000Hz lên XiaoZhi Hub WebSocket (Loại bỏ hoàn toàn Google STT)
+    String recognizedUserText = "";
+    String aiReplyText = "";
+    String emotionTag = "happy";
 
-    // Nếu chưa nhận diện được STT (ví dụ key Google cũ đã hết hạn, hoặc chưa cấu hình wit_token)
-    if (recognizedAscii.length() == 0) {
-      s40AiEmotionTag = "CONFUSED";
-      eyeState = 8;
-      s40AiReplyText = "[KET QUA THU AM MIC INMP441]\nDa thu: " + String(recSec, 1) +
-                       " giay (" + String((unsigned)((sampleCount * 2) / 1024)) + " KB PCM) | Max VU: " + String(maxVu) +
-                       "%.\nMic thu am tot! Khoa Google STT cu da het han (403). Ban hay them 'wit_token' vao config.json hoac chat qua Web UI!";
+    auto onProgressCb = [](const String& sttText, const String& partialReply, const String& emotion, bool isFinal) {
+      bool needRedraw = false;
+      bool stateChangedToReplying = false;
+      if (sttText.length() > 0) {
+        String cleanStt = XiaoZhiClient::stripVietnameseToAscii(sttText);
+        if (cleanStt != s40AiUserSpeechText) {
+          s40AiUserSpeechText = cleanStt;
+          s40AiSttPhaseMsg = ">> XiaoZhi dang suy nghi tra loi...";
+          needRedraw = true;
+        }
+      }
+
+      // ĐỒNG BỘ BIỂU CẢM THỜI GIAN THỰC TỪ XIAOZHI CLOUD
+      String resolvedEmotion = emotion;
+      if (resolvedEmotion.length() == 0 && partialReply.length() > 0) {
+        resolvedEmotion = XiaoZhiClient::detectEmotionFromText(partialReply);
+      }
+      if (resolvedEmotion.length() > 0 && resolvedEmotion != s40AiEmotionTag) {
+        s40AiEmotionTag = resolvedEmotion;
+        uint8_t targetEye = mapAiEmotionToEyeState(s40AiEmotionTag, partialReply);
+        if (targetEye != eyeState) {
+          eyeState = targetEye;
+          lastExternalEmojiSync = millis();
+          needRedraw = true;
+        }
+      }
+
+      if (partialReply.length() > 0) {
+        String replyAscii = XiaoZhiClient::stripVietnameseToAscii(partialReply);
+        String newReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;
+        if (newReplyText != s40AiReplyText) {
+          s40AiReplyText = newReplyText;
+          s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+          s40AiScrollLine = 0;
+          s40AiAutoScroll = true;
+          s40AiLastScrollMs = millis();
+          if (s40AiState != AI_STATE_REPLYING) {
+            s40AiState = AI_STATE_REPLYING;
+            stateChangedToReplying = true;
+          }
+          uint8_t targetEye = mapAiEmotionToEyeState(s40AiEmotionTag, replyAscii);
+          if (targetEye != eyeState) {
+            eyeState = targetEye;
+            lastExternalEmojiSync = millis();
+          }
+          needRedraw = true;
+        }
+      }
+
+      if (needRedraw && tft) {
+        drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        drawXiaoZhiAssistantStatusStrip();
+        drawXiaoZhiConversationBoxOnly();
+        if (stateChangedToReplying) {
+          drawSymbianSoftkeys("Noi tiep(OK)", "Am luong", "Thoat");
+        }
+      }
+    };
+
+    bool wsOk = XiaoZhiClient::sendAudioToXiaoZhi(pcm, sampleCount, TestAudio::getRecordSampleRate(),
+                                                  recognizedUserText, aiReplyText, emotionTag, onProgressCb);
+
+    if (wsOk) {
+      String userAscii = XiaoZhiClient::stripVietnameseToAscii(recognizedUserText);
+      String replyAscii = XiaoZhiClient::stripVietnameseToAscii(aiReplyText);
+
+      s40AiUserSpeechText = (userAscii.length() > 0) ? userAscii : "(Da nhan am thanh)";
+
+      // Dự phòng thông minh nếu máy chủ chưa gửi kịp text TTS
+      if (replyAscii.length() == 0 && userAscii.length() > 0) {
+        replyAscii = XiaoZhiClient::askXiaoZhiAI(userAscii, emotionTag);
+      }
+
+      s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;
+      String finalEmotion = emotionTag;
+      if (finalEmotion.length() == 0) finalEmotion = XiaoZhiClient::getLastEmotion();
+      if (finalEmotion.length() == 0) finalEmotion = XiaoZhiClient::detectEmotionFromText(replyAscii);
+      if (finalEmotion.length() == 0) finalEmotion = "happy";
+      s40AiEmotionTag = finalEmotion;
+      eyeState = mapAiEmotionToEyeState(s40AiEmotionTag, replyAscii);
+      lastExternalEmojiSync = millis();
+
       s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
       s40AiScrollLine = 0;
       s40AiAutoScroll = true;
@@ -4073,31 +4311,14 @@ namespace TestDisplay {
       return;
     }
 
-    // 4. ĐÃ NHẬN DIỆN ĐƯỢC GIỌNG NÓI THẬT -> HIỂN THỊ NGAY LÊN 1/3 MÀN HÌNH TRONG LÚC XIAOZHI ĐANG NGHĨ!
-    s40AiUserSpeechText = recognizedAscii;
-    s40AiSttPhaseMsg = ">> XiaoZhi AI dang suy nghi...";
-    drawXiaoZhiConversationBoxOnly();
-    drawSymbianSoftkeys("Dang nghi", "Cho AI...", "Thoat");
-
-    Serial.printf("💭 [XIAOZHI AI] Câu nói thực tế từ Mic: \"%s\" -> Đang gửi lên XiaoZhi AI...\n", recognizedAscii.c_str());
-
-    String emotionTag = "HAPPY";
-    float t = TestSensors::isSht31Connected() ? TestSensors::getTemperatureC() : stCfg.temp;
-    float h = TestSensors::isSht31Connected() ? TestSensors::getHumidityPct() : (float)stCfg.humidity;
-    String queryForLlm = (rawUtf8.length() > 0) ? rawUtf8 : recognizedAscii;
-    String aiAnswer = XiaoZhiClient::askXiaoZhiAI(queryForLlm, emotionTag, t, h);
-
-    s40AiEmotionTag = emotionTag;
-    s40AiReplyText = "Ban: \"" + recognizedAscii + "\"\nXiaoZhi: " + aiAnswer;
-
-    if (emotionTag == "HAPPY") eyeState = 2;
-    else if (emotionTag == "WINK") eyeState = 9;
-    else if (emotionTag == "CONFUSED") eyeState = 8;
-    else if (emotionTag == "COOL") eyeState = 0;
-    else if (emotionTag == "SLEEPY") eyeState = 11;
-    else eyeState = 2;
-    lastExternalEmojiSync = millis();
-
+    // Nếu truyền qua XiaoZhi Hub chưa nhận được kết quả tức thì
+    s40AiEmotionTag = "CONFUSED";
+    eyeState = 8;
+    if (XiaoZhiClient::isWebSocketConnected()) {
+      s40AiReplyText = "XiaoZhi dang xu ly cau hoi, ban cho trong giay lat nhe!";
+    } else {
+      s40AiReplyText = "Chua the ket noi toi XiaoZhi Hub.\nVui long kiem tra lai ket noi Wi-Fi!";
+    }
     s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
     s40AiScrollLine = 0;
     s40AiAutoScroll = true;
@@ -5428,7 +5649,7 @@ namespace TestDisplay {
     mediaVisCanvas->fillScreen(0x0842);
     mediaVisCanvas->drawRoundRect(0, 0, vw, vh, 6, C_NEON_CYAN);
 
-    int vol = TestAudio::getSpeakerVolumePct();
+    int vol = TestAudio::getMusicVolumePct();
     int micPeak = s40MediaPlaying ? TestAudio::getLastMicLevelPct() : 0;
     const uint8_t* realSpec16 = TestAudio::getMicSpectrum16();
     const int8_t* realWave48  = TestAudio::getWaveformBuffer();
@@ -5810,7 +6031,7 @@ namespace TestDisplay {
     tft->printf("BÀI %02d/%02d [%s]", s40MediaTrackIdx + 1, s40MediaTrackCount,
                 (s40MediaTrackCount > 0 && s40MediaFromSd[s40MediaTrackIdx]) ? "THẺ SD" : "MẪU");
 
-    int vol = TestAudio::getSpeakerVolumePct();
+    int vol = TestAudio::getMusicVolumePct();
     tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
     tft->setCursor(W - 68, 120);
     tft->printf("ÂM:%3d%%", vol);
@@ -7190,7 +7411,7 @@ namespace TestDisplay {
     }
   }
 
-  static void refreshActiveScreen();
+  void refreshActiveScreen();
 
   static void handleGameCenterKey(int keyIndex) {
     if (s40GameActiveId == 0) {
@@ -7308,7 +7529,92 @@ namespace TestDisplay {
     }
   }
 
-  static void refreshActiveScreen() {
+  // ============================================================================
+  // CHẾ ĐỘ 17: STREAMING ĐA PHƯƠNG TIỆN (VIDEO MJPEG / CANVAS / URL QUA WI-FI)
+  // ============================================================================
+  static unsigned long lastStreamFrameMs = 0;
+  static uint32_t s_streamFrameCount = 0;
+
+  static bool jpgStreamRenderCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+    if (!tft) return false;
+    tft->drawRGBBitmap(x, y, bitmap, w, h);
+    return true;
+  }
+
+  static void drawStreamAppScreen(bool fullRedraw = true) {
+    if (!tft) return;
+    int W = tft->width();
+    int H = tft->height();
+    if (fullRedraw) {
+      tft->fillScreen(C_BLACK);
+      tft->drawRect(0, 0, W, H, C_NEON_CYAN);
+      tft->fillRect(4, 4, W - 8, 24, C_HEADER_BG);
+      tft->setTextSize(1);
+      tft->setTextColor(C_NEON_CYAN, C_HEADER_BG);
+      tft->setCursor(10, 10);
+      tft->print("STREAM // CHO LUONG VIDEO/AUDIO");
+
+      tft->fillRoundRect(12, 38, W - 24, 236, 8, C_CARD_BG);
+      tft->drawRoundRect(12, 38, W - 24, 236, 8, C_CARD_BORDER);
+
+      int cx = W / 2;
+      tft->drawCircle(cx, 105, 38, C_NEON_CYAN);
+      tft->drawCircle(cx, 105, 24, C_NEON_GREEN);
+      tft->fillCircle(cx, 105, 8, C_NEON_PINK);
+
+      tft->setTextSize(1);
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->setCursor(cx - 75, 160);
+      tft->print("SAN SANG NHAN STREAM WI-FI");
+
+      tft->setTextColor(C_YELLOW, C_CARD_BG);
+      tft->setCursor(cx - 78, 180);
+      tft->print("240x320 PORTRAIT @ 15-20 FPS");
+
+      tft->setTextColor(C_SLATE, C_CARD_BG);
+      tft->setCursor(cx - 82, 205);
+      tft->print("Mo Web PC de chia se man hinh");
+      tft->setCursor(cx - 82, 220);
+      tft->print("hoac phat nhac truc tiep!");
+
+      tft->fillRect(4, H - 24, W - 8, 20, C_HEADER_BG);
+      tft->setTextColor(C_NEON_GREEN, C_HEADER_BG);
+      tft->setCursor(10, H - 17);
+      tft->print("[EXIT] Thoat ve Man hinh cho");
+    }
+  }
+
+  bool drawStreamJpegFrame(const uint8_t* buf, size_t len) {
+    if (!tft || !buf || len == 0) return false;
+    lastUserActivityMs = millis();
+    lastStreamFrameMs = millis();
+    s_streamFrameCount++;
+    if (isScreenSleeping) {
+      isScreenSleeping = false;
+      setBacklightBrightness(screenBrightnessPct);
+    }
+    if (currentMode != 17) {
+      currentMode = 17;
+    }
+    TJpgDec.setCallback(jpgStreamRenderCallback);
+    TJpgDec.setSwapBytes(false);
+    TJpgDec.setJpgScale(1);
+    bool ok = (TJpgDec.drawJpg(0, 0, buf, len) == JDR_OK);
+    return ok;
+  }
+
+  void stopStreamMode() {
+    if (currentMode == 17) {
+      currentMode = 0;
+      refreshActiveScreen();
+    }
+  }
+
+  bool isStreamActive() {
+    return (currentMode == 17) && (millis() - lastStreamFrameMs < 6000);
+  }
+
+  void refreshActiveScreen() {
     if (!tft) return;
     if (isScreenSleeping) {
       if (alwaysOnDisplayEnabled) {
@@ -7320,7 +7626,7 @@ namespace TestDisplay {
       return;
     }
     if (currentMode == 0) drawStandbyScreenFull();
-    else if (currentMode == 1) drawFullEmojiScreen();
+    else if (currentMode == 1 || currentMode == 11) drawXiaoZhiAssistantScreen(true);
     else if (currentMode == 2) drawPcHudScreen(true);
     else if (currentMode == 3) drawHardwareDiagScreen(true);
     else if (currentMode == 4) drawSymbianMenuScreen(true);
@@ -7336,9 +7642,99 @@ namespace TestDisplay {
     else if (currentMode == 14) drawCalendarAppScreen();
     else if (currentMode == 15) drawGameCenterAppScreen(true);
     else if (currentMode == 16) drawQrCodeWifiScreen(true);
+    else if (currentMode == 17) drawStreamAppScreen(true);
     if (s40PushAlertActive) {
       drawPushAlertModal(true);
     }
+  }
+
+  // --- HOẠT ẢNH LOADING KẾT NỐI WI-FI (CHẤM XOAY ĐUỔI NHAU) & TOAST THÔNG BÁO ---
+  static bool s_isWifiConnecting = false;
+  static String s_connectingSsid = "";
+  static String lastKnownSsid = "";
+
+  void showWifiConnectingScreen(const String& ssid) {
+    if (!tft) return;
+    s_isWifiConnecting = true;
+    s_connectingSsid = ssid;
+    int w = tft->width();
+
+    tft->fillScreen(C_BLACK);
+    drawSymbianHeader("KET NOI WI-FI");
+
+    // Thẻ bo tròn Cyberpunk
+    tft->fillRoundRect(12, 45, w - 24, 230, 10, C_CARD_BG);
+    tft->drawRoundRect(12, 45, w - 24, 230, 10, C_NEON_CYAN);
+
+    tft->setTextColor(C_WHITE, C_CARD_BG);
+    tft->setTextSize(1);
+    int sx = (w - vnStrLen("DANG KET NOI WI-FI...") * 6) / 2;
+    tft->setCursor(max(16, sx), 65);
+    tft->print("DANG KET NOI WI-FI...");
+
+    String cleanSsid = toCleanAscii(ssid);
+    if (cleanSsid.length() > 22) cleanSsid = cleanSsid.substring(0, 22);
+    tft->setTextColor(C_YELLOW, C_CARD_BG);
+    int ssX = (w - vnStrLen(cleanSsid) * 6) / 2;
+    tft->setCursor(max(16, ssX), 85);
+    tft->print(cleanSsid);
+
+    tft->setTextColor(C_SLATE, C_CARD_BG);
+    int subX = (w - vnStrLen("Vui long cho trong giay lat...") * 6) / 2;
+    tft->setCursor(max(16, subX), 235);
+    tft->print("Vui long cho trong giay lat...");
+
+    updateWifiConnectingSpinner(ssid, 0);
+  }
+
+  void updateWifiConnectingSpinner(const String& ssid, uint8_t animStep) {
+    if (!tft) return;
+    int cx = 120;
+    int cy = 160;
+    int R = 32;
+
+    const int NUM_DOTS = 8;
+    for (int i = 0; i < NUM_DOTS; i++) {
+      float angle = (float)i * (2.0f * (float)M_PI / (float)NUM_DOTS);
+      int dotX = cx + (int)(cosf(angle) * (float)R);
+      int dotY = cy + (int)(sinf(angle) * (float)R);
+
+      int dist = (animStep - i) % NUM_DOTS;
+      if (dist < 0) dist += NUM_DOTS;
+
+      uint16_t col;
+      int radius;
+      if (dist == 0) {
+        col = C_WHITE;
+        radius = 5;
+      } else if (dist == 1) {
+        col = C_NEON_CYAN;
+        radius = 4;
+      } else if (dist == 2) {
+        col = C_NEON_GREEN;
+        radius = 3;
+      } else {
+        col = 0x2124;
+        radius = 2;
+      }
+
+      tft->fillCircle(dotX, dotY, 6, C_CARD_BG);
+      tft->fillCircle(dotX, dotY, radius, col);
+    }
+  }
+
+  void onWifiConnectedSuccess(const String& ssid, const String& ip) {
+    s_isWifiConnecting = false;
+    lastWifiState = true;
+    lastKnownSsid = ssid;
+    showSymbianToast(String("DA KET NOI: ") + toCleanAscii(ssid));
+    refreshActiveScreen();
+  }
+
+  void onWifiConnectFailed(const String& ssid) {
+    s_isWifiConnecting = false;
+    showSymbianToast("KET NOI THAT BAI!");
+    refreshActiveScreen();
   }
 
   // Xử lý thay đổi giá trị trong App Hình Nền (Mode 5) khi bấm LEFT (-1) hoặc RIGHT/OK (+1)
@@ -7426,8 +7822,9 @@ namespace TestDisplay {
       const char* aodStNames[4] = { "Đã TẮT màn hình khóa", "AOD: Kỹ thuật số", "AOD: Lật số cổ điển", "AOD: Đồng hồ kim" };
       showSymbianToast(aodStNames[aodClockStyle]);
     } else if (row == 4) {
-      TestAudio::setSpeakerVolumePct(TestAudio::getSpeakerVolumePct() + dir * 5);
+      TestAudio::setNotifyVolumePct(TestAudio::getNotifyVolumePct() + dir * 5);
       TestAudio::playKeyBeep();
+      showSymbianToast(String("THÔNG BÁO: ") + TestAudio::getNotifyVolumePct() + "%");
     } else if (row == 5) {
       keyBeepEnabled = !keyBeepEnabled;
       saveSystemSettingsPrefs();
@@ -7457,7 +7854,28 @@ namespace TestDisplay {
       int m = (TestWindmill::getMode() + dir + 5) % 5;
       TestWindmill::setMode(m);
       saveSystemSettingsPrefs();
-      showSymbianToast(String("L298N: ") + TestWindmill::getModeName());
+      showSymbianToast(String("CỐI XAY: ") + TestWindmill::getModeName());
+    } else if (row == 11) {
+      int m = (TestWindmill::getEdisonLeftMode() + dir + 11) % 11;
+      TestWindmill::setEdisonLeftMode(m);
+      saveSystemSettingsPrefs();
+      showSymbianToast(String("EDISON TRÁI: ") + TestWindmill::getEdisonLeftModeName());
+    } else if (row == 12) {
+      int m = (TestWindmill::getEdisonRightMode() + dir + 11) % 11;
+      TestWindmill::setEdisonRightMode(m);
+      saveSystemSettingsPrefs();
+      showSymbianToast(String("EDISON PHẢI: ") + TestWindmill::getEdisonRightModeName());
+    } else if (row == 13) {
+      if (dir > 0) {
+        // Bấm Phải hoặc OK: Chuyển sang chế độ tiếp theo trên vi mạch IC
+        CobLeds::nextMode();
+      } else {
+        // Bấm Trái: Bật / Tắt nhanh nguồn LED COB
+        CobLeds::togglePower();
+      }
+      TestWindmill::setFlowingLeds(CobLeds::isOn());
+      saveSystemSettingsPrefs();
+      showSymbianToast(String("LED COB: ") + CobLeds::getModeName());
     }
     drawSettingsAppScreen(false);
   }
@@ -7518,9 +7936,27 @@ namespace TestDisplay {
       return;
     }
 
-    // Phát âm bíp bàn phím mono siêu ngắn dứt khoát nếu tính năng Âm bàn phím đang bật (trừ khi đang chơi game để tránh trễ)
-    if (keyBeepEnabled && (currentMode != 15 || s40GameActiveId == 0)) {
+    // Phát âm bíp bàn phím mono siêu ngắn dứt khoát nếu tính năng Âm bàn phím đang bật (trừ khi đang stream hoặc chơi game)
+    if (keyBeepEnabled && currentMode != 17 && (currentMode != 15 || s40GameActiveId == 0)) {
       TestAudio::playKeyBeep();
+    }
+
+    // Nếu đang ở Chế độ Stream Video/Audio (Mode 17):
+    if (currentMode == 17) {
+      if (keyIndex == 6 || keyIndex == 5) {
+        // EXIT hoặc MENU: Thoát Stream về màn hình chờ
+        stopStreamMode();
+        showSymbianToast("⏹ ĐÃ THOÁT STREAM");
+      } else if (keyIndex == 1) {
+        // UP: Tăng âm lượng loa
+        int curVol = TestAudio::getMusicVolumePct();
+        TestAudio::setMusicVolumePct(min(100, curVol + 5));
+      } else if (keyIndex == 2) {
+        // DOWN: Giảm âm lượng loa
+        int curVol = TestAudio::getMusicVolumePct();
+        TestAudio::setMusicVolumePct(max(0, curVol - 5));
+      }
+      return;
     }
 
     // Nếu đang ở Trung tâm Trò chơi (Mode 15): chuyển toàn bộ sự kiện phím (bao gồm cả MENU) cho Game xử lý!
@@ -7598,22 +8034,21 @@ namespace TestDisplay {
     }
 
     // Điều hướng tùy theo màn hình hiện tại
-    if (currentMode == 0 || currentMode == 1 || currentMode == 3) {
+    if (currentMode == 0 || currentMode == 3) {
       if (keyIndex == 0) {
         currentMode = 4;
         refreshActiveScreen();
-      } else if (keyIndex == 3) {
-        currentMode = (currentMode + 3) % 4;
+      } else if (keyIndex == 3) { // LEFT
+        if (currentMode == 0) currentMode = 3;
+        else if (currentMode == 3) currentMode = 2;
         refreshActiveScreen();
-      } else if (keyIndex == 4) {
-        currentMode = (currentMode + 1) % 4;
-        refreshActiveScreen();
-      } else if (keyIndex == 1 && currentMode == 1) {
-        eyeState = (eyeState + 1) % 12;
-        drawFullEmojiScreen();
-      } else if (keyIndex == 2 && currentMode == 1) {
-        eyeState = (eyeState + 11) % 12;
-        drawFullEmojiScreen();
+      } else if (keyIndex == 4) { // RIGHT
+        if (currentMode == 0) {
+          enterXiaoZhiAssistantMode(false);
+        } else if (currentMode == 3) {
+          currentMode = 0;
+          refreshActiveScreen();
+        }
       } else if (keyIndex == 6) {
         if (currentMode != 0) {
           currentMode = 0;
@@ -7635,14 +8070,19 @@ namespace TestDisplay {
         }
       }
     } else if (currentMode == 2) {
-      if (keyIndex == 1 || keyIndex == 4) {
+      if (keyIndex == 3) { // LEFT: từ PC HUD sang XiaoZhi AI (Mode 1)
+        enterXiaoZhiAssistantMode(false);
+      } else if (keyIndex == 4) { // RIGHT: từ PC HUD sang Chẩn đoán (Mode 3)
+        currentMode = 3;
+        refreshActiveScreen();
+      } else if (keyIndex == 1) {
         cycleHudStyle(1);
-      } else if (keyIndex == 2 || keyIndex == 3) {
+      } else if (keyIndex == 2) {
         cycleHudStyle(-1);
       } else if (keyIndex == 0) {
         drawPcHudScreen(true);
       } else if (keyIndex == 6) {
-        currentMode = 4;
+        currentMode = 0;
         refreshActiveScreen();
       }
     } else if (currentMode == 4) {
@@ -7713,10 +8153,10 @@ namespace TestDisplay {
       }
     } else if (currentMode == 6) {
       if (keyIndex == 1) {
-        s40SettingsCursor = (s40SettingsCursor + 10) % 11;
+        s40SettingsCursor = (s40SettingsCursor + 13) % 14;
         drawSettingsAppScreen(false);
       } else if (keyIndex == 2) {
-        s40SettingsCursor = (s40SettingsCursor + 1) % 11;
+        s40SettingsCursor = (s40SettingsCursor + 1) % 14;
         drawSettingsAppScreen(false);
       } else if (keyIndex == 3) {
         adjustSettingsAppItem(s40SettingsCursor, -1);
@@ -8261,7 +8701,7 @@ namespace TestDisplay {
           drawMemoryManagerAppScreen();
         }
       }
-    } else if (currentMode == 11) {
+    } else if (currentMode == 1 || currentMode == 11) {
       if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
         if (keyIndex == 0) { // OK: Kiểm tra lại liên kết với XiaoZhi Hub
           TestAudio::playKeyBeep();
@@ -8278,7 +8718,7 @@ namespace TestDisplay {
             TestAudio::playOkChime();
             showSymbianToast("KET NOI XIAOZHI THANH CONG!");
             s40AiState = AI_STATE_IDLE;
-            s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de hoi thoai.";
+            s40AiReplyText = "Xin chao! Toi la Tro ly XiaoZhi AI.\nBam [OK] de bat dau tro chuyen.";
             drawXiaoZhiAssistantScreen(true);
           } else {
             String authCode = XiaoZhiClient::getLastAuthCode();
@@ -8290,8 +8730,8 @@ namespace TestDisplay {
             }
             drawXiaoZhiAssistantScreen(true);
           }
-        } else if (keyIndex == 6) { // EXIT: Thoát về menu
-          currentMode = 4;
+        } else if (keyIndex == 6) { // EXIT: Thoát về màn hình chờ
+          currentMode = 0;
           refreshActiveScreen();
         }
         return;
@@ -8301,70 +8741,49 @@ namespace TestDisplay {
         if (s40AiState == AI_STATE_IDLE || s40AiState == AI_STATE_REPLYING) {
           startXiaoZhiListening();
         } else if (s40AiState == AI_STATE_LISTENING) {
-          triggerXiaoZhiThinkingAndReply();
+          if (millis() - s40AiStateChangeMs >= 600) {
+            triggerXiaoZhiThinkingAndReply();
+          }
         }
-      } else if (keyIndex == 1) {
-        if (s40AiState == AI_STATE_REPLYING && s40AiScrollLine > 0) {
-          s40AiScrollLine--;
-          s40AiLastScrollMs = millis();
-          drawXiaoZhiConversationBoxOnly();
-        }
-      } else if (keyIndex == 2) {
-        if (s40AiState == AI_STATE_REPLYING && s40AiScrollLine + 5 < s40AiTotalLines) {
-          s40AiScrollLine++;
-          s40AiLastScrollMs = millis();
-          drawXiaoZhiConversationBoxOnly();
-        }
-      } else if (keyIndex == 3) { // TRÁI (LEFT): Chuyển sang TRÌNH PHÁT NHẠC (Mode 12) & Phát lại bản thu!
+      } else if (keyIndex == 1) { // UP: Tăng âm lượng thoại Trợ lý XiaoZhi AI
+        TestAudio::setXiaoZhiVolumePct(TestAudio::getXiaoZhiVolumePct() + 5);
+        TestAudio::playKeyBeep();
+        showSymbianToast(String("AM LUONG AI: ") + TestAudio::getXiaoZhiVolumePct() + "%");
+        drawXiaoZhiAssistantStatusStrip();
+      } else if (keyIndex == 2) { // DOWN: Giảm âm lượng thoại Trợ lý XiaoZhi AI
+        TestAudio::setXiaoZhiVolumePct(TestAudio::getXiaoZhiVolumePct() - 5);
+        TestAudio::playKeyBeep();
+        showSymbianToast(String("AM LUONG AI: ") + TestAudio::getXiaoZhiVolumePct() + "%");
+        drawXiaoZhiAssistantStatusStrip();
+      } else if (keyIndex == 3) { // TRÁI (LEFT): Chuyển về Màn hình chờ (Mode 0)
         if (s40AiState == AI_STATE_LISTENING) {
           TestAudio::stopVoiceRecording();
           s40AiState = AI_STATE_IDLE;
         }
-
-        if (TestAudio::getRecordedSampleCount() > 0) {
-          TestAudio::saveRecordedVoiceToSd("/recording/rec_latest.wav");
-        }
-
-        bool hasVoiceRec = (TestAudio::getRecordedSampleCount() > 0) ||
-                           (TestSDCard::isMounted() && SD.exists("/recording/rec_latest.wav"));
-
-        if (hasVoiceRec) {
-          refreshMediaPlaylist();
-          for (int i = 0; i < s40MediaTrackCount; i++) {
-            if (s40MediaTracks[i].indexOf("rec_latest.wav") >= 0) {
-              s40MediaTrackIdx = i;
-              break;
-            }
-          }
-          s40MediaCurSec = 0;
-          s40MediaPlaying = true;
-          s40MediaSubState = 0;
-          currentMode = 12; // Chuyển thẳng sang Trình phát nhạc
-          refreshActiveScreen();
-          startMediaAudioPlayback();
-          showSymbianToast("PHAT QUA TRINH PHAT NHAC");
-        } else {
-          showSymbianToast("CHUA CO BAN THU AM!");
-        }
-      } else if (keyIndex == 4) { // PHẢI (RIGHT): Phát thử tiếng bíp test Loa PWM GPIO 15
-        showSymbianToast("TEST BIP LOA PWM...");
-        TestAudio::playStartupPwmChime(PIN_I2S_SPK_DIN);
-      } else if (keyIndex == 5) { // MENU: Buộc hủy liên kết cũ & Lấy mã OTP mới từ XiaoZhi Hub!
-        TestAudio::playKeyBeep();
-        showSymbianToast("DANG LAY MA OTP MOI...");
-        enterXiaoZhiAssistantMode(true);
-        drawXiaoZhiAssistantScreen(true);
-      } else if (keyIndex == 6) {
+        currentMode = 0;
+        refreshActiveScreen();
+      } else if (keyIndex == 4) { // PHẢI (RIGHT): Chuyển sang PC HUD (Mode 2)
         if (s40AiState == AI_STATE_LISTENING) {
           TestAudio::stopVoiceRecording();
-          if (TestAudio::getRecordedSampleCount() > 0) {
-            TestAudio::saveRecordedVoiceToSd("/recording/rec_latest.wav");
-          }
+          s40AiState = AI_STATE_IDLE;
+        }
+        currentMode = 2;
+        refreshActiveScreen();
+      } else if (keyIndex == 5) { // MENU: Mở Menu chính S40
+        if (s40AiState == AI_STATE_LISTENING) {
+          TestAudio::stopVoiceRecording();
+          s40AiState = AI_STATE_IDLE;
+        }
+        currentMode = 4;
+        refreshActiveScreen();
+      } else if (keyIndex == 6) { // EXIT: Hủy thu âm hoặc quay về Màn hình chờ
+        if (s40AiState == AI_STATE_LISTENING) {
+          TestAudio::stopVoiceRecording();
           s40AiState = AI_STATE_IDLE;
           eyeState = 0;
           drawXiaoZhiAssistantScreen(true);
         } else {
-          currentMode = 4;
+          currentMode = 0;
           refreshActiveScreen();
         }
       }
@@ -8375,12 +8794,14 @@ namespace TestDisplay {
           if (s40MediaPlaying) startMediaAudioPlayback();
           else stopMediaAudioPlayback();
           drawMediaPlayerAppScreen(false);
-        } else if (keyIndex == 1) { // UP: Tăng âm lượng
-          TestAudio::setSpeakerVolumePct(TestAudio::getSpeakerVolumePct() + 5);
+        } else if (keyIndex == 1) { // UP: Tăng âm lượng phát nhạc
+          TestAudio::setMusicVolumePct(TestAudio::getMusicVolumePct() + 5);
           drawMediaPlayerAppScreen(false);
-        } else if (keyIndex == 2) { // DOWN: Giảm âm lượng
-          TestAudio::setSpeakerVolumePct(TestAudio::getSpeakerVolumePct() - 5);
+          showSymbianToast(String("ÂM LƯỢNG NHẠC: ") + TestAudio::getMusicVolumePct() + "%");
+        } else if (keyIndex == 2) { // DOWN: Giảm âm lượng phát nhạc
+          TestAudio::setMusicVolumePct(TestAudio::getMusicVolumePct() - 5);
           drawMediaPlayerAppScreen(false);
+          showSymbianToast(String("ÂM LƯỢNG NHẠC: ") + TestAudio::getMusicVolumePct() + "%");
         } else if (keyIndex == 3) { // LEFT: Bài trước (Prev)
           if (s40MediaTrackCount > 0) {
             s40MediaTrackIdx = (s40MediaTrackIdx + s40MediaTrackCount - 1) % s40MediaTrackCount;
@@ -8976,7 +9397,7 @@ namespace TestDisplay {
 
     ledcSetup(0, 5000, 8);
     ledcAttachPin(PIN_TFT_BL, 0);
-    pinMode(PIN_TOUCH_TTP223, INPUT_PULLDOWN); // Cảm biến chạm điện dung TTP223 trên GPIO 20 (Active HIGH, chống nhiễu khi chưa cắm)
+    pinMode(PIN_TOUCH_TTP223, INPUT_PULLDOWN); // Cảm biến chạm điện dung TTP223 trên GPIO 21 (Active HIGH, RTC_GPIO21, chống nhiễu khi chưa cắm)
     lastTtp223State = (digitalRead(PIN_TOUCH_TTP223) == HIGH);
     lastUserActivityMs = millis();
     isScreenSleeping = false;
@@ -9049,25 +9470,32 @@ namespace TestDisplay {
   void setScreenMode(const String& mode) {
     uint8_t newMode = currentMode;
     if (mode == "standby") newMode = 0;
-    else if (mode == "emoji") newMode = 1;
+    else if (mode == "emoji" || mode == "xiaozhi" || mode == "assistant") newMode = 1;
     else if (mode == "pchud" || mode == "pc_hud") newMode = 2;
     else if (mode == "diag") newMode = 3;
     else if (mode == "symbian" || mode == "menu") newMode = 4;
-    else if (mode == "xiaozhi" || mode == "assistant") newMode = 11;
     else if (mode == "media" || mode == "music") newMode = 12;
     else if (mode == "clock" || mode == "alarm") newMode = 13;
     else if (mode == "calendar") newMode = 14;
     else if (mode == "games" || mode == "game") { s40GameActiveId = 0; newMode = 15; }
     else if (mode == "qr_wifi" || mode == "qr" || mode == "wifi_qr") newMode = 16;
     else if (mode == "about" || mode == "info") newMode = 8;
+    else if (mode == "stream") {
+      newMode = 17;
+      lastStreamFrameMs = millis(); // Reset ngay để không bị timeout đá về màn hình chờ
+    }
 
     if (newMode != currentMode) {
       currentMode = newMode;
+      if (currentMode == 17) lastStreamFrameMs = millis();
       refreshActiveScreen();
     } else if (!isScreenSleeping && currentMode == 0) {
       drawStandbyScreenFull();
     } else if (!isScreenSleeping && currentMode == 3) {
       drawHardwareDiagScreen(true);
+    } else if (!isScreenSleeping && currentMode == 17) {
+      lastStreamFrameMs = millis();
+      drawStreamAppScreen(true);
     }
   }
 
@@ -9097,12 +9525,9 @@ namespace TestDisplay {
       subChanged = true;
     }
 
-    if (currentMode == 1 && tft && !isScreenSleeping) {
+    if ((currentMode == 1 || currentMode == 11) && tft && !isScreenSleeping) {
       if (stateChanged) {
-        drawXiaoZhiEyesBox(8, 28, tft->width() - 16, 186, eyeState, 2);
-      }
-      if (subChanged) {
-        drawEmojiSubtitleBox();
+        drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
       }
     }
   }
@@ -9125,14 +9550,43 @@ namespace TestDisplay {
   }
 
   String getScreenModeName() {
-    if (currentMode == 1) return "emoji";
+    if (currentMode == 1 || currentMode == 11) return "xiaozhi";
     if (currentMode == 2) return "pchud";
     if (currentMode == 3) return "diag";
-    if (currentMode == 11) return "xiaozhi";
     if (currentMode == 15) return "games";
     if (currentMode == 16) return "qr_wifi";
+    if (currentMode == 17) return "stream";
     if (currentMode >= 4) return "symbian";
     return "standby";
+  }
+
+  uint8_t getCurrentMode() {
+    return currentMode;
+  }
+
+  int getS40MenuCursor() {
+    return s40MenuCursor;
+  }
+
+  String getCurrentScreenTitle() {
+    if (currentMode == 0) return "Màn Hình Chờ";
+    if (currentMode == 1 || currentMode == 11) return "XiaoZhi AI";
+    if (currentMode == 2) return "PC Status HUD";
+    if (currentMode == 3) return "Chẩn Đoán DIO & ADC";
+    if (currentMode == 4) return "Menu Symbian S40";
+    if (currentMode == 5) return "Đồng Hồ & Báo Thức";
+    if (currentMode == 6) return "Cài Đặt Hệ Thống";
+    if (currentMode == 7) return "Bộ Sưu Tập Ảnh";
+    if (currentMode == 8) return "Thông Tin Thiết Bị";
+    if (currentMode == 9) return "Kiểm Tra Thẻ SD";
+    if (currentMode == 10) return "Quản Lý Bộ Nhớ";
+    if (currentMode == 12) return "Trình Phát Âm Nhạc";
+    if (currentMode == 13) return "Bộ Đồng Hồ";
+    if (currentMode == 14) return "Báo Thức";
+    if (currentMode == 15) return "Trò Chơi S40";
+    if (currentMode == 16) return "Mã QR Wi-Fi";
+    if (currentMode == 17) return "Stream Video";
+    return "Symbian OS";
   }
 
   String getSubtitle() {
@@ -9144,15 +9598,50 @@ namespace TestDisplay {
     return styles[hudStyle % 4];
   }
 
+  String getStandbyBgImage() {
+    return stCfg.bgImage;
+  }
+
+  String getStandbyBgMode() {
+    return stCfg.bgMode;
+  }
+
+  int getStandbyDimOverlay() {
+    return stCfg.dimOverlay;
+  }
+
+  String getStandbyClockColor() {
+    if (stCfg.clockColorHex.length() > 0) return stCfg.clockColorHex;
+    char buf[10];
+    uint8_t r = ((stCfg.clockColor >> 11) & 0x1F) * 255 / 31;
+    uint8_t g = ((stCfg.clockColor >> 5) & 0x3F) * 255 / 63;
+    uint8_t b = (stCfg.clockColor & 0x1F) * 255 / 31;
+    snprintf(buf, sizeof(buf), "#%02x%02x%02x", r, g, b);
+    return String(buf);
+  }
+
+  String getStandbyCustomText() {
+    return stCfg.customText;
+  }
+
+  float getStandbyTemp() {
+    return stCfg.temp;
+  }
+
+  int getStandbyHumidity() {
+    return stCfg.humidity;
+  }
+
   void loop() {
     if (!tft) return;
     unsigned long now = millis();
 
     TestSDCard::loop();
 
-    // 1. Đọc cảm biến chạm điện dung TTP223 trên chân GPIO 20 (PIN_TOUCH_TTP223)
+    // 1. Đọc cảm biến chạm điện dung TTP223 trên chân GPIO 21 (PIN_TOUCH_TTP223)
+    // Tăng debounce lên 150ms để lọc hoàn toàn các xung nhiễu điện dung khi loa MAX98357A phát công suất lớn
     bool ttpNow = (digitalRead(PIN_TOUCH_TTP223) == HIGH);
-    if (ttpNow != lastTtp223State && (now - lastTtp223ChangeMs >= 65)) {
+    if (ttpNow != lastTtp223State && (now - lastTtp223ChangeMs >= 150)) {
       lastTtp223ChangeMs = now;
       lastTtp223State = ttpNow;
       if (ttpNow) { // Phát hiện sườn lên (Chạm ngón tay vào TTP223)
@@ -9165,6 +9654,10 @@ namespace TestDisplay {
           return;
         } else {
           Serial.println("👆 [TTP223 GPIO20] Chạm cảm biến TTP223!");
+          HardwareManager::setLedColor(0, 220, 255); // Nháy xanh Cyan xác nhận cảm ứng chạm
+          if (currentMode != 17) {
+            TestAudio::playClickBeep(); // Phát tiếng bíp ngắn phản hồi thao tác chạm (trừ khi đang stream)
+          }
           if (currentMode == 0) {
             // Chạm phím Touch TTP223 (GPIO 20) tại Màn hình chờ: Đổi kiểu đồng hồ hiển thị
             const char* clkStyles[4] = { "digital", "retro-flip", "analog", "compact" };
@@ -9177,9 +9670,24 @@ namespace TestDisplay {
             saveConfigToFile();
             showSymbianToast(String("DONG HO: ") + stCfg.clockStyle);
             refreshActiveScreen();
-          } else if (currentMode == 1) {
-            eyeState = (eyeState + 1) % 12;
-            drawFullEmojiScreen();
+          } else if (currentMode == 12) {
+            // Chạm TTP223 tại Trình phát nhạc: Phát / Tạm dừng (Play / Pause)
+            s40MediaPlaying = !s40MediaPlaying;
+            if (s40MediaPlaying) startMediaAudioPlayback();
+            else stopMediaAudioPlayback();
+            drawMediaPlayerAppScreen(false);
+            showSymbianToast(s40MediaPlaying ? "▶ TIẾP TỤC PHÁT NHẠC" : "⏸ TẠM DỪNG NHẠC");
+          } else if (currentMode == 17) {
+            // Chạm TTP223 tại Màn hình Stream: Thoát Stream về Màn hình chờ
+            stopStreamMode();
+            showSymbianToast("⏹ ĐÃ THOÁT STREAM");
+          } else if (currentMode == 1 || currentMode == 11) {
+            // Chạm TTP223 khi người dùng ĐÃ Ở màn hình XiaoZhi AI: Bật lắng nghe giọng nói / Gửi câu hỏi!
+            if (s40AiState == AI_STATE_IDLE || s40AiState == AI_STATE_REPLYING) {
+              startXiaoZhiListening();
+            } else if (s40AiState == AI_STATE_LISTENING) {
+              triggerXiaoZhiThinkingAndReply();
+            }
           } else if (currentMode == 15 && s40GameActiveId == 2) {
             // Hỗ trợ chạm TTP223 để vỗ cánh trong game Flappy Bird!
             handleGameCenterKey(0);
@@ -9296,21 +9804,26 @@ namespace TestDisplay {
       Serial.println("🕒 [NTP] Đã kích hoạt đồng bộ thời gian thực GMT+7 (pool.ntp.org)");
     }
 
-    if (wifiNow != lastWifiState) {
+    String currentSsid = wifiNow ? WiFi.SSID() : "";
+    if (wifiNow != lastWifiState || (wifiNow && currentSsid.length() > 0 && currentSsid != lastKnownSsid)) {
       lastWifiState = wifiNow;
+      lastKnownSsid = currentSsid;
       refreshActiveScreen();
     }
 
     if (now - lastSecondTick >= 1000) {
       lastSecondTick = now;
 
-      // Tự động cập nhật đồng hồ nhỏ trên thanh trạng thái (cạnh biểu tượng Pin) ở Menu 4x3 và mọi ứng dụng (Mode 4..15)
-      if (currentMode >= 4) {
+      // Tự động cập nhật đồng hồ nhỏ trên thanh trạng thái (cạnh biểu tượng Pin) ở Menu 4x3 và mọi ứng dụng (Mode 4..15, ngoại trừ Stream Mode 17)
+      if (currentMode >= 4 && currentMode != 17) {
         updateSymbianTopStatusBarClock();
       }
 
       if (currentMode == 0) {
         updateStandbyClockDigits(false);
+      } else if (currentMode == 17 && (now - lastStreamFrameMs >= 8000)) {
+        currentMode = 0;
+        refreshActiveScreen();
       } else if (currentMode == 2) {
         drawPcHudScreen(false);
       } else if (currentMode == 9) {
@@ -9346,18 +9859,7 @@ namespace TestDisplay {
       }
     }
 
-    if (currentMode == 1 && (now - lastExternalEmojiSync > 5500)) {
-      if (!isAutoBlinkActive && (now - lastAnimTick >= 4500)) {
-        lastAnimTick = now;
-        if (eyeState != 1 && eyeState != 8) {
-          isAutoBlinkActive = true;
-          drawXiaoZhiEyesBox(8, 28, tft->width() - 16, 186, 1, 2);
-        }
-      } else if (isAutoBlinkActive && (now - lastAnimTick >= 140)) {
-        isAutoBlinkActive = false;
-        drawXiaoZhiEyesBox(8, 28, tft->width() - 16, 186, eyeState, 2);
-      }
-    } else if (currentMode == 3 && (now - lastAnimTick >= 65)) {
+    if (currentMode == 3 && (now - lastAnimTick >= 65)) {
       lastAnimTick = now;
       drawHardwareDiagScreen(false);
     } else if (currentMode == 12 && s40MediaSubState == 0 && (now - lastAnimTick >= 65)) {
@@ -9373,10 +9875,10 @@ namespace TestDisplay {
       drawClockSuiteAppScreen(false);
     } else if (currentMode == 15) {
       updateActiveGameLoop(now);
-    } else if (currentMode == 11) {
+    } else if (currentMode == 1 || currentMode == 11) {
       if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
-        // Tự động kiểm tra trạng thái liên kết với XiaoZhi Cloud mỗi 3.5 giây nếu có Wi-Fi
-        if (now - s40AiLastOtpPollMs >= 3500) {
+        // Tự động kiểm tra trạng thái liên kết với XiaoZhi Cloud mỗi 8 giây nếu có Wi-Fi
+        if (now - s40AiLastOtpPollMs >= 8000) {
           s40AiLastOtpPollMs = now;
           if (WiFi.status() == WL_CONNECTED) {
             XiaoZhiClient::queryOTA(false);
@@ -9434,6 +9936,88 @@ namespace TestDisplay {
         }
       }
 
+      // --- CƠ CHẾ ĐỒNG BỘ TRẠNG THÁI & BIỂU CẢM MẮT SỐNG ĐỘNG (LIVING ROBOT EYE SYNC) ---
+      static unsigned long s_lastAiEyeBlinkMs = 0;
+      static bool s_aiEyeBlinking = false;
+      static uint8_t s_aiEyePrevState = 0;
+
+      if (s40AiState == AI_STATE_IDLE) {
+        // Trạng thái chờ: Mắt 2 vòng tròn phát sáng (Cyan). Tự động nháy mắt sinh học mỗi 4.2 giây
+        if (!s_aiEyeBlinking && (now - s_lastAiEyeBlinkMs >= 4200)) {
+          s_lastAiEyeBlinkMs = now;
+          s_aiEyeBlinking = true;
+          s_aiEyePrevState = eyeState;
+          eyeState = 1; // BLINK (- -)
+          drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        } else if (s_aiEyeBlinking && (now - s_lastAiEyeBlinkMs >= 130)) {
+          s_aiEyeBlinking = false;
+          s_lastAiEyeBlinkMs = now;
+          eyeState = (s_aiEyePrevState == 1) ? 0 : s_aiEyePrevState;
+          drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        }
+      } else if (s40AiState == AI_STATE_THINKING) {
+        // Trạng thái đang suy nghĩ: Mắt động luân chuyển sinh động (Nhìn lên -> Liếc trái -> Xoáy bối rối -> Liếc phải)
+        static unsigned long s_lastThinkingAnimMs = 0;
+        if (now - s_lastThinkingAnimMs >= 500) {
+          s_lastThinkingAnimMs = now;
+          static const uint8_t thinkSeq[] = { 5, 3, 8, 4 };
+          static uint8_t thinkIdx = 0;
+          eyeState = thinkSeq[thinkIdx % 4];
+          thinkIdx++;
+          drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        }
+      } else if (s40AiState == AI_STATE_REPLYING) {
+        // 1. Cập nhật câu thoại thời gian thực nếu XiaoZhi Cloud gửi thêm câu mới (streaming nhiều câu)
+        String fullAiReply = XiaoZhiClient::getLastLlmReply();
+        if (fullAiReply.length() > 0) {
+          String replyAscii = XiaoZhiClient::stripVietnameseToAscii(fullAiReply);
+          String expectedReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;
+          if (expectedReplyText != s40AiReplyText) {
+            s40AiReplyText = expectedReplyText;
+            int prevTotal = s40AiTotalLines;
+            s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+            if (s40AiTotalLines > prevTotal) {
+              int maxStart = (s40AiTotalLines > 5) ? (s40AiTotalLines - 5) : 0;
+              if (s40AiScrollLine > maxStart) s40AiScrollLine = maxStart;
+            }
+            s40AiLastScrollMs = now;
+            drawXiaoZhiAssistantStatusStrip();
+            drawXiaoZhiConversationBoxOnly();
+          }
+        }
+
+        // 2. Cập nhật biểu cảm mắt nếu server gửi emotion mới hoặc phân tích ngữ cảnh từ câu thoại
+        String latestEmotion = XiaoZhiClient::getLastEmotion();
+        if (latestEmotion.length() == 0 && fullAiReply.length() > 0) {
+          latestEmotion = XiaoZhiClient::detectEmotionFromText(fullAiReply);
+        }
+        if (latestEmotion.length() > 0 && latestEmotion != s40AiEmotionTag) {
+          s40AiEmotionTag = latestEmotion;
+          uint8_t targetEye = mapAiEmotionToEyeState(s40AiEmotionTag, s40AiReplyText);
+          if (targetEye != eyeState) {
+            eyeState = targetEye;
+            lastExternalEmojiSync = now;
+            drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+            drawXiaoZhiAssistantStatusStrip();
+            drawXiaoZhiConversationBoxOnly();
+          }
+        }
+
+        // 3. Tự động nháy mắt sinh học nhẹ trong khi đang hiển thị trả lời (mỗi 4.5s)
+        if (!s_aiEyeBlinking && (now - s_lastAiEyeBlinkMs >= 4500)) {
+          s_lastAiEyeBlinkMs = now;
+          s_aiEyeBlinking = true;
+          s_aiEyePrevState = eyeState;
+          eyeState = 1;
+          drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        } else if (s_aiEyeBlinking && (now - s_lastAiEyeBlinkMs >= 130)) {
+          s_aiEyeBlinking = false;
+          s_lastAiEyeBlinkMs = now;
+          eyeState = (s_aiEyePrevState == 1) ? 2 : s_aiEyePrevState;
+          drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        }
+      }
+
       if (s40AiState == AI_STATE_REPLYING && s40AiAutoScroll && s40AiTotalLines > 5) {
         int maxStart = s40AiTotalLines - 5;
         unsigned long interval = (s40AiScrollLine >= maxStart) ? 4200UL : 1650UL;
@@ -9448,6 +10032,9 @@ namespace TestDisplay {
         }
       }
     }
+
+    // Luôn vẽ Toast nổi nếu có thông báo toàn cục (WiFi mới kết nối, trạng thái hệ thống...)
+    drawGlobalToastIfNeeded();
   }
 
   // ============================================================================
@@ -9465,12 +10052,14 @@ namespace TestDisplay {
     repeatMode = s40MediaRepeatMode % 3;
     curSec     = s40MediaCurSec;
     totalSec   = (s40MediaTrackCount > 0) ? s40MediaDurations[trackIdx] : 180;
-    volumePct  = TestAudio::getSpeakerVolumePct();
+    volumePct  = TestAudio::getMusicVolumePct();
     fromSd     = (s40MediaTrackCount > 0) ? s40MediaFromSd[trackIdx] : false;
   }
 
   int getMediaPlaylistItems(String names[], uint16_t durations[], bool fromSd[], size_t sizes[], int maxCount) {
-    refreshMediaPlaylist();
+    if (s40MediaTrackCount == 0 && !TestAudio::isVoicePlaybackAsyncRunning()) {
+      refreshMediaPlaylist();
+    }
     int n = min(s40MediaTrackCount, maxCount);
     for (int i = 0; i < n; i++) {
       if (names)     names[i]     = s40MediaTracks[i];
@@ -9505,19 +10094,42 @@ namespace TestDisplay {
     if (action == "play") {
       s40MediaPlaying = true;
       startMediaAudioPlayback();
+      if (currentMode != 12) {
+        currentMode = 12;
+        s40MediaSubState = 0;
+        refreshActiveScreen();
+        return;
+      }
     } else if (action == "pause") {
       s40MediaPlaying = false;
       stopMediaAudioPlayback();
+      if (currentMode == 12) drawMediaPlayerAppScreen(false);
     } else if (action == "toggle") {
       s40MediaPlaying = !s40MediaPlaying;
-      if (s40MediaPlaying) startMediaAudioPlayback();
-      else stopMediaAudioPlayback();
+      if (s40MediaPlaying) {
+        startMediaAudioPlayback();
+        if (currentMode != 12) {
+          currentMode = 12;
+          s40MediaSubState = 0;
+          refreshActiveScreen();
+          return;
+        }
+      } else {
+        stopMediaAudioPlayback();
+        if (currentMode == 12) drawMediaPlayerAppScreen(false);
+      }
     } else if (action == "next") {
       if (s40MediaTrackCount > 0) {
         s40MediaTrackIdx = (s40MediaTrackIdx + 1) % s40MediaTrackCount;
         s40MediaCurSec = 0;
         s40MediaPlaying = true;
         startMediaAudioPlayback();
+        if (currentMode != 12) {
+          currentMode = 12;
+          s40MediaSubState = 0;
+          refreshActiveScreen();
+          return;
+        }
       }
     } else if (action == "prev") {
       if (s40MediaTrackCount > 0) {
@@ -9525,6 +10137,12 @@ namespace TestDisplay {
         s40MediaCurSec = 0;
         s40MediaPlaying = true;
         startMediaAudioPlayback();
+        if (currentMode != 12) {
+          currentMode = 12;
+          s40MediaSubState = 0;
+          refreshActiveScreen();
+          return;
+        }
       }
     } else if (action == "select") {
       if (trackName.length() > 0) {
@@ -9551,7 +10169,7 @@ namespace TestDisplay {
       uint16_t tot = (s40MediaTrackCount > 0) ? s40MediaDurations[s40MediaTrackIdx] : 180;
       s40MediaCurSec = (uint16_t)constrain(value, 0, (int)tot);
     } else if (action == "volume") {
-      TestAudio::setSpeakerVolumePct(constrain(value, 0, 100));
+      TestAudio::setMusicVolumePct(constrain(value, 0, 100));
     } else if (action == "vis") {
       if (value >= 0 && value <= 2) s40MediaVisMode = (uint8_t)value;
       else s40MediaVisMode = (s40MediaVisMode + 1) % 3;
@@ -9587,6 +10205,79 @@ namespace TestDisplay {
     applyS40UiTheme(idx);
     showSymbianToast(String("GIAO DIEN: ") + curTheme().headerTag);
     refreshActiveScreen();
+  }
+
+  // ============================================================================
+  // ĐỒNG BỘ & ĐIỀU KHIỂN TRỢ LÝ XIAOZHI AI (MODE 11 <-> WEB UI)
+  // ============================================================================
+  void getXiaoZhiChatState(String& stateStr, String& userText, String& aiReply, String& emotion,
+                           uint8_t& outEyeState, int& volumePct, int& micLevelPct, uint32_t& turnId) {
+    if (s40AiState == AI_STATE_IDLE) {
+      stateStr = "idle";
+    } else if (s40AiState == AI_STATE_LISTENING) {
+      stateStr = "listening";
+    } else if (s40AiState == AI_STATE_THINKING) {
+      stateStr = "thinking";
+    } else if (s40AiState == AI_STATE_REPLYING) {
+      stateStr = "replying";
+    } else if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
+      stateStr = "binding";
+    } else {
+      stateStr = "idle";
+    }
+
+    // 1. STT User Text (Ưu tiên UTF-8 gốc có dấu đầy đủ từ XiaoZhi Cloud nếu có)
+    String sttUtf8 = XiaoZhiClient::getLastSttText();
+    if (sttUtf8.length() > 0) {
+      userText = sttUtf8;
+    } else {
+      userText = s40AiUserSpeechText;
+    }
+
+    // 2. AI Reply Text (Ưu tiên UTF-8 gốc có dấu đầy đủ từ XiaoZhi Cloud nếu có)
+    String llmUtf8 = XiaoZhiClient::getLastLlmReply();
+    if (llmUtf8.length() > 0) {
+      aiReply = llmUtf8;
+    } else {
+      aiReply = s40AiReplyText;
+    }
+
+    // 3. Emotion & Eye State
+    emotion = s40AiEmotionTag;
+    if (emotion.length() == 0) {
+      emotion = XiaoZhiClient::getLastEmotion();
+    }
+    if (emotion.length() == 0) emotion = "happy";
+
+    outEyeState = eyeState;
+    volumePct = TestAudio::getXiaoZhiVolumePct();
+    micLevelPct = TestAudio::getLastMicLevelPct();
+    turnId = s40AiTurnId;
+  }
+
+  void triggerXiaoZhiListeningFromWeb() {
+    lastUserActivityMs = millis();
+    if (isScreenSleeping) {
+      isScreenSleeping = false;
+      setBacklightBrightness(screenBrightnessPct);
+    }
+
+    if (currentMode != 11) {
+      enterXiaoZhiAssistantMode(false);
+    }
+
+    if (s40AiState == AI_STATE_LISTENING) {
+      triggerXiaoZhiThinkingAndReply();
+    } else {
+      startXiaoZhiListening();
+    }
+  }
+
+  void stopXiaoZhiListeningFromWeb() {
+    lastUserActivityMs = millis();
+    if (s40AiState == AI_STATE_LISTENING) {
+      triggerXiaoZhiThinkingAndReply();
+    }
   }
 
   void printHelp() {

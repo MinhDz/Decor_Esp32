@@ -1,0 +1,5 @@
+yt-dlp>=2026.08.19
+imageio-ffmpeg>=0.6.0
+requests>=2.30.0
+flask>=3.0.0
+

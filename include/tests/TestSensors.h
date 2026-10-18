@@ -22,7 +22,14 @@ namespace TestSensors {
   float getHumidityPct();
   bool isTouchPressed();
 
-  // In báo cáo trạng thái cảm biến & quét I2C ra Serial Monitor ('t', 'g')
+  // Đo điện áp pin 18650 (GPIO 2 - ADC1_CH1) & Trạng thái sạc Vin MH-CD42 (GPIO 46)
+  float getBatteryVoltage();
+  int   getBatteryMilliVolts();
+  int   getBatteryPercentage();
+  int   getBatteryRawAdc();
+  bool  isCharging();
+
+  // In báo cáo trạng thái cảm biến & quét I2C ra Serial Monitor ('t', 'g', 'p')
   bool handleSerial(char cmd);
 }
 

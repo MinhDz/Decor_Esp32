@@ -13,11 +13,11 @@
 4. **Loa Khuếch Đại I2S DAC**: Module MAX98357A (Cổng I2S1 độc lập hoàn toàn, công suất 3W).
 5. **Micro Kỹ Thuật Số I2S**: Module INMP441 (Cổng I2S0 độc lập chuyên thu âm AI & XiaoZhi).
 6. **Cối xay gió Cyberpunk**: Động cơ giảm tốc N20 và vòng LED cánh cối xay đấu song song qua mạch cầu H L298N Mini / MX1508.
-7. **Đèn ống năng lượng sườn trạm**: 2 ống LED Edison filament dẻo 30x6mm ở 2 bên sườn (khung sườn cao 7.7cm), nối tiếp trở hạn dòng $47\,\Omega$, chung GND.
-8. **Đèn dải tín hiệu mặt lưng**: 2 thanh LED nước chảy sao băng COB 3V tích hợp IC quét tự động, gắn đối xứng 2 bên dưới module SD, nối trực tiếp vào ESP32.
-9. **Cảm biến môi trường**: Module SHT31 (Đo nhiệt độ và độ ẩm qua bus phần cứng I2C).
-10. **Cảm biến chạm**: Module điện dung TTP223 (Chạm vào nút đồng / kết cấu kim loại decor).
-11. **Bo nguồn & Bàn phím**: Keypad_Power_Shield (7 phím điều hướng thang trở 1 dây, IC sạc pin TP4056 và mạch tăng áp 5V nuôi hệ thống).
+7. **Đèn ống năng lượng sườn trạm**: 2 ống LED Edison filament dẻo 30x6mm ở 2 bên sườn (khung sườn cao 7.7cm): sườn TRÁI nối **GPIO 47**, sườn PHẢI nối **GPIO 21**, nối tiếp trở hạn dòng $47\,\Omega$, chung GND.
+8. **Đèn dải tín hiệu mặt lưng**: 2 thanh LED nước chảy sao băng COB 3V tích hợp IC quét tự động, gắn đối xứng 2 bên dưới module SD, nối trực tiếp vào ESP32 (GPIO 38 và GPIO 18).
+9. **Cảm biến môi trường**: Module SHT31 (Đo nhiệt độ và độ ẩm qua bus phần cứng I2C: SDA GPIO 8, SCL GPIO 9).
+10. **Cảm biến chạm**: Module điện dung TTP223 (Chân SIG nối **GPIO 20** - Active HIGH, RTC_GPIO20 hỗ trợ đánh thức Deep Sleep khi chạm vỏ đồng).
+11. **Bo nguồn & Bàn phím**: Key_pad (7 phím điều hướng thang trở 1 dây trên GPIO 3, kênh đọc trạng thái sạc High/Low từ Vin bo sạc MH-CD42 trên **GPIO 46**, kênh đo điện áp pin 18650 BAT_ADC trên **GPIO 2** qua cầu phân áp $100\,\text{k}\Omega / 100\,\text{k}\Omega$ thuộc ADC1_CH1, và tụ 2200µF chống sụt áp 5V).
 12. **Đèn RGB Onboard**: WS2812 NeoPixel có sẵn trên kit ESP32-S3 (GPIO 48).
 
 ---
@@ -46,12 +46,12 @@ Sơ đồ nhìn từ mặt trước khi cổng USB hướng lên trên:
 | 8 | GPIO 15 | **15** | **Loa MAX98357A DIN** | **Dữ liệu âm thanh số ra loa (I2S1 Data OUT)** |
 | 9 | GPIO 16 | **16** | **Loa MAX98357A BCLK** | **Xung nhịp bit phát loa (I2S1 Bit Clock)** |
 | 10 | GPIO 17 | **17** | **Loa MAX98357A LRC** | **Xung chọn kênh phát loa (I2S1 Word Select)** |
-| 11 | GPIO 18 | **18** | **LED Nước Chảy Trái (L)** | **Cực (+) Thanh LED sao băng bên trái mặt lưng (ESP32)** |
+| 11 | GPIO 18 | **18** | **LED Nước Chảy Phải (R)** | **Cực (+) Thanh LED sao băng bên PHẢI mặt lưng (qua trở $22\,\Omega$)** |
 | 12 | GPIO 8 | **8** | **Cảm biến SHT31 SDA** | Dữ liệu I2C Data |
 | 13 | GPIO 19 | 19 | USB D- | Dành riêng Native USB (Tránh dùng) |
-| 14 | GPIO 20 | **20** | **Cảm biến Chạm TTP223** | Tín hiệu chạm Digital SIG (Active HIGH) |
+| 14 | GPIO 20 | **20** | **Cảm biến Chạm TTP223** | Tín hiệu chạm Digital SIG (Active HIGH), RTC_GPIO20 hỗ trợ đánh thức Deep Sleep |
 | 15 | GPIO 3 | **3** | **Bàn phím KEY_ADC** | Đọc cụm thang điện trở 7 nút (ADC1_CH2) |
-| 16 | GPIO 46 | **46** | **Bo Sạc CHG_STAT** | Đọc cờ trạng thái sạc pin TP4056 (Input-Only) |
+| 16 | GPIO 46 | **46** | **Trạng Thái Sạc Vin MH-CD42** | Đọc trạng thái High/Low sạc pin từ Vin MH-CD42 (HIGH: Đang sạc, LOW: Không sạc, Input-Only) |
 | 17 | GPIO 9 | **9** | **Cảm biến SHT31 SCL** | Xung nhịp I2C Clock |
 | 18 | GPIO 10 | **10** | **Màn hình ST7789 RST** | Reset phần cứng LCD |
 | 19 | GPIO 11 | **11** | **Màn hình ST7789 MOSI** | SPI Data Out (SDA / SDI) |
@@ -69,18 +69,18 @@ Sơ đồ nhìn từ mặt trước khi cổng USB hướng lên trên:
 | 2 | GPIO 43 | 43 | UART0 TXD | Serial Monitor / Nạp code (CH343) |
 | 3 | GPIO 44 | 44 | UART0 RXD | Serial Monitor / Nạp code (CH343) |
 | 4 | GPIO 1 | **1** | **Cối Xay Gió IN1** | PWM điều tốc Motor N20 & Vành đèn cánh cối xay |
-| 5 | GPIO 2 | **2** | **2 LED Ống Edison Sườn** | Cực (+) 2 ống LED Edison 30mm qua trở $47\,\Omega$ (hoặc L298N IN3) |
+| 5 | GPIO 2 | **2** | **Đo điện áp Pin BAT_ADC** | Đọc điện áp pin 18650 qua cầu phân áp $100\,\text{k}\Omega / 100\,\text{k}\Omega$ (ADC1_CH1, không xung đột WiFi) |
 | 6 | GPIO 42 | **42** | **Thẻ Micro SD SCK** | SPI Clock thẻ nhớ SD |
 | 7 | GPIO 41 | **41** | **Thẻ Micro SD MISO** | SPI Data In từ thẻ nhớ SD về ESP32 |
 | 8 | GPIO 40 | **40** | **Thẻ Micro SD MOSI** | SPI Data Out từ ESP32 ghi vào thẻ nhớ SD |
 | 9 | GPIO 39 | **39** | **Thẻ Micro SD CS** | Chip Select thẻ nhớ SD |
-| 10 | GPIO 38 | **38** | **LED Nước Chảy Phải (R)** | **Cực (+) Thanh LED sao băng bên phải mặt lưng (ESP32)** |
+| 10 | GPIO 38 | **38** | **LED Nước Chảy Trái (L)** | **Cực (+) Thanh LED sao băng bên TRÁI mặt lưng (qua trở $22\,\Omega$)** |
 | 11-13 | GPIO 35-37 | - | *BỎ TRỐNG* | **CẤM DÙNG** (Nội bộ Octal PSRAM / SPI Flash) |
 | 14 | GPIO 0 | 0 | Boot Pin | Để hở / Nút BOOT |
 | 15 | GPIO 45 | 45 | Dự phòng | Chân I/O tự do |
 | 16 | GPIO 48 | **48** | **RGB WS2812 Onboard** | Đèn LED đa sắc RGB tích hợp sẵn trên mạch |
-| 17 | GPIO 47 | 47 | Dự phòng | Chân I/O tự do |
-| 18 | GPIO 21 | 21 | Dự phòng / BAT_ADC 2 | Dự phòng đọc điện áp pin hoặc LED phụ |
+| 17 | GPIO 47 | **47** | **Cặp LED Ống Edison Trái (L)** | Cực (+) Cặp LED Edison sườn TRÁI qua trở $47\,\Omega$ (PWM CH4, 11 hiệu ứng) |
+| 18 | GPIO 21 | **21** | **Cặp LED Ống Edison Phải (R)** | Cực (+) Cặp LED Edison sườn PHẢI qua trở $47\,\Omega$ (PWM CH5, 11 hiệu ứng) |
 | 19 | NC / GND | - | Mass chung | - |
 | 20 | GND | - | Mass chung | Nối sườn trạm kiềng đồng |
 | 21 | 5V | - | Nguồn VIN 5V | Nhận nguồn 5V từ cổng Type-C hoặc bo sạc pin |
@@ -111,28 +111,34 @@ Việc tách riêng biệt cụm chân I2S cho Loa và Mic giúp ESP32-S3 chạy
 1. **2 Ống LED Edison $30\,\text{mm}$ ở 2 mặt bên sườn ($7.7\,\text{cm}$)**:
    - Nối chung GND vào khung sườn đồng.
    - Cực dương (+) mỗi ống nối qua 1 điện trở hạn dòng $47\,\Omega$.
-   - Điều khiển băm xung PWM mượt mà trên **`GPIO 2`** (dòng chỉ $\approx 10.6\,\text{mA}$ mỗi ống, an toàn tuyệt đối khi nuôi trực tiếp từ ESP32 hoặc qua kênh L298N IN3).
+   - Điều khiển băm xung PWM mượt mà trên **`GPIO 47`** (sườn TRÁI) và **`GPIO 21`** (sườn PHẢI) với tần số 5000Hz (dòng chỉ $\approx 10.6\,\text{mA}$ mỗi ống, an toàn tuyệt đối).
+   - Hỗ trợ 11 chế độ hiệu ứng ánh sáng (Lò phản ứng, Ngọn nến lung linh, Nhịp tim Cyber, Sấm sét, Thở lệch pha, Năng lượng sạc...) có thể điều chỉnh độc lập hoặc đồng bộ trực tiếp từ giao diện Web.
    - Dây cấp cực (+) sử dụng dây đồng tráng men cách điện $0.1\,\text{mm}$ dán ẩn sau thanh đồng $1.2\,\text{mm}$.
 2. **2 Thanh LED nước chảy sao băng mặt lưng (COB 3V tích hợp IC quét)**:
    - Vị trí: Đặt đối xứng hai bên bên dưới khe thẻ Micro SD ở mặt lưng trạm.
    - Nối chung GND vào khung đồng.
-   - Thanh bên Trái: Cực (+) nối trực tiếp vào **`GPIO 18`** (khoảng cách chỉ $1-2\,\text{cm}$).
-   - Thanh bên Phải: Cực (+) nối trực tiếp vào **`GPIO 38`** (khoảng cách chỉ $1-2\,\text{cm}$).
-   - Không cần kéo dây xuống L298N ở chân tháp cối xay, loại bỏ hoàn toàn tình trạng rối dây!
+   - Thanh bên Trái: Cực (+) nối vào **`GPIO 38`** qua điện trở hạn dòng **$22\,\Omega$**.
+   - Thanh bên Phải: Cực (+) nối vào **`GPIO 18`** qua điện trở hạn dòng **$22\,\Omega$**.
+   - Dòng điện được ghim ở mức an toàn $\approx 18\,\text{mA}$, bảo vệ an toàn tuyệt đối cho cổng GPIO ESP32-S3!
 
 ---
 
 ### C. Cối xay gió Cyberpunk N20
 - Động cơ N20 và vành đèn LED trên cánh cối xay đã được đấu song song vào ngõ ra OUT1 của module L298N Mini / MX1508.
-- Chân điều khiển: Duy nhất **`GPIO 1`** nối vào IN1 (PWM tần số cao 5000Hz).
+- Chân điều khiển: Duy nhất **`GPIO 1`** nối vào IN1 (PWM tần số cao 5000Hz, hỗ trợ điều tốc mềm 0..100% từ Web).
 - Toàn bộ dây từ ESP32 xuống mạch cối xay ở chân tháp chỉ còn duy nhất **1 đường tín hiệu GPIO 1** và đường nguồn.
 
 ---
 
-### D. Bo Nguồn & Bàn Phím Keypad_Power_Shield
-- **`GPIO 3` (KEY_ADC)**: Đọc thang điện trở 7 phím bấm (Up, Down, Left, Right, OK, Menu, Exit) với 1 dây tín hiệu duy nhất kết hợp trở kéo lên $10\,\text{k}\Omega$ lên 3.3V.
-- **`GPIO 46` (CHG_STAT)**: Đọc trạng thái sạc pin từ chân STAT của IC TP4056 (mức LOW khi đang sạc, HIGH/thả nổi khi sạc đầy). Chân GPIO 46 là chân Input-Only chuyên dụng nên cực kỳ phù hợp.
-- **`GPIO 2` / `GPIO 21` (BAT_ADC)**: Dự phòng đọc điện áp pin Lithium 18650 qua cầu phân áp $100\,\text{k}\Omega / 100\,\text{k}\Omega$.
+### D. Bo Nguồn MH-CD42 & Bàn Phím Key_pad (`hardware/Key_pad`)
+- **`GPIO 3` (KEY_ADC)**: Đọc thang điện trở 7 phím bấm (Up, Down, Left, Right, OK, Menu, Exit) với 1 dây tín hiệu duy nhất kết hợp trở kéo lên $10\,\text{k}\Omega$ lên 3.3V và tụ lọc nhiễu $100\,\text{nF}$ (kênh ADC1_CH2). Phím bấm sử dụng footprint nút nhấn xúc giác 2 chân (`CustomLib:SW_TactPush_6x6x5mm_2Pin_P4.5mm`).
+- **`GPIO 46` (CHG_STAT / Vin MH-CD42)**: Đọc trạng thái High/Low từ chân ngõ vào Vin của module sạc xả tự ngắt MH-CD42 (qua cầu phân áp an toàn $10\,\text{k}\Omega / 15\,\text{k}\Omega$ để hạ $5\,\text{V} \to 3.0\,\text{V}$). Logic:
+  - **HIGH ($\approx 3.0\,\text{V}$)**: Đang cắm nguồn sạc USB (Vin có 5V $\to$ Trạng thái: Đang Sạc).
+  - **LOW ($0\,\text{V}$)**: Đã rút sạc (Vin = 0V $\to$ Trạng thái: Không sạc / Đang chạy pin Lithium).
+  - GPIO 46 là chân Input-Only chuyên dụng, cực kỳ an toàn và ổn định.
+- **`GPIO 2` (BAT_ADC)**: Đọc điện áp pin Lithium 18650 qua cầu phân áp $100\,\text{k}\Omega / 100\,\text{k}\Omega$ và tụ lọc $100\,\text{nF}$ (kênh ADC1_CH1, tỉ lệ chia 1/2, ngõ vào $1.5\,\text{V} - 2.1\,\text{V}$). Khối ADC1 hoạt động hoàn toàn độc lập, không bị nhiễu hay xung đột khi hệ thống bật thu phát sóng WiFi.
+- **`GPIO 20` (TOUCH_PAD)**: Tín hiệu chạm Digital SIG từ cảm biến điện dung TTP223 (Active HIGH, RTC_GPIO20). Hỗ trợ đánh thức hệ thống từ Deep Sleep và tương tác chạm đổi hiệu ứng đèn decor / chuyển bài nhạc / đánh thức XiaoZhi.
+- **Tụ dập xung $2200\,\mu\text{F} / 16\,\text{V}$ (C_5V)**: Mắc song song trực tiếp trên đường nguồn $+5\,\text{V}$ và GND sau công tắc nguồn `SW_PWR`, chống sụt áp tức thời (anti-brownout) khi hệ thống khởi động WiFi/Bluetooth, chạy loa MAX98357A ở mức âm lượng cao hoặc bật động cơ cối xay gió.
 
 ---
 
@@ -166,16 +172,18 @@ flowchart TD
 
         subgraph DECOR_LIGHTS["Cối Xay & Đèn Decor"]
             WINDMILL["GPIO 1 (PWM): Motor N20 & Vành LED (L298N IN1)"]
-            EDISON["GPIO 2 (PWM): 2 LED Ống Edison Sườn 30mm (Trở 47Ω)"]
-            FLOW_L["GPIO 18: Thanh LED Nước Chảy Lưng Trái"]
-            FLOW_R["GPIO 38: Thanh LED Nước Chảy Lưng Phải"]
+            EDISON_L["GPIO 47 (PWM): Ống LED Edison Sườn Trái (Trở 47Ω)"]
+            EDISON_R["GPIO 21 (PWM): Ống LED Edison Sườn Phải (Trở 47Ω)"]
+            FLOW_L["GPIO 38: Thanh LED Nước Chảy Lưng Trái"]
+            FLOW_R["GPIO 18: Thanh LED Nước Chảy Lưng Phải"]
         end
 
-        subgraph SENSORS_INPUT["Cảm Biến & Bàn Phím"]
+        subgraph SENSORS_INPUT["Cảm Biến & Bàn Phím & Giám Sát Nguồn"]
             I2C_SHT["GPIO 8 (SDA), GPIO 9 (SCL): Cảm Biến SHT31"]
-            TOUCH_PAD["GPIO 20: Cảm Biến Chạm Điện Dung TTP223"]
+            TOUCH_PAD["GPIO 20 (RTC): Cảm Biến Chạm Điện Dung TTP223"]
+            BAT_PIN["GPIO 2 (ADC1_CH1): Đo Điện Áp Pin BAT_ADC"]
             KEYPAD_IN["GPIO 3 (ADC1_CH2): Bàn Phím 7 Nút 1 Dây"]
-            CHG_IN["GPIO 46 (Input-Only): Báo Trạng Thái Sạc Pin TP4056"]
+            CHG_IN["GPIO 46 (Input-Only): Trạng Thái Sạc Vin MH-CD42 (High/Low)"]
             RGB_ON["GPIO 48: WS2812 RGB Onboard"]
         end
     end
@@ -199,12 +207,14 @@ flowchart TD
     I2S1_LOA --> MAX98357
     INMP441_DEV --> I2S0_MIC
     WINDMILL --> L298N_DEV --> MOTOR_FAN
-    EDISON --> TUBE_EDISON
+    EDISON_L --> TUBE_EDISON
+    EDISON_R --> TUBE_EDISON
     FLOW_L --> FLOW_STRIPS
     FLOW_R --> FLOW_STRIPS
     I2C_SHT <===> SHT31_DEV
     TTP223_DEV --> TOUCH_PAD
     KEY_BOARD --> KEYPAD_IN
+    KEY_BOARD --> BAT_PIN
     KEY_BOARD --> CHG_IN
 ```
 
