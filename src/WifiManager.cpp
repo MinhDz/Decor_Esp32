@@ -3,6 +3,7 @@
 #include "HardwareManager.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestAudio.h"
+#include "OtaManager.h"
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <DNSServer.h>
@@ -16,6 +17,13 @@ static String lastWifiNotification = "";
 static DNSServer dnsServer;
 static bool s_dnsStarted = false;
 static bool s_apActive = false;
+
+// Trạng thái tự động quét và kết nối lại ngầm như Smartphone (Auto-Reconnect)
+static bool s_isAutoScanning = false;
+static unsigned long s_lastAutoScanTime = 0;
+static bool s_isAutoConnecting = false;
+static unsigned long s_autoConnectStartTime = 0;
+static bool s_isManualConnecting = false;
 
 void WifiManager::begin() {
   WiFi.mode(WIFI_AP_STA);
@@ -254,6 +262,7 @@ bool WifiManager::smartConnect() {
 
 bool WifiManager::connectDirect(const String& ssid, const String& password, bool save) {
   if (ssid.length() == 0) return false;
+  s_isManualConnecting = true;
 
   String actualPass = password;
   // Nếu mật khẩu để trống, tìm mật khẩu đã lưu
@@ -299,12 +308,14 @@ bool WifiManager::connectDirect(const String& ssid, const String& password, bool
     Serial.printf("✅ Đã kết nối thành công tới %s! IP: %s (Ping 1-4ms)\n", ssid.c_str(), WiFi.localIP().toString().c_str());
     TestAudio::playOkChime();
     TestDisplay::onWifiConnectedSuccess(ssid, WiFi.localIP().toString());
+    s_isManualConnecting = false;
     return true;
   } else {
     HardwareManager::setLedColor(255, 50, 50); // Đỏ báo lỗi
     Serial.println("❌ Kết nối thất bại!");
     TestAudio::playDeleteChime();
     TestDisplay::onWifiConnectFailed(ssid);
+    s_isManualConnecting = false;
     return false;
   }
 }
@@ -369,6 +380,58 @@ void WifiManager::scanNetworks(JsonDocument& resDoc) {
   WiFi.scanDelete();
 }
 
+void WifiManager::triggerScan(bool async) {
+  WiFi.scanDelete();
+  if (async) {
+    WiFi.scanNetworks(true, false);
+  } else {
+    WiFi.scanNetworks(false, false);
+  }
+}
+
+std::vector<SavedWifiStatus> WifiManager::getSavedWifiWithStatus() {
+  std::vector<SavedWifiStatus> list;
+  JsonDocument doc;
+  loadSavedWifiList(doc);
+  if (!doc.is<JsonArray>()) return list;
+
+  String curSsid = (WiFi.status() == WL_CONNECTED) ? WiFi.SSID() : "";
+  int curRssi = (WiFi.status() == WL_CONNECTED) ? WiFi.RSSI() : -100;
+
+  for (JsonObject item : doc.as<JsonArray>()) {
+    SavedWifiStatus st;
+    st.ssid = item["ssid"].as<String>();
+    st.password = item["password"].as<String>();
+    st.connected = (curSsid.length() > 0 && curSsid == st.ssid);
+    if (st.connected) {
+      st.inRange = true;
+      st.rssi = curRssi;
+    } else {
+      st.inRange = false;
+      st.rssi = -100;
+    }
+    list.push_back(st);
+  }
+
+  // Đối chiếu kết quả quét gần nhất để cập nhật RSSI cho các mạng chưa kết nối
+  int n = WiFi.scanComplete();
+  if (n > 0) {
+    for (int i = 0; i < n; i++) {
+      String scSsid = WiFi.SSID(i);
+      int scRssi = WiFi.RSSI(i);
+      for (auto& st : list) {
+        if (!st.connected && st.ssid == scSsid) {
+          st.inRange = true;
+          st.rssi = scRssi;
+          break;
+        }
+      }
+    }
+  }
+
+  return list;
+}
+
 bool WifiManager::isConnected() {
   return WiFi.status() == WL_CONNECTED;
 }
@@ -407,6 +470,103 @@ void WifiManager::loop() {
     if (WiFi.status() == WL_CONNECTED) {
       WiFi.setSleep(false);
       esp_wifi_set_ps(WIFI_PS_NONE);
+    }
+  }
+
+  // ============================================================================
+  // CƠ CHẾ TỰ ĐỘNG QUÉT & KẾT NỐI LẠI NHƯ SMARTPHONE (BACKGROUND AUTO-RECONNECT)
+  // Khi ở chế độ AP hoặc khi vừa mất kết nối STA: quét ngầm định kỳ và tự nối lại!
+  // ============================================================================
+  if (OtaManager::isUpdating() || s_isManualConnecting) {
+    return;
+  }
+
+  if (WiFi.status() == WL_CONNECTED) {
+    // Đang có mạng STA bình thường -> Reset cờ auto-reconnect
+    s_isAutoScanning = false;
+    s_isAutoConnecting = false;
+    return;
+  }
+
+  // Trường hợp đang trong tiến trình auto-connect ngầm
+  if (s_isAutoConnecting) {
+    if (WiFi.status() == WL_CONNECTED) {
+      s_isAutoConnecting = false;
+      WiFi.setSleep(false);
+      esp_wifi_set_ps(WIFI_PS_NONE);
+      HardwareManager::setLedColor(0, 255, 120);
+      lastWifiNotification = "Đã tự động kết nối: " + WiFi.SSID() + " (" + WiFi.localIP().toString() + ")";
+      Serial.printf("✅ [Smart-WiFi] Auto-Reconnect thành công tới '%s'! IP: %s\n",
+                    WiFi.SSID().c_str(), WiFi.localIP().toString().c_str());
+      TestAudio::playOkChime();
+      TestDisplay::onWifiConnectedSuccess(WiFi.SSID(), WiFi.localIP().toString());
+    } else if (millis() - s_autoConnectStartTime > 12000) {
+      // Hết timeout 12s không kết nối được
+      Serial.println("⚠️ [Smart-WiFi] Auto-Reconnect timeout (12s). Chờ chu kỳ quét tiếp theo.");
+      WiFi.disconnect(false);
+      s_isAutoConnecting = false;
+      s_lastAutoScanTime = millis();
+    }
+    return;
+  }
+
+  // Trường hợp đang có tiến trình quét mạng ngầm
+  if (s_isAutoScanning) {
+    int16_t scanStatus = WiFi.scanComplete();
+    if (scanStatus == WIFI_SCAN_RUNNING) {
+      return; // Vẫn đang quét ngầm, không block
+    } else if (scanStatus == WIFI_SCAN_FAILED) {
+      WiFi.scanDelete();
+      s_isAutoScanning = false;
+      s_lastAutoScanTime = millis();
+      return;
+    } else if (scanStatus >= 0) {
+      // Quét ngầm hoàn tất! Tìm kiếm mạng đã lưu có sóng mạnh nhất
+      JsonDocument savedDoc;
+      loadSavedWifiList(savedDoc);
+      JsonArray savedArr = savedDoc.as<JsonArray>();
+
+      String bestSsid = "";
+      String bestPass = "";
+      int bestRssi = -999;
+
+      for (int i = 0; i < scanStatus; i++) {
+        String scannedSsid = WiFi.SSID(i);
+        int scannedRssi = WiFi.RSSI(i);
+        for (JsonObject saved : savedArr) {
+          if (saved["ssid"].as<String>() == scannedSsid) {
+            if (scannedRssi > bestRssi) {
+              bestRssi = scannedRssi;
+              bestSsid = scannedSsid;
+              bestPass = saved["password"].as<String>();
+            }
+            break;
+          }
+        }
+      }
+
+      WiFi.scanDelete();
+      s_isAutoScanning = false;
+      s_lastAutoScanTime = millis();
+
+      if (bestSsid.length() > 0) {
+        Serial.printf("📡 [Smart-WiFi] Smartphone Auto-Reconnect: Phát hiện '%s' (%d dBm). Đang tự động kết nối lại...\n",
+                      bestSsid.c_str(), bestRssi);
+        s_isAutoConnecting = true;
+        s_autoConnectStartTime = millis();
+        WiFi.disconnect(false);
+        WiFi.begin(bestSsid.c_str(), bestPass.c_str());
+      }
+    }
+    return;
+  }
+
+  // Định kỳ mỗi 18 giây: Khởi chạy quét mạng ngầm không đồng bộ
+  if (millis() - s_lastAutoScanTime > 18000) {
+    s_lastAutoScanTime = millis();
+    int16_t res = WiFi.scanNetworks(true, false);
+    if (res == WIFI_SCAN_RUNNING) {
+      s_isAutoScanning = true;
     }
   }
 }

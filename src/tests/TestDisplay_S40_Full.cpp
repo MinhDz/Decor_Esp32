@@ -1386,6 +1386,39 @@ namespace TestDisplay {
     tft->print(text);
   }
 
+  // ============================================================================
+  // BIỂU TƯỢNG QUẠT SÓNG WI-FI VÒNG TRÒN / CUNG ĐỒNG TÂM (THAY THẾ CỘT SÓNG DI ĐỘNG)
+  // Vẽ chuẩn xác biểu tượng Wi-Fi quốc tế: Chấm gốc + 3 cung tròn đồng tâm theo RSSI
+  // ============================================================================
+  static void drawWifiArcIcon(int cx, int cy, int rssi, bool connected, uint16_t activeCol = C_NEON_GREEN, uint16_t inactiveCol = 0x31A6) {
+    if (!tft) return;
+    int level = 0;
+    if (connected) {
+      if (rssi >= -60) level = 3;
+      else if (rssi >= -75) level = 2;
+      else level = 1;
+    }
+
+    // 1. Chấm phát sóng ở gốc
+    uint16_t dotCol = connected ? activeCol : (WifiManager::isApActive() ? C_NEON_AMBER : inactiveCol);
+    tft->fillCircle(cx, cy, 1, dotCol);
+
+    // 2. 3 Cung sóng tròn đồng tâm (bán kính 4, 7, 10)
+    const int radii[3] = { 4, 7, 10 };
+    for (int i = 0; i < 3; i++) {
+      int r = radii[i];
+      uint16_t col = (i < level) ? activeCol : inactiveCol;
+      int maxDx = (r * 707) / 1000;
+      for (int dx = -maxDx; dx <= maxDx; dx++) {
+        int dy = -(int)roundf(sqrtf((float)(r * r - dx * dx)));
+        tft->drawPixel(cx + dx, cy + dy, col);
+        if (i > 0) {
+          tft->drawPixel(cx + dx, cy + dy - 1, col); // Nét dày đôi cho cung ngoài
+        }
+      }
+    }
+  }
+
   // Vẽ thanh trạng thái đặc cho các màn hình Emoji / PC HUD / Diagnostic
   static void drawTopStatusBar() {
     if (!tft) return;
@@ -1394,12 +1427,12 @@ namespace TestDisplay {
     tft->drawFastHLine(0, 24, w, C_CARD_BORDER);
 
     bool connected = (WiFi.status() == WL_CONNECTED);
-    uint16_t dotColor = connected ? C_NEON_GREEN : C_NEON_AMBER;
-    tft->fillCircle(10, 12, 4, dotColor);
+    int curRssi = connected ? WiFi.RSSI() : -100;
+    drawWifiArcIcon(11, 18, curRssi, connected, C_NEON_GREEN, 0x31A6);
 
     tft->setTextSize(1);
     tft->setTextColor(C_WHITE, C_CARD_BG);
-    tft->setCursor(18, 8);
+    tft->setCursor(24, 8);
     if (connected) {
       String ssid = toCleanAscii(WifiManager::getCurrentSsid());
       if (ssid.length() > 14) ssid = ssid.substring(0, 14);
@@ -1613,14 +1646,15 @@ namespace TestDisplay {
     // Bước 2: Vẽ Top Bar (2 viên thuốc kính mờ: Trái = Wi-Fi/STA, Phải = ESP32-S3)
     bool connected = (WiFi.status() == WL_CONNECTED);
     tft->drawRoundRect(8, 8, 84, 18, 8, 0x39E7);
-    tft->fillCircle(17, 17, 3, connected ? C_NEON_GREEN : C_NEON_AMBER);
+    int curRssi = connected ? WiFi.RSSI() : -100;
+    drawWifiArcIcon(17, 22, curRssi, connected, C_NEON_GREEN, 0x39E7);
     String wifiTag = "AP MODE";
     if (connected) {
       String s = toCleanAscii(WifiManager::getCurrentSsid());
       if (s.length() > 8) s = s.substring(0, 8);
       wifiTag = s.length() > 0 ? s : "STA";
     }
-    drawShadowText(25, 13, wifiTag, C_WHITE, 1);
+    drawShadowText(27, 13, wifiTag, C_WHITE, 1);
 
     tft->drawRoundRect(164, 8, 68, 18, 8, 0x39E7);
     drawShadowText(174, 13, "ESP32-S3", C_NEON_CYAN, 1);
@@ -2224,12 +2258,10 @@ namespace TestDisplay {
       tft->drawFastHLine(0, 23, w, C_NEON_PINK);
     }
 
-    // Cột sóng Wi-Fi bên trái
+    // Biểu tượng quạt sóng Wi-Fi vòng tròn bên trái (thay thế cột sóng di động)
     bool wifiOk = (WiFi.status() == WL_CONNECTED);
-    for (int b = 0; b < 4; b++) {
-      int bh = 4 + b * 3;
-      tft->fillRect(6 + b * 4, 18 - bh, 3, bh, wifiOk ? C_NEON_GREEN : C_GRAY);
-    }
+    int curRssi = wifiOk ? WiFi.RSSI() : -100;
+    drawWifiArcIcon(14, 18, curRssi, wifiOk, C_NEON_GREEN, 0x31A6);
 
     // Tiêu đề App ở giữa
     tft->setTextSize(1);
@@ -2476,10 +2508,16 @@ namespace TestDisplay {
       tft->fillRect(cx + 2, cy - 2, 2, 2, C_NEON_GREEN);
       tft->fillRect(cx - 2, cy + 4, 3, 3, C_WHITE);
       tft->fillRect(cx + 6, cy + 5, 3, 3, C_YELLOW);
+    } else if (idx == 14) {
+      // 14: KẾT NỐI WI-FI (Biểu tượng Quạt sóng Wi-Fi phát sóng tròn Neon)
+      tft->fillRoundRect(cx - 15, cy - 13, 30, 26, 4, C_DARK_BG);
+      tft->drawRoundRect(cx - 15, cy - 13, 30, 26, 4, C_NEON_GREEN);
+      drawWifiArcIcon(cx, cy + 6, -55, true, C_NEON_GREEN, 0x31A6);
+      tft->fillCircle(cx, cy + 6, 2, C_YELLOW);
     }
   }
 
-  static const int S40_MENU_COUNT = 14;
+  static const int S40_MENU_COUNT = 15;
   static int s40MenuScrollRow     = 0; // Hàng bắt đầu hiển thị trên khung nhìn 4x3 (0 = hiện hàng 0..2, 1 = cuộn xuống hiện hàng 1..3)
   static int lastDrawnMenuCursor  = -1;
   static int lastDrawnMenuScroll  = -1;
@@ -2488,7 +2526,7 @@ namespace TestDisplay {
     "Hình nền", "Cài đặt",  "Máy tính", "Thư viện",
     "Bộ nhớ",   "Trợ lý AI","Âm nhạc",  "Đồng hồ",
     "Lịch",     "Thiết bị", "Sóng âm",  "Thẻ nhớ",
-    "Trò chơi", "Mã QR"
+    "Trò chơi", "Mã QR",    "Kết nối"
   };
   static const char* S40_MENU_DESCS[S40_MENU_COUNT] = {
     "1. Tùy chỉnh Hình nền & Đồng hồ chờ",
@@ -2504,7 +2542,8 @@ namespace TestDisplay {
     "11. Biểu đồ Sóng âm & Cảm biến phòng",
     "12. Thông tin Chi tiết Thẻ nhớ MicroSD",
     "13. Trò chơi: Rắn săn mồi, Flappy & Xếp gạch",
-    "14. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý"
+    "14. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý",
+    "15. Quản Lý Mạng Wi-Fi Đã Lưu & Chuyển Sóng"
   };
 
   static void drawSymbianMenuBanner() {
@@ -3608,6 +3647,7 @@ namespace TestDisplay {
       tft->printf("MAC   : %s", WiFi.macAddress().c_str());
       tft->setCursor(14, 178);
       tft->printf("Sóng  : %d dBm", wifiOk ? WiFi.RSSI() : 0);
+      drawWifiArcIcon(140, 184, wifiOk ? WiFi.RSSI() : -100, wifiOk, C_NEON_GREEN, C_GRAY);
 
       bool pcLive = PcStatsManager::isLive();
       tft->setTextColor(pcLive ? C_NEON_GREEN : C_NEON_PINK, C_CARD_BG);
@@ -7615,6 +7655,149 @@ namespace TestDisplay {
     return (currentMode == 17) && (millis() - lastStreamFrameMs < 6000);
   }
 
+  // ============================================================================
+  // CHẾ ĐỘ 18: QUẢN LÝ KẾT NỐI WI-FI (DANH SÁCH MẠNG ĐÃ LƯU, VÒNG TRÒN SÓNG & CHUYỂN MẠNG)
+  // ============================================================================
+  static int s40WifiConnCursor = 0;
+  static int s40WifiConnScroll = 0;
+  static std::vector<SavedWifiStatus> s_savedWifiListCache;
+
+  static void drawWifiConnectionScreen(bool fullRedraw = true) {
+    if (!tft) return;
+    int w = tft->width();
+    int h = tft->height();
+
+    if (fullRedraw) {
+      tft->fillRect(0, 22, w, h - 44, C_DARK_BG);
+    }
+
+    // Thanh Header Symbian và 3 phím chức năng Softkeys ở đáy
+    drawSymbianChrome("KẾT NỐI WI-FI", "Quét lại", "Kết nối", "Thoát");
+
+    // 1. Thẻ trạng thái kết nối hiện tại (y = 26..66, cao 40px)
+    drawThemedBox(6, 26, w - 12, 40, false);
+    bool wifiOk = (WiFi.status() == WL_CONNECTED);
+    int curRssi = wifiOk ? WiFi.RSSI() : -100;
+    drawWifiArcIcon(20, 52, curRssi, wifiOk, C_NEON_GREEN, C_NEON_AMBER);
+
+    tft->setTextSize(1);
+    if (wifiOk) {
+      tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+      tft->setCursor(36, 32);
+      String curSsid = toCleanAscii(WiFi.SSID());
+      if (curSsid.length() > 18) curSsid = curSsid.substring(0, 18);
+      tft->printf("ĐANG DÙNG: %s", curSsid.c_str());
+
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->setCursor(36, 48);
+      tft->printf("IP: %s | Sóng: %d dBm", WiFi.localIP().toString().c_str(), curRssi);
+    } else {
+      tft->setTextColor(C_NEON_AMBER, C_CARD_BG);
+      tft->setCursor(36, 32);
+      tft->print("CHẾ ĐỘ AP: TramVuTru-Config");
+
+      tft->setTextColor(C_SLATE, C_CARD_BG);
+      tft->setCursor(36, 48);
+      tft->print("IP: 192.168.4.1 (Tự dò mạng ngầm)");
+    }
+
+    // 2. Tiêu đề phân mục danh sách mạng đã lưu
+    tft->setTextColor(C_YELLOW, C_DARK_BG);
+    tft->setCursor(10, 72);
+    int totalSaved = (int)s_savedWifiListCache.size();
+    tft->printf("MẠNG ĐÃ LƯU TRÊN TRẠM (%d):", totalSaved);
+
+    // 3. Khung danh sách mạng đã lưu (y = 84..268)
+    if (totalSaved == 0) {
+      tft->fillRoundRect(6, 84, w - 12, 184, 6, C_CARD_BG);
+      tft->drawRoundRect(6, 84, w - 12, 184, 6, C_CARD_BORDER);
+
+      drawWifiArcIcon(w / 2, 130, -100, false, C_NEON_AMBER, C_GRAY);
+
+      tft->setTextColor(C_NEON_AMBER, C_CARD_BG);
+      tft->setCursor(16, 146);
+      tft->print("CHƯA CÓ MẠNG WI-FI ĐÃ LƯU!");
+
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->setCursor(16, 166);
+      tft->print("1. Kết nối vào Wi-Fi SoftAP:");
+      tft->setCursor(16, 180);
+      tft->print("   SSID: TramVuTru-Config");
+      tft->setCursor(16, 194);
+      tft->print("   Mật khẩu: 12345678");
+      tft->setCursor(16, 212);
+      tft->print("2. Mở trình duyệt web cài đặt:");
+      tft->setCursor(16, 226);
+      tft->print("   Địa chỉ: http://192.168.4.1");
+      tft->setCursor(16, 244);
+      tft->print("3. Hoặc vào Menu -> 'Mã QR' quét!");
+    } else {
+      if (s40WifiConnCursor < 0) s40WifiConnCursor = 0;
+      if (s40WifiConnCursor >= totalSaved) s40WifiConnCursor = totalSaved - 1;
+      if (s40WifiConnCursor < s40WifiConnScroll) s40WifiConnScroll = s40WifiConnCursor;
+      if (s40WifiConnCursor >= s40WifiConnScroll + 4) s40WifiConnScroll = s40WifiConnCursor - 3;
+
+      const int itemH = 43;
+      const int gap = 4;
+      for (int i = 0; i < 4; i++) {
+        int idx = s40WifiConnScroll + i;
+        int itemY = 84 + i * (itemH + gap);
+        if (idx < totalSaved) {
+          const auto& net = s_savedWifiListCache[idx];
+          bool sel = (idx == s40WifiConnCursor);
+
+          drawThemedBox(6, itemY, w - 12, itemH, sel);
+
+          // Biểu tượng Wi-Fi vòng tròn thể hiện mức sóng
+          uint16_t iconCol = net.connected ? C_NEON_GREEN : (net.inRange ? C_NEON_CYAN : C_GRAY);
+          drawWifiArcIcon(20, itemY + 28, net.rssi, net.inRange || net.connected, iconCol, 0x2965);
+
+          // Tên SSID
+          String cleanS = toCleanAscii(net.ssid);
+          if (cleanS.length() > 16) cleanS = cleanS.substring(0, 16);
+          tft->setTextColor(sel ? C_YELLOW : (net.connected ? C_NEON_GREEN : C_WHITE), sel ? C_CARD_SEL : C_CARD_BG);
+          tft->setCursor(36, itemY + 8);
+          tft->print(cleanS);
+
+          // Trạng thái sóng và kết nối
+          tft->setCursor(36, itemY + 24);
+          if (net.connected) {
+            tft->setTextColor(C_NEON_GREEN, sel ? C_CARD_SEL : C_CARD_BG);
+            tft->printf("[✓ ĐANG DÙNG] %d dBm", net.rssi);
+          } else if (net.inRange) {
+            tft->setTextColor(C_NEON_CYAN, sel ? C_CARD_SEL : C_CARD_BG);
+            tft->printf("Khả dụng: %d dBm", net.rssi);
+          } else {
+            tft->setTextColor(C_SLATE, sel ? C_CARD_SEL : C_CARD_BG);
+            tft->print("Ngoài phạm vi phủ sóng");
+          }
+
+          if (sel) {
+            tft->setTextColor(C_YELLOW, C_CARD_SEL);
+            tft->setCursor(w - 24, itemY + 16);
+            tft->print("►");
+          }
+        } else {
+          tft->fillRect(6, itemY, w - 12, itemH, C_DARK_BG);
+        }
+      }
+
+      // Thanh cuộn nhỏ bên phải nếu có trên 4 mạng
+      if (totalSaved > 4) {
+        int sbH = 184;
+        tft->fillRect(w - 5, 84, 3, sbH, 0x1082);
+        int thumbH = max(16, (sbH * 4) / totalSaved);
+        int thumbY = 84 + (s40WifiConnScroll * (sbH - thumbH)) / (totalSaved - 4);
+        tft->fillRect(w - 5, thumbY, 3, thumbH, C_NEON_CYAN);
+      }
+    }
+
+    // 4. Dòng hướng dẫn thao tác đáy
+    tft->setTextColor(C_SLATE, C_DARK_BG);
+    tft->setCursor(8, 276);
+    tft->print("Lên/Xuống: Chọn | Phím OK: Đổi Wi-Fi");
+  }
+
   void refreshActiveScreen() {
     if (!tft) return;
     if (isScreenSleeping) {
@@ -7644,6 +7827,7 @@ namespace TestDisplay {
     else if (currentMode == 15) drawGameCenterAppScreen(true);
     else if (currentMode == 16) drawQrCodeWifiScreen(true);
     else if (currentMode == 17) drawStreamAppScreen(true);
+    else if (currentMode == 18) drawWifiConnectionScreen(true);
     if (s40PushAlertActive) {
       drawPushAlertModal(true);
     }
@@ -8105,12 +8289,14 @@ namespace TestDisplay {
         if (s40MenuCursor + 4 < S40_MENU_COUNT) {
           s40MenuCursor += 4;
         } else if (s40MenuCursor >= 8 && s40MenuCursor <= 11) {
-          s40MenuCursor = (s40MenuCursor % 2 == 0) ? 12 : 13;
+          if (s40MenuCursor == 8) s40MenuCursor = 12;
+          else if (s40MenuCursor == 9) s40MenuCursor = 13;
+          else s40MenuCursor = 14;
         } else {
           s40MenuCursor = s40MenuCursor % 4;
         }
         drawSymbianMenuScreen(false);
-      } else if (keyIndex == 0) { // OK -> Mở ứng dụng tương ứng trong 14 biểu tượng
+      } else if (keyIndex == 0) { // OK -> Mở ứng dụng tương ứng trong 15 biểu tượng
         if (s40MenuCursor == 0)      currentMode = 5;  // 1. Hình nền
         else if (s40MenuCursor == 1) currentMode = 6;  // 2. Cài đặt
         else if (s40MenuCursor == 2) currentMode = 2;  // 3. Máy tính (PC)
@@ -8125,6 +8311,18 @@ namespace TestDisplay {
         else if (s40MenuCursor == 11) currentMode = 9; // 12. Thẻ nhớ
         else if (s40MenuCursor == 12) { s40GameActiveId = 0; currentMode = 15; } // 13. Trung tâm Trò chơi (3 Game)
         else if (s40MenuCursor == 13) { currentMode = 16; } // 14. Mã QR Cài Đặt Wi-Fi
+        else if (s40MenuCursor == 14) {
+          s40WifiConnCursor = 0;
+          s40WifiConnScroll = 0;
+          s_savedWifiListCache = WifiManager::getSavedWifiWithStatus();
+          for (int i = 0; i < (int)s_savedWifiListCache.size(); i++) {
+            if (s_savedWifiListCache[i].connected) {
+              s40WifiConnCursor = i;
+              break;
+            }
+          }
+          currentMode = 18;
+        } // 15. Quản Lý Kết Nối Wi-Fi
         refreshActiveScreen();
       } else if (keyIndex == 5) { // MENU -> Nếu đang ở icon Trợ lý AI: Buộc lấy mã OTP mới!
         if (s40MenuCursor == 5) {
@@ -8305,6 +8503,41 @@ namespace TestDisplay {
         s40QrModeTab = (s40QrModeTab + 1) % 2;
         drawQrCodeWifiScreen(false);
       } else if (keyIndex == 6) {
+        currentMode = 4;
+        refreshActiveScreen();
+      }
+    } else if (currentMode == 18) {
+      int total = (int)s_savedWifiListCache.size();
+      if (keyIndex == 1) { // LÊN
+        if (s40WifiConnCursor > 0) {
+          s40WifiConnCursor--;
+          drawWifiConnectionScreen(false);
+        }
+      } else if (keyIndex == 2) { // XUỐNG
+        if (s40WifiConnCursor + 1 < total) {
+          s40WifiConnCursor++;
+          drawWifiConnectionScreen(false);
+        }
+      } else if (keyIndex == 0) { // OK -> Chuyển kết nối tới mạng đã chọn
+        if (total > 0 && s40WifiConnCursor >= 0 && s40WifiConnCursor < total) {
+          SavedWifiStatus target = s_savedWifiListCache[s40WifiConnCursor];
+          if (target.connected && WiFi.status() == WL_CONNECTED) {
+            TestAudio::playKeyBeep();
+            showSymbianToast("ĐANG KẾT NỐI MẠNG NÀY!");
+          } else {
+            showSymbianToast("ĐANG NỐI: " + target.ssid);
+            bool ok = WifiManager::connectDirect(target.ssid, target.password, false);
+            s_savedWifiListCache = WifiManager::getSavedWifiWithStatus();
+            drawWifiConnectionScreen(true);
+          }
+        }
+      } else if (keyIndex == 3 || keyIndex == 5) { // TRÁI / MENU -> Quét lại sóng Wi-Fi
+        showSymbianToast("ĐANG QUÉT LẠI WI-FI...");
+        WifiManager::triggerScan(false);
+        s_savedWifiListCache = WifiManager::getSavedWifiWithStatus();
+        showSymbianToast("ĐÃ CẬP NHẬT SÓNG MẠNG!");
+        drawWifiConnectionScreen(true);
+      } else if (keyIndex == 6) { // EXIT / THOÁT -> Về Menu S40
         currentMode = 4;
         refreshActiveScreen();
       }
@@ -9883,6 +10116,18 @@ namespace TestDisplay {
     else if (mode == "games" || mode == "game") { s40GameActiveId = 0; newMode = 15; }
     else if (mode == "qr_wifi" || mode == "qr" || mode == "wifi_qr") newMode = 16;
     else if (mode == "about" || mode == "info") newMode = 8;
+    else if (mode == "wifi_manager" || mode == "connect" || mode == "wifi_connect") {
+      s40WifiConnCursor = 0;
+      s40WifiConnScroll = 0;
+      s_savedWifiListCache = WifiManager::getSavedWifiWithStatus();
+      for (int i = 0; i < (int)s_savedWifiListCache.size(); i++) {
+        if (s_savedWifiListCache[i].connected) {
+          s40WifiConnCursor = i;
+          break;
+        }
+      }
+      newMode = 18;
+    }
     else if (mode == "stream") {
       newMode = 17;
       lastStreamFrameMs = millis(); // Reset ngay để không bị timeout đá về màn hình chờ
@@ -9899,6 +10144,9 @@ namespace TestDisplay {
     } else if (!isScreenSleeping && currentMode == 17) {
       lastStreamFrameMs = millis();
       drawStreamAppScreen(true);
+    } else if (!isScreenSleeping && currentMode == 18) {
+      s_savedWifiListCache = WifiManager::getSavedWifiWithStatus();
+      drawWifiConnectionScreen(true);
     }
   }
 
@@ -9959,6 +10207,7 @@ namespace TestDisplay {
     if (currentMode == 15) return "games";
     if (currentMode == 16) return "qr_wifi";
     if (currentMode == 17) return "stream";
+    if (currentMode == 18) return "wifi_manager";
     if (currentMode >= 4) return "symbian";
     return "standby";
   }
@@ -9989,6 +10238,7 @@ namespace TestDisplay {
     if (currentMode == 15) return "Trò Chơi S40";
     if (currentMode == 16) return "Mã QR Wi-Fi";
     if (currentMode == 17) return "Stream Video";
+    if (currentMode == 18) return "Kết Nối Wi-Fi";
     return "Symbian OS";
   }
 

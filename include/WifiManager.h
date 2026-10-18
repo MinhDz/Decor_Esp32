@@ -1,6 +1,15 @@
 #pragma once
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <vector>
+
+struct SavedWifiStatus {
+  String ssid;
+  String password;
+  int rssi;
+  bool inRange;
+  bool connected;
+};
 
 class WifiManager {
 public:
@@ -8,6 +17,8 @@ public:
   static bool smartConnect();
   static bool connectDirect(const String& ssid, const String& password, bool save);
   static void scanNetworks(JsonDocument& resDoc);
+  static void triggerScan(bool async = false);
+  static std::vector<SavedWifiStatus> getSavedWifiWithStatus();
   
   static void loadSavedWifiList(JsonDocument& doc);
   static void saveSavedWifiList(const JsonDocument& doc);

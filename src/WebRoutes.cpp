@@ -4314,7 +4314,8 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     { id: 10, title: "Sóng âm",   icon: "🧪", desc: "11. Biểu đồ Sóng âm & Cảm biến phòng", mode: "diag" },
     { id: 11, title: "Thẻ nhớ",   icon: "💾", desc: "12. Thông tin Chi tiết Thẻ nhớ MicroSD", tab: "images" },
     { id: 12, title: "Trò chơi",  icon: "🎮", desc: "13. Trò chơi: Rắn săn mồi, Flappy & Xếp gạch", mode: "game" },
-    { id: 13, title: "Mã QR",     icon: "📱", desc: "14. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý", tab: "wifi" }
+    { id: 13, title: "Mã QR",     icon: "📱", desc: "14. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý", tab: "wifi" },
+    { id: 14, title: "Kết nối",   icon: "📶", desc: "15. Quản Lý Mạng Wi-Fi Đã Lưu & Chuyển Sóng", tab: "wifi", mode: "connect" }
   ];
 
   let currentS40Cursor = 0;
@@ -4369,7 +4370,12 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
                   <!-- Top Bar: Wi-Fi Pill (trái) & ESP32-S3 (phải) giống hệt thiết bị thật -->
                   <div class="sim-topbar">
                     <div class="sim-pill sim-pill-wifi" id="sim-pill-wifi">
-                      <span class="sim-dot-wifi" id="sim-dot-wifi">●</span>
+                      <svg id="sim-wifi-svg" width="13" height="11" viewBox="0 0 24 20" style="vertical-align:middle;margin-right:2px;fill:none;stroke:#10b981;stroke-width:2.5;stroke-linecap:round;">
+                        <path d="M1 5a18.5 18.5 0 0 1 22 0" id="sim-wifi-arc3"/>
+                        <path d="M5 9a12.5 12.5 0 0 1 14 0" id="sim-wifi-arc2"/>
+                        <path d="M9 13a6.5 6.5 0 0 1 6 0" id="sim-wifi-arc1"/>
+                        <circle cx="12" cy="18" r="1.5" fill="#10b981" id="sim-wifi-dot"/>
+                      </svg>
                       <span id="sim-wifi-ssid">STA</span>
                     </div>
                     <div class="sim-pill sim-pill-node">
@@ -4462,6 +4468,28 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
                   <div>ĐIỆN ÁP: <strong id="sim-diag-volt" style="color:#34d399;">3.30 V</strong></div>
                   <div>ADC 12-BIT: <strong id="sim-diag-raw" style="color:#fbbf24;">4095</strong></div>
                   <div>NÚT NHẬN DIỆN: <strong id="sim-diag-btn" style="color:#38bdf8;">KHÔNG BẤM</strong></div>
+                </div>
+              </div>
+
+              <!-- Mode 18: Quản lý Kết nối Wi-Fi -->
+              <div class="sim-view" id="sim-view-wifi" style="display:none;background:#050b14;color:#fff;flex-direction:column;padding:8px;box-sizing:border-box;">
+                <div class="s40-header-bar" style="border-bottom:1px solid #00f0ff;padding-bottom:4px;margin-bottom:6px;display:flex;justify-content:space-between;">
+                  <span style="color:#00f0ff;font-weight:700;font-size:0.75rem;">KẾT NỐI WI-FI</span>
+                  <span style="color:#10b981;font-size:0.65rem;" id="sim-wificonn-status">● ĐÃ KẾT NỐI</span>
+                </div>
+                <div style="background:#0a192f;border:1px solid #1e293b;border-radius:6px;padding:6px;margin-bottom:8px;">
+                  <div style="font-size:0.65rem;color:#facc15;font-weight:700;" id="sim-wificonn-ssid">ĐANG DÙNG: Wi-Fi Gia Đình</div>
+                  <div style="font-size:0.58rem;color:#94a3b8;" id="sim-wificonn-sub">IP: 192.168.1.5 | Sóng: -52 dBm</div>
+                </div>
+                <div style="font-size:0.62rem;color:#38bdf8;margin-bottom:4px;font-weight:700;">MẠNG ĐÃ LƯU TRÊN TRẠM:</div>
+                <div id="sim-wificonn-list" style="display:flex;flex-direction:column;gap:4px;flex:1;overflow-y:auto;">
+                  <div style="background:#0f172a;border:1px solid #10b981;border-radius:4px;padding:4px 6px;font-size:0.62rem;display:flex;justify-content:space-between;">
+                    <span style="color:#10b981;">📶 [✓] Yen Long</span>
+                    <span style="color:#64748b;font-size:0.55rem;">-48 dBm</span>
+                  </div>
+                </div>
+                <div style="border-top:1px solid #1e293b;padding-top:4px;font-size:0.55rem;color:#64748b;text-align:center;">
+                  Phím OK: Đổi Wi-Fi | Thoát: Về Menu
                 </div>
               </div>
             </div>
@@ -4664,6 +4692,14 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     if (dotWifi) {
       dotWifi.style.color = wifiConn ? '#10b981' : '#f59e0b';
       dotWifi.style.filter = wifiConn ? 'drop-shadow(0 0 5px #10b981)' : 'drop-shadow(0 0 5px #f59e0b)';
+    }
+    const wifiSvg = document.getElementById('sim-wifi-svg');
+    const wifiDot = document.getElementById('sim-wifi-dot');
+    if (wifiSvg) {
+      const strokeCol = wifiConn ? '#10b981' : '#f59e0b';
+      wifiSvg.style.stroke = strokeCol;
+      if (wifiDot) wifiDot.style.fill = strokeCol;
+      wifiSvg.style.filter = wifiConn ? 'drop-shadow(0 0 5px #10b981)' : 'drop-shadow(0 0 5px #f59e0b)';
     }
 
     // 8. Cập nhật nhiệt độ & độ ẩm (Weather pill)
@@ -4878,7 +4914,7 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     if (titleTag) titleTag.innerText = d.screen_title || 'Màn hình ESP32';
 
     // 2. Chuyển đổi View theo mode_id
-    const views = ['standby', 's40', 'pchud', 'xiaozhi', 'media', 'diag'];
+    const views = ['standby', 's40', 'pchud', 'xiaozhi', 'media', 'diag', 'wifi'];
     views.forEach(v => {
       const el = document.getElementById('sim-view-' + v);
       if (el) el.style.display = 'none';
@@ -4890,6 +4926,20 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       const el = document.getElementById('sim-view-s40');
       if (el) el.style.display = 'flex';
       renderS40Grid(d.menu_cursor || 0);
+    } else if (mId === 18) {
+      // Kết nối Wi-Fi
+      const el = document.getElementById('sim-view-wifi');
+      if (el) el.style.display = 'flex';
+      const isConn = d.wifi_connected || false;
+      const stEl = document.getElementById('sim-wificonn-status');
+      if (stEl) {
+        stEl.innerText = isConn ? '● ĐÃ KẾT NỐI' : '● SOFTAP';
+        stEl.style.color = isConn ? '#10b981' : '#f59e0b';
+      }
+      const ssidEl = document.getElementById('sim-wificonn-ssid');
+      if (ssidEl) ssidEl.innerText = isConn ? ('ĐANG DÙNG: ' + (d.wifi_ssid || 'Wi-Fi')) : 'CHẾ ĐỘ AP: TramVuTru-Config';
+      const subEl = document.getElementById('sim-wificonn-sub');
+      if (subEl) subEl.innerText = 'IP: ' + (d.ip || '192.168.4.1') + (isConn ? (' | Sóng: ' + (d.wifi_rssi || 0) + ' dBm') : ' (Tự dò mạng ngầm)');
     } else if (mId === 2) {
       // PC HUD
       const el = document.getElementById('sim-view-pchud');
@@ -5522,6 +5572,8 @@ static void handleKeypadPress() {
   res["humidity"] = TestDisplay::getStandbyHumidity();
   bool isWifiConn1 = (WiFi.status() == WL_CONNECTED);
   res["wifi_connected"] = isWifiConn1;
+  res["ip"] = WifiManager::getIp();
+  res["wifi_rssi"] = WifiManager::getRssi();
   if (isWifiConn1) {
     String s = WifiManager::getCurrentSsid();
     if (s.length() > 8) s = s.substring(0, 8);
@@ -5560,6 +5612,8 @@ static void handleKeypadStatus() {
   res["humidity"] = TestDisplay::getStandbyHumidity();
   bool isWifiConn2 = (WiFi.status() == WL_CONNECTED);
   res["wifi_connected"] = isWifiConn2;
+  res["ip"] = WifiManager::getIp();
+  res["wifi_rssi"] = WifiManager::getRssi();
   if (isWifiConn2) {
     String s = WifiManager::getCurrentSsid();
     if (s.length() > 8) s = s.substring(0, 8);
