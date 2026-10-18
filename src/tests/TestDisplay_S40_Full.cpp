@@ -14,6 +14,7 @@
 #include "GomeIcons.h"
 #include "OtaManager.h"
 #include "HardwareManager.h"
+#include "SatelliteSprite.h"
 #include <SPI.h>
 #include <WiFi.h>
 #include <LittleFS.h>
@@ -9166,6 +9167,412 @@ namespace TestDisplay {
   }
 
   // ============================================================================
+  // HOẠT ẢNH KHỞI ĐỘNG TRẠM VŨ TRỤ (SPACE STATION BOOT ANIMATION)
+  // Quỹ đạo 3D quanh Trái Đất, Phóng to từ điểm sáng, Kích hoạt đèn Edison & Đệm WiFi
+  // ============================================================================
+
+  struct BootStar {
+    int16_t x;
+    int16_t y;
+    uint16_t color;
+  };
+
+  static const BootStar BOOT_STARS[] = {
+    { 18,  22, 0x4228 }, { 45,  16, 0x9D13 }, { 82,  30, 0x194B }, { 110, 18, 0xFFFF },
+    { 142, 24, 0x5ACB }, { 178, 15, 0x2124 }, { 205, 32, 0x8410 }, { 228, 20, 0x07FF },
+    { 12,  56, 0x632C }, { 34,  75, 0x194B }, { 68,  62, 0x8C71 }, { 210, 68, 0x3186 },
+    { 232, 82, 0xFFFF }, { 16, 110, 0x5ACB }, { 222, 115, 0x6BDD }, { 14, 148, 0x194B },
+    { 38, 165, 0xFFFF }, { 75, 178, 0x3A49 }, { 198, 160, 0x8C71 }, { 226, 172, 0x4228 },
+    { 25, 192, 0x5ACB }, { 52, 204, 0x194B }, { 115, 195, 0x3186 }, { 180, 202, 0xFFFF },
+    { 215, 198, 0x7BEF }, { 95,  40, 0x4228 }, { 158, 48, 0x632C }, { 28,  38, 0x194B },
+    { 192, 92, 0x5ACB }, { 40, 130, 0x3186 }, { 200, 140, 0x8C71 }, { 162, 175, 0x194B }
+  };
+  static const size_t BOOT_STARS_COUNT = sizeof(BOOT_STARS) / sizeof(BOOT_STARS[0]);
+
+  static void drawBootEarth(int cx, int cy, float rotOffset) {
+    if (!tft) return;
+    const int R = 26;
+    const int R2 = R * R;
+    for (int dy = -R; dy <= R; dy++) {
+      int maxDx = (int)(sqrtf((float)(R2 - dy * dy)) + 0.5f);
+      for (int dx = -maxDx; dx <= maxDx; dx++) {
+        int dist2 = dx * dx + dy * dy;
+        if (dist2 > R2) continue;
+        float dist = sqrtf((float)dist2);
+        float nx = (float)dx / (float)R;
+        float ny = (float)dy / (float)R;
+        float nz = sqrtf(max(0.0f, 1.0f - nx * nx - ny * ny));
+
+        // Nguồn sáng từ góc trên trái
+        float lx = -0.55f, ly = -0.45f, lz = 0.70f;
+        float dot = nx * lx + ny * ly + nz * lz;
+        if (dot < 0.10f) dot = 0.10f;
+
+        // Mô phỏng lục địa xoay quanh trục
+        float u = atan2f(nx, nz) + rotOffset;
+        float v = ny * 0.5f + 0.5f;
+        bool isLand = (sinf(u * 2.8f) * cosf(v * 4.0f) + sinf(u * 5.0f + v * 3.0f)) > 0.12f;
+
+        int r, g, b;
+        if (isLand) {
+          r = (int)(35.0f * dot + 10.0f);
+          g = (int)(185.0f * dot + 20.0f);
+          b = (int)(95.0f * dot + 15.0f);
+        } else {
+          r = (int)(10.0f * dot + 5.0f);
+          g = (int)(60.0f * dot + 15.0f);
+          b = (int)(210.0f * dot + 30.0f);
+        }
+
+        // Vệt phản chiếu ánh sáng trên đại dương
+        if (!isLand && dot > 0.75f) {
+          float specRatio = (dot - 0.75f) / 0.25f;
+          int spec = (int)(100.0f * specRatio * specRatio);
+          r = min(255, r + spec);
+          g = min(255, g + spec);
+          b = min(255, b + spec);
+        }
+
+        // Vành khí quyển phát sáng ở rìa Trái Đất
+        if (dist > R - 2.5f) {
+          r = min(255, r + 40);
+          g = min(255, g + 80);
+          b = min(255, b + 140);
+        }
+
+        uint16_t col565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        tft->drawPixel(cx + dx, cy + dy, col565);
+      }
+    }
+
+    // Quầng sáng khí quyển ngoài (Outer Glow Rim)
+    for (int deg = 0; deg < 360; deg += 4) {
+      float rad = deg * 0.0174532925f;
+      float cosA = cosf(rad);
+      float sinA = sinf(rad);
+      tft->drawPixel((int)(cx + (R + 1) * cosA), (int)(cy + (R + 1) * sinA), 0x0272);
+      tft->drawPixel((int)(cx + (R + 2) * cosA), (int)(cy + (R + 2) * sinA), 0x0129);
+    }
+  }
+
+  static void drawBootOrbitRing(int cx, int cy, float progressScale = 1.0f) {
+    if (!tft) return;
+    const float rx = 74.0f * progressScale;
+    const float ry = 26.0f * progressScale;
+    if (rx < 2.0f || ry < 2.0f) return;
+
+    for (int deg = 0; deg < 360; deg += 3) {
+      float rad = deg * 0.0174532925f;
+      float cosA = cosf(rad);
+      float sinA = sinf(rad);
+      int ox = (int)(cx + rx * cosA);
+      int oy = (int)(cy + ry * sinA - 0.22f * (ox - cx));
+
+      // Không vẽ đè lên phần bán cầu trước của Trái Đất nếu quỹ đạo đang ở phía sau
+      if (progressScale >= 0.95f) {
+        int dx = ox - cx;
+        int dy = oy - cy;
+        if (dx * dx + dy * dy <= 26 * 26 && sinA < 0) {
+          continue;
+        }
+      }
+
+      uint16_t col = (deg % 12 < 8) ? 0x0478 : 0x01E8;
+      if (deg % 36 == 0) col = C_NEON_CYAN;
+      tft->drawPixel(ox, oy, col);
+    }
+  }
+
+  static void drawBootSatelliteSprite(int satX, int satY, bool behindEarth = false, int cx = 120, int cy = 112) {
+    if (!tft) return;
+    const int sprW = 32;
+    const int sprH = 28;
+    int originX = satX - 16;
+    int originY = satY - 14;
+
+    for (int r = 0; r < sprH; r++) {
+      int py = originY + r;
+      if (py < 0 || py >= 320) continue;
+      for (int c = 0; c < sprW; c++) {
+        int px = originX + c;
+        if (px < 0 || px >= 240) continue;
+
+        uint16_t col = pgm_read_word(&SATELLITE_SPRITE_32x28[r * sprW + c]);
+        if (col == 0x0000) continue; // Trong suốt
+
+        if (behindEarth) {
+          int edx = px - cx;
+          int edy = py - cy;
+          if (edx * edx + edy * edy <= 26 * 26) {
+            continue; // Bị Trái Đất che khuất
+          }
+        }
+        tft->drawPixel(px, py, col);
+      }
+    }
+  }
+
+  static void eraseBootSatelliteSprite(int satX, int satY, int cx, int cy) {
+    if (!tft) return;
+    const int sprW = 32;
+    const int sprH = 28;
+    int x0 = satX - 16;
+    int y0 = satY - 14;
+
+    // Xóa khung viền cũ của vệ tinh
+    tft->fillRect(x0, y0, sprW, sprH, C_BLACK);
+
+    // Vẽ lại các ngôi sao rơi vào khu vực vừa bị xóa
+    for (size_t s = 0; s < BOOT_STARS_COUNT; s++) {
+      if (BOOT_STARS[s].x >= x0 && BOOT_STARS[s].x < x0 + sprW &&
+          BOOT_STARS[s].y >= y0 && BOOT_STARS[s].y < y0 + sprH) {
+        tft->drawPixel(BOOT_STARS[s].x, BOOT_STARS[s].y, BOOT_STARS[s].color);
+      }
+    }
+
+    // Vẽ lại các điểm quỹ đạo rơi vào khu vực vừa bị xóa
+    const float rx = 74.0f;
+    const float ry = 26.0f;
+    for (int deg = 0; deg < 360; deg += 3) {
+      float rad = deg * 0.0174532925f;
+      int ox = (int)(cx + rx * cosf(rad));
+      int oy = (int)(cy + ry * sinf(rad) - 0.22f * (ox - cx));
+      if (ox >= x0 && ox < x0 + sprW && oy >= y0 && oy < y0 + sprH) {
+        int edx = ox - cx;
+        int edy = oy - cy;
+        if (edx * edx + edy * edy <= 26 * 26 && sinf(rad) < 0) continue;
+        uint16_t col = (deg % 12 < 8) ? 0x0478 : 0x01E8;
+        if (deg % 36 == 0) col = C_NEON_CYAN;
+        tft->drawPixel(ox, oy, col);
+      }
+    }
+  }
+
+  void runSpaceStationBootAnimation(bool playChime) {
+    if (!tft) return;
+    isScreenSleeping = false;
+    setBacklightBrightness(screenBrightnessPct > 0 ? screenBrightnessPct : 80);
+
+    int w = tft->width();
+    int h = tft->height();
+    int cx = w / 2; // 120
+    int cy = 112;
+
+    // Kích hoạt chuỗi hiệu ứng khởi động của đèn Ống Edison (Lò phản ứng bừng sáng)
+    TestWindmill::triggerStartupEffect();
+
+    // 1. Khởi tạo không gian sâu (Deep Space)
+    tft->fillScreen(C_BLACK);
+
+    // Vẽ viền Cyberpunk mỏng
+    tft->drawRect(2, 2, w - 4, h - 4, 0x1186);
+    tft->drawFastHLine(2, 2, 14, C_NEON_CYAN);
+    tft->drawFastVLine(2, 2, 14, C_NEON_CYAN);
+    tft->drawFastHLine(w - 16, 2, 14, C_NEON_CYAN);
+    tft->drawFastVLine(w - 3, 2, 14, C_NEON_CYAN);
+    tft->drawFastHLine(2, h - 3, 14, C_NEON_CYAN);
+    tft->drawFastVLine(2, h - 16, 14, C_NEON_CYAN);
+    tft->drawFastHLine(w - 16, h - 3, 14, C_NEON_CYAN);
+    tft->drawFastVLine(w - 3, h - 16, 14, C_NEON_CYAN);
+
+    // Tag tiêu đề trên cùng
+    tft->fillRect(40, 4, 160, 12, 0x0821);
+    tft->drawRect(40, 4, 160, 12, 0x1A6B);
+    tft->setTextSize(1);
+    tft->setTextColor(C_NEON_CYAN, 0x0821);
+    tft->setCursor(46, 6);
+    tft->print("* DECOR SPACE STATION *");
+
+    // ========================================================================
+    // GIAI ĐOẠN 1: QUANG ĐIỂM TÂM PHÓNG TO & KÍCH HOẠT QUỸ ĐẠO (WARP EXPANSION)
+    // Từ 1 pixel sáng rực giữa màn hình, sóng năng lượng bung ra thành vòng tròn quỹ đạo
+    // ========================================================================
+    tft->drawPixel(cx, cy, C_WHITE);
+    tft->drawPixel(cx - 1, cy, C_NEON_CYAN);
+    tft->drawPixel(cx + 1, cy, C_NEON_CYAN);
+    tft->drawPixel(cx, cy - 1, C_NEON_CYAN);
+    tft->drawPixel(cx, cy + 1, C_NEON_CYAN);
+    delay(100); yield();
+
+    for (int step = 1; step <= 13; step++) {
+      int r = step * 2;
+      uint16_t ringCol = (step < 6) ? C_WHITE : ((step < 10) ? C_NEON_CYAN : 0x03FF);
+      tft->drawCircle(cx, cy, r, ringCol);
+      if (step > 1) {
+        tft->drawCircle(cx, cy, r - 2, C_BLACK);
+      }
+
+      // Hiện dần các vì sao theo từng nhịp sóng
+      if (step >= 4) {
+        size_t starIdx = (step - 4) * 3;
+        for (size_t s = starIdx; s < starIdx + 3 && s < BOOT_STARS_COUNT; s++) {
+          tft->drawPixel(BOOT_STARS[s].x, BOOT_STARS[s].y, BOOT_STARS[s].color);
+        }
+      }
+
+      // Bung vòng quỹ đạo mở rộng
+      if (step >= 6) {
+        drawBootOrbitRing(cx, cy, (float)(step - 5) / 8.0f);
+      }
+
+      TestWindmill::loop();
+      delay(16); yield();
+    }
+    tft->drawCircle(cx, cy, 26, C_BLACK);
+
+    // Vẽ toàn bộ các vì sao còn lại
+    for (size_t s = 0; s < BOOT_STARS_COUNT; s++) {
+      tft->drawPixel(BOOT_STARS[s].x, BOOT_STARS[s].y, BOOT_STARS[s].color);
+    }
+
+    // Vẽ Trái Đất nguyên bản lần đầu
+    drawBootEarth(cx, cy, 0.0f);
+    // Vẽ vòng quỹ đạo hoàn chỉnh
+    drawBootOrbitRing(cx, cy, 1.0f);
+
+    // ========================================================================
+    // VẼ KHUNG ĐIỀU KHIỂN NẠP HỆ THỐNG DƯỚI (BOTTOM HUD & LOADING BAR)
+    // ========================================================================
+    tft->drawRect(10, 215, 220, 95, 0x1186);
+    tft->drawRect(11, 216, 218, 93, 0x01A3);
+    // 4 góc ke công nghệ
+    tft->drawFastHLine(10, 215, 12, C_NEON_CYAN);
+    tft->drawFastVLine(10, 215, 12, C_NEON_CYAN);
+    tft->drawFastHLine(230 - 12, 215, 12, C_NEON_CYAN);
+    tft->drawFastVLine(229, 215, 12, C_NEON_CYAN);
+    tft->drawFastHLine(10, 310, 12, C_NEON_CYAN);
+    tft->drawFastVLine(10, 310 - 12, 12, C_NEON_CYAN);
+    tft->drawFastHLine(230 - 12, 310, 12, C_NEON_CYAN);
+    tft->drawFastVLine(229, 310 - 12, 12, C_NEON_CYAN);
+
+    // Tiêu đề trạm
+    tft->setTextSize(1);
+    tft->setTextColor(C_YELLOW, C_BLACK);
+    tft->setCursor(20, 224);
+    tft->print("TRẠM KHÔNG GIAN S40");
+
+    // Khung thanh tiến trình (Loading Bar)
+    tft->drawRect(18, 244, 204, 12, 0x03FF);
+    tft->drawRect(19, 245, 202, 10, 0x01A3);
+    tft->fillRect(20, 246, 200, 8, 0x0842);
+
+    // ========================================================================
+    // GIAI ĐOẠN 2: VỆ TINH XOAY QUANH TRÁI ĐẤT & ĐỆM KẾT NỐI WI-FI (1-2s)
+    // Tự động kiểm tra trạng thái WiFi thời gian thực, nạp thanh Loading từ 0% -> 100%
+    // ========================================================================
+    const int totalFrames = 62;
+    int lastSatX = cx;
+    int lastSatY = cy;
+    float rotOffset = 0.0f;
+    int lastPct = -1;
+
+    for (int frame = 0; frame <= totalFrames; frame++) {
+      // Góc quỹ đạo chuyển động đều
+      float angle = -1.570796f + (float)frame * (6.283185f / (float)totalFrames);
+
+      // Tọa độ elip nghiêng 3D
+      int satX = (int)(cx + 74.0f * cosf(angle));
+      int satY = (int)(cy + 26.0f * sinf(angle) - 0.22f * (satX - cx));
+      bool behindEarth = (sinf(angle) < -0.15f);
+
+      // Xóa vị trí cũ của vệ tinh
+      if (frame > 0) {
+        eraseBootSatelliteSprite(lastSatX, lastSatY, cx, cy);
+      }
+
+      // Xoay Trái Đất nhẹ
+      rotOffset += 0.04f;
+      drawBootEarth(cx, cy, rotOffset);
+
+      // Vẽ lại vòng quỹ đạo
+      drawBootOrbitRing(cx, cy, 1.0f);
+
+      // Vẽ vệ tinh tại vị trí mới (nếu ở phía sau Trái Đất sẽ được clip tự động)
+      drawBootSatelliteSprite(satX, satY, behindEarth, cx, cy);
+      lastSatX = satX;
+      lastSatY = satY;
+
+      // Cập nhật phần trăm tiến trình
+      int pct = (frame * 100) / totalFrames;
+      if (pct != lastPct) {
+        lastPct = pct;
+
+        // Điền thanh tiến trình
+        int fillW = (pct * 200) / 100;
+        if (fillW > 0) {
+          tft->fillRect(20, 246, fillW, 8, (pct >= 98) ? C_NEON_GREEN : C_NEON_CYAN);
+          if (pct < 100 && fillW >= 2) {
+            tft->fillRect(20 + fillW - 2, 246, 2, 8, C_WHITE);
+          }
+        }
+
+        // Số %
+        tft->setTextSize(1);
+        tft->setTextColor(C_NEON_CYAN, C_BLACK);
+        tft->setCursor(184, 224);
+        tft->printf("%3d%%", pct);
+
+        // Thông điệp trạng thái hệ thống
+        const char* statusMsg = "KHỞI TẠO...";
+        if (pct < 22) statusMsg = "ĐỒNG BỘ CON QUAY HỒI CHUYỂN...";
+        else if (pct < 45) statusMsg = "KÍCH HOẠT LÒ ĐÈN EDISON...";
+        else if (pct < 70) statusMsg = "KẾT NỐI MẠNG TRẠM VŨ TRỤ...";
+        else if (pct < 92) statusMsg = "ĐỒNG BỘ CẢM BIẾN & GIAO DIỆN...";
+        else statusMsg = "HỆ THỐNG SẴN SÀNG - KHỞI HÀNH!";
+
+        tft->fillRect(18, 264, 204, 10, C_BLACK);
+        tft->setCursor(20, 265);
+        tft->setTextColor((pct >= 92) ? C_NEON_GREEN : C_SLATE, C_BLACK);
+        tft->print(statusMsg);
+
+        // Dòng trạng thái Wi-Fi thời gian thực (Đệm 1-2s kết nối)
+        tft->fillRect(18, 280, 204, 10, C_BLACK);
+        tft->setCursor(20, 282);
+        if (WiFi.status() == WL_CONNECTED) {
+          tft->setTextColor(C_NEON_GREEN, C_BLACK);
+          tft->printf("WiFi: %.12s (Online)", WiFi.SSID().c_str());
+        } else if (WiFi.getMode() == WIFI_MODE_AP || WiFi.getMode() == WIFI_MODE_APSTA) {
+          tft->setTextColor(C_NEON_AMBER, C_BLACK);
+          tft->print("WiFi: Trạm phát AP Sẵn sàng");
+        } else {
+          tft->setTextColor(0x047F, C_BLACK);
+          tft->print("WiFi: Đang kết nối mạng...");
+        }
+
+        // Dòng thông tin hệ thống chân trang
+        tft->setTextColor(0x4228, C_BLACK);
+        tft->setCursor(20, 296);
+        tft->printf("DECOR OS %s | 240MHz", FIRMWARE_VERSION);
+      }
+
+      // Duy trì xung nhịp đèn Edison và xử lý tác vụ nền
+      TestWindmill::loop();
+      delay(22); yield();
+    }
+
+    // ========================================================================
+    // GIAI ĐOẠN 3: HOÀN TẤT NẠP, PHÁT ÂM HIỆU STARTUP & VÀO MÀN HÌNH CHỜ (STANDBY)
+    // ========================================================================
+    tft->drawRect(18, 244, 204, 12, C_NEON_GREEN);
+    tft->fillRect(20, 246, 200, 8, C_NEON_GREEN);
+
+    if (playChime) {
+      TestAudio::playStartupChime();
+    }
+
+    unsigned long holdStart = millis();
+    while (millis() - holdStart < 350) {
+      TestWindmill::loop();
+      delay(15); yield();
+    }
+
+    // Chuyển sang Màn hình chờ (Mode 0: Standby Screen)
+    tft->fillScreen(C_BLACK);
+    currentMode = 0;
+    refreshActiveScreen();
+  }
+
+  // ============================================================================
   // HOẠT ẢNH BOOT CYBERPUNK & KIỂM TRA TRẠNG THÁI NGOẠI VI (P.O.S.T SYSTEM LOAD)
   // Khởi động hệ thống với chẩn đoán phần cứng thời gian thực và thanh tiến trình
   // ============================================================================
@@ -9373,19 +9780,15 @@ namespace TestDisplay {
     TestAudio::playKeyBeep();
     delay(100); yield();
 
-    // HOÀN TẤT: 100% TIẾN TRÌNH & PHÁT ÂM HIỆU STARTUP
-    updateBootProgress(100, "HỆ ĐIỀU HÀNH SẴN SÀNG!");
+    // HOÀN TẤT KIỂM TRA NGOẠI VI (POST OK)
+    updateBootProgress(100, "NGOẠI VI ĐÃ SẴN SÀNG!");
     tft->drawFastHLine(14, 258, w - 28, C_NEON_GREEN);
+    TestAudio::playKeyBeep();
+    delay(300); yield();
 
-    if (playChime) {
-      TestAudio::playStartupChime();
-    }
-    delay(450); yield();
-
-    // Chuyển sang Màn hình chờ (Mode 0)
-    tft->fillScreen(C_BLACK);
-    currentMode = 0;
-    refreshActiveScreen();
+    // CHUYỂN SANG HOẠT ẢNH KHỞI ĐỘNG TRẠM VŨ TRỤ (SPACE STATION BOOT ANIMATION)
+    // Phóng to từ điểm sáng tâm, Quỹ đạo 3D quanh Trái Đất, Kích hoạt đèn Edison & Đệm WiFi 1-2s
+    runSpaceStationBootAnimation(playChime);
   }
 
   void init() {

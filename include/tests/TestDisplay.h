@@ -77,6 +77,9 @@ namespace TestDisplay {
   // Chạy hoạt ảnh Boot Cyberpunk & Bảng kiểm tra ngoại vi POST (Power-On Self-Test)
   void runBootSequence(bool playChime = true);
 
+  // Hoạt ảnh khởi động Trạm Không Gian (Phóng to từ 1 điểm, vệ tinh xoay quanh Trái Đất, hiệu ứng đèn Edison & loading Wi-Fi)
+  void runSpaceStationBootAnimation(bool playChime = true);
+
   // Hiển thị tiến trình cập nhật phần mềm từ xa tối giản (OTA Progress Screen)
   void drawOtaProgressScreen(const char* status, int pct);
 
