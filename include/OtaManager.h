@@ -4,7 +4,7 @@
 
 #define SYSTEM_DEVICE_NAME    "Trạm Decor Vũ Trụ"
 #define SYSTEM_OS_NAME        "Space OS"
-#define FIRMWARE_VERSION      "v3.1.3"
+#define FIRMWARE_VERSION      "v3.1.4"
 #define FIRMWARE_BUILD_DATE   __DATE__ " " __TIME__
 
 struct OtaUpdateInfo {
@@ -39,6 +39,7 @@ public:
 
   // Trạng thái và tiến trình nạp
   static bool isUpdating();
+  static void setUpdating(bool updating);
   static int getUpdateProgress();
   static String getUpdateStatus();
 

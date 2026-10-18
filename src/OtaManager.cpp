@@ -53,6 +53,10 @@ bool OtaManager::isUpdating() {
   return s_isUpdating;
 }
 
+void OtaManager::setUpdating(bool updating) {
+  s_isUpdating = updating;
+}
+
 int OtaManager::getUpdateProgress() {
   return s_progressPct;
 }
@@ -189,7 +193,9 @@ bool OtaManager::startCloudUpdate(const String& binUrl) {
         int pct = (totalLen > 0) ? (written * 100 / totalLen) : 50;
         if (pct != lastPct) {
           lastPct = pct;
-          drawMinimalOtaProgress("Dang tai & nap Flash...", pct);
+          char statusMsg[48];
+          snprintf(statusMsg, sizeof(statusMsg), "Dang tai & nap (%u KB)...", (unsigned)(written / 1024));
+          drawMinimalOtaProgress(statusMsg, pct);
         }
       }
     } else {

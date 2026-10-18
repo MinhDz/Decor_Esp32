@@ -1453,7 +1453,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     if (pBox) pBox.style.display = 'block';
 
     const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/update', true);
+    xhr.open('POST', '/update?size=' + file.size, true);
 
     xhr.upload.onprogress = function(e) {
       if (e.lengthComputable) {
@@ -5755,6 +5755,9 @@ static void handleOtaStart() {
   OtaManager::startCloudUpdate(binUrl);
 }
 
+static size_t s_localOtaTotalExpected = 0;
+static int s_lastLocalOtaPct = -1;
+
 static void handleLocalUpdate() {
   server.sendHeader("Connection", "close");
   if (!Update.hasError()) {
@@ -5767,6 +5770,7 @@ static void handleLocalUpdate() {
     delay(1500);
     ESP.restart();
   } else {
+    OtaManager::setUpdating(false);
     server.send(500, "text/html",
       "<html><body style='font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#fff;'>"
       "<h2>❌ CẬP NHẬT THẤT BẠI!</h2>"
@@ -5780,19 +5784,47 @@ static void handleLocalUpdateUpload() {
   HTTPUpload& upload = server.upload();
 
   if (upload.status == UPLOAD_FILE_START) {
-    Serial.printf("⬆️ [WEB OTA] Bắt đầu nhận file: %s\n", upload.filename.c_str());
+    OtaManager::setUpdating(true);
+    s_lastLocalOtaPct = -1;
+
+    // Lấy kích thước tổng file truyền từ client qua query param ?size=...
+    if (server.hasArg("size")) {
+      s_localOtaTotalExpected = (size_t)server.arg("size").toInt();
+    } else {
+      s_localOtaTotalExpected = 0;
+    }
+
+    Serial.printf("⬆️ [WEB OTA] Bắt đầu nhận file: %s (Kỳ vọng: %u bytes)\n",
+                  upload.filename.c_str(), (unsigned)s_localOtaTotalExpected);
     OtaManager::drawMinimalOtaProgress("Nhan file qua Web...", 0);
 
-    if (!Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH)) {
+    if (!Update.begin(s_localOtaTotalExpected > 0 ? s_localOtaTotalExpected : UPDATE_SIZE_UNKNOWN, U_FLASH)) {
       Update.printError(Serial);
+      OtaManager::drawMinimalOtaProgress("Loi khoi tao Flash!", 0);
     }
   } else if (upload.status == UPLOAD_FILE_WRITE) {
     if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
       Update.printError(Serial);
     }
-    if (upload.totalSize > 0) {
-      int pct = (upload.currentSize * 100 / upload.totalSize);
-      OtaManager::drawMinimalOtaProgress("Dang ghi Flash...", pct);
+
+    // upload.totalSize là tổng số byte tích lũy đã ghi thành công
+    if (s_localOtaTotalExpected > 0) {
+      int pct = (int)((upload.totalSize * 100ULL) / s_localOtaTotalExpected);
+      pct = constrain(pct, 0, 99);
+      if (pct != s_lastLocalOtaPct) {
+        s_lastLocalOtaPct = pct;
+        char statusMsg[48];
+        snprintf(statusMsg, sizeof(statusMsg), "Dang ghi Flash (%u KB)...", (unsigned)(upload.totalSize / 1024));
+        OtaManager::drawMinimalOtaProgress(statusMsg, pct);
+      }
+    } else {
+      static unsigned long s_lastKbUpdateMs = 0;
+      if (millis() - s_lastKbUpdateMs >= 250) {
+        s_lastKbUpdateMs = millis();
+        char statusMsg[48];
+        snprintf(statusMsg, sizeof(statusMsg), "Da nhan %u KB...", (unsigned)(upload.totalSize / 1024));
+        OtaManager::drawMinimalOtaProgress(statusMsg, 50);
+      }
     }
   } else if (upload.status == UPLOAD_FILE_END) {
     if (Update.end(true)) {
@@ -5801,11 +5833,13 @@ static void handleLocalUpdateUpload() {
     } else {
       Update.printError(Serial);
       OtaManager::drawMinimalOtaProgress("Loi ghi Flash!", 0);
+      OtaManager::setUpdating(false);
     }
   } else if (upload.status == UPLOAD_FILE_ABORTED) {
     Update.end();
     Serial.println("⚠️ [WEB OTA] Quá trình tải lên bị hủy!");
     OtaManager::drawMinimalOtaProgress("Da huy tai len!", 0);
+    OtaManager::setUpdating(false);
   }
 }
 

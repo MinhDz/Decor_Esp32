@@ -10039,6 +10039,13 @@ namespace TestDisplay {
     if (!tft) return;
     unsigned long now = millis();
 
+    // Nếu đang trong quá trình nạp OTA: Khóa mọi thao tác vẽ đè (Đồng hồ, Menu, Toast, AOD/Sleep)
+    if (OtaManager::isUpdating()) {
+      isScreenSleeping = false;
+      lastUserActivityMs = now;
+      return;
+    }
+
     TestSDCard::loop();
 
     // 1. Đọc cảm biến chạm điện dung TTP223 trên chân GPIO 21 (PIN_TOUCH_TTP223)
@@ -10778,7 +10785,10 @@ namespace TestDisplay {
     }
   }
 
-  static int lastOtaDrawnPct = -1;
+  static bool s_otaScreenDrawn = false;
+  static int  s_lastOtaPct = -1;
+  static char s_lastOtaStatus[64] = "";
+
   void drawOtaProgressScreen(const char* status, int pct) {
     if (!tft) return;
     pct = constrain(pct, 0, 100);
@@ -10786,87 +10796,154 @@ namespace TestDisplay {
     int w = tft->width();
     int h = tft->height();
 
-    // Lần đầu vẽ hoặc khi pct == 0: Xóa màn hình và vẽ bộ khung tối giản
-    if (lastOtaDrawnPct < 0 || pct == 0) {
+    // 1. Chỉ vẽ khung tĩnh MỘT LẦN DUY NHẤT khi bắt đầu OTA -> Triệt tiêu hoàn toàn nhấp nháy!
+    if (!s_otaScreenDrawn) {
+      s_otaScreenDrawn = true;
+      s_lastOtaPct = -1;
+      s_lastOtaStatus[0] = '\0';
+
       isScreenSleeping = false;
       setBacklightBrightness(100);
       tft->fillScreen(C_BLACK);
 
-      // 1. Tiêu đề tối giản trên cùng
-      tft->fillRect(0, 0, w, 28, 0x18C3);
-      tft->drawFastHLine(0, 28, w, 0x52AA);
+      // Viền Cyberpunk ngoài cùng
+      tft->drawRect(2, 2, w - 4, h - 4, 0x1186);
+      tft->drawFastHLine(2, 2, 14, C_NEON_CYAN);
+      tft->drawFastVLine(2, 2, 14, C_NEON_CYAN);
+      tft->drawFastHLine(w - 16, 2, 14, C_NEON_CYAN);
+      tft->drawFastVLine(w - 3, 2, 14, C_NEON_CYAN);
+      tft->drawFastHLine(2, h - 3, 14, C_NEON_CYAN);
+      tft->drawFastVLine(2, h - 16, 14, C_NEON_CYAN);
+      tft->drawFastHLine(w - 16, h - 3, 14, C_NEON_CYAN);
+      tft->drawFastVLine(w - 3, h - 16, 14, C_NEON_CYAN);
+
+      // Hộp tiêu đề trên cùng
+      tft->fillRect(20, 6, w - 40, 18, 0x0821);
+      tft->drawRect(20, 6, w - 40, 18, 0x1A6B);
       tft->setTextSize(1);
-      tft->setTextColor(C_WHITE, 0x18C3);
-      tft->setCursor(14, 10);
-      tft->print("HE THONG // CAP NHAT PHAN MEM (OTA)");
+      tft->setTextColor(C_NEON_CYAN, 0x0821);
+      tft->setCursor(32, 11);
+      tft->print("* HE THONG // CAP NHAT OTA *");
 
-      // 2. Khung viền trung tâm
-      tft->drawRect(12, 44, w - 24, 220, 0x52AA);
-      tft->drawRect(14, 46, w - 28, 216, 0x2104);
+      // Khung thẻ thông tin trung tâm
+      tft->drawRect(8, 30, w - 16, 246, 0x194B);
+      tft->drawRect(9, 31, w - 18, 244, 0x01A3);
+      tft->drawFastHLine(8, 30, 10, C_NEON_CYAN);
+      tft->drawFastVLine(8, 30, 10, C_NEON_CYAN);
+      tft->drawFastHLine(w - 18, 30, 10, C_NEON_CYAN);
+      tft->drawFastVLine(w - 9, 30, 10, C_NEON_CYAN);
 
-      // Icon vi điều khiển / tải xuống tối giản ở giữa
-      tft->drawRect(w / 2 - 24, 62, 48, 48, 0x7BEF);
-      tft->fillRect(w / 2 - 20, 66, 40, 40, 0x10A2);
-      tft->drawLine(w / 2, 74, w / 2, 94, C_WHITE);
-      tft->drawLine(w / 2 - 1, 74, w / 2 - 1, 94, C_WHITE);
-      tft->fillTriangle(w / 2 - 8, 92, w / 2 + 8, 92, w / 2, 100, C_WHITE);
+      // Icon vi điều khiển / chip trung tâm
+      int cx = w / 2;
+      int cy = 60;
+      tft->fillRect(cx - 20, cy - 20, 40, 40, 0x0842);
+      tft->drawRect(cx - 20, cy - 20, 40, 40, 0x03FF);
+      // Chân chip vi mạch
+      for (int p = -12; p <= 12; p += 8) {
+        tft->drawFastHLine(cx - 24, cy + p, 4, C_NEON_CYAN);
+        tft->drawFastHLine(cx + 20, cy + p, 4, C_NEON_CYAN);
+        tft->drawFastVLine(cx + p, cy - 24, 4, C_NEON_CYAN);
+        tft->drawFastVLine(cx + p, cy + 20, 4, C_NEON_CYAN);
+      }
+      // Mũi tên tải xuống phát sáng
+      tft->drawLine(cx, cy - 10, cx, cy + 6, C_WHITE);
+      tft->drawLine(cx - 1, cy - 10, cx - 1, cy + 6, C_WHITE);
+      tft->fillTriangle(cx - 7, cy + 5, cx + 7, cy + 5, cx, cy + 13, C_NEON_CYAN);
 
-      // 3. Khung cảnh báo ở đáy
-      tft->fillRect(12, h - 38, w - 24, 24, 0x2000);
-      tft->drawRect(12, h - 38, w - 24, 24, C_RED);
+      // Thông tin thiết bị & phân vùng
+      tft->setTextColor(C_YELLOW, C_BLACK);
       tft->setTextSize(1);
+      tft->setCursor(18, 92);
+      tft->print("TRAM DECOR VU TRU // ESP32-S3");
+      tft->setTextColor(C_SLATE, C_BLACK);
+      tft->setCursor(18, 106);
+      tft->printf("PHAN VUNG: %s -> %s",
+                  OtaManager::getRunningPartitionName().c_str(),
+                  OtaManager::getNextPartitionName().c_str());
+
+      // Vạch phân cách công nghệ
+      tft->drawFastHLine(18, 122, w - 36, 0x194B);
+      tft->drawFastHLine(35, 122, w - 70, C_NEON_CYAN);
+
+      // Khung rỗng cố định của thanh tiến trình (Loading Bar Outer Track)
+      tft->drawRect(18, 188, 204, 18, 0x03FF);
+      tft->drawRect(19, 189, 202, 16, 0x01A3);
+      tft->fillRect(20, 190, 200, 14, 0x0842);
+
+      // Khung cảnh báo ở đáy (Cố định, không vẽ lại)
+      tft->fillRect(8, 282, w - 16, 32, 0x2000);
+      tft->drawRect(8, 282, w - 16, 32, C_RED);
+      tft->drawRect(9, 283, w - 18, 30, 0x8000);
       tft->setTextColor(C_WHITE, 0x2000);
-      const char* warn = "! KHONG DUOC NGAT NGUON DIEN !";
-      tft->setCursor(max(14, (w - vnStrLen(warn) * 6) / 2), h - 30);
-      tft->print(warn);
-
-      lastOtaDrawnPct = -1;
+      tft->setCursor(18, 288);
+      tft->print("! CANH BAO QUAN TRONG !");
+      tft->setTextColor(C_YELLOW, 0x2000);
+      tft->setCursor(18, 300);
+      tft->print("KHONG DUOC NGAT NGUON DIEN!");
     }
 
-    // Cập nhật vùng trạng thái & tiến trình
-    if (pct != lastOtaDrawnPct) {
-      lastOtaDrawnPct = pct;
+    // 2. Cập nhật thông điệp trạng thái (Chỉ vẽ lại khi có thay đổi nội dung)
+    if (status && strcmp(status, s_lastOtaStatus) != 0) {
+      strncpy(s_lastOtaStatus, status, sizeof(s_lastOtaStatus) - 1);
+      s_lastOtaStatus[sizeof(s_lastOtaStatus) - 1] = '\0';
 
-      // Dòng trạng thái (Status text)
-      tft->fillRect(16, 126, w - 32, 16, C_BLACK);
+      tft->fillRect(16, 130, w - 32, 16, C_BLACK);
       tft->setTextSize(1);
       tft->setTextColor(0x7BEF, C_BLACK);
       int sw = strlen(status) * 6;
-      tft->setCursor(max(20, (w - sw) / 2), 128);
+      tft->setCursor(max(20, (w - sw) / 2), 134);
       tft->print(status);
+    }
 
-      // Thanh Progress Bar (w - 50 px)
-      int barX = 25;
-      int barY = 152;
-      int barW = w - 50;
-      int barH = 14;
-      tft->drawRect(barX, barY, barW, barH, 0x7BEF);
-      tft->fillRect(barX + 2, barY + 2, barW - 4, barH - 4, 0x10A2);
+    // 3. Cập nhật thanh tiến trình & số phần trăm (Chỉ vẽ phần mới tăng thêm -> Tuyệt đối không nhấp nháy!)
+    if (pct != s_lastOtaPct) {
+      int prevFillW = (s_lastOtaPct >= 0) ? ((s_lastOtaPct * 200) / 100) : 0;
+      int curFillW  = (pct * 200) / 100;
 
-      int fillW = ((barW - 4) * pct) / 100;
-      if (fillW > 0) {
-        tft->fillRect(barX + 2, barY + 2, fillW, barH - 4, 0x07E0);
+      uint16_t barCol = (pct >= 98) ? C_NEON_GREEN : C_NEON_CYAN;
+
+      if (curFillW > prevFillW) {
+        // Chỉ tô đoạn mới tăng thêm (Differential Fill)
+        tft->fillRect(20 + prevFillW, 190, curFillW - prevFillW, 14, barCol);
+        if (pct < 100 && curFillW >= 2) {
+          tft->fillRect(20 + curFillW - 2, 190, 2, 14, C_WHITE);
+        }
+      } else if (curFillW < prevFillW || pct == 0) {
+        // Trường hợp reset tiến trình
+        tft->fillRect(20, 190, 200, 14, 0x0842);
+        if (curFillW > 0) {
+          tft->fillRect(20, 190, curFillW, 14, barCol);
+        }
       }
 
-      // Phần trăm số to rõ ở giữa
+      // Số phần trăm hiển thị to rõ giữa màn hình
       char pctBuf[16];
-      snprintf(pctBuf, sizeof(pctBuf), "%d%%", pct);
-      tft->fillRect(w / 2 - 40, 180, 80, 26, C_BLACK);
+      snprintf(pctBuf, sizeof(pctBuf), "%3d%%", pct);
+      tft->fillRect(w / 2 - 45, 154, 90, 26, C_BLACK);
       tft->setTextSize(3);
-      tft->setTextColor(C_WHITE, C_BLACK);
+      tft->setTextColor((pct >= 100) ? C_NEON_GREEN : C_WHITE, C_BLACK);
       int pw = strlen(pctBuf) * 18;
-      tft->setCursor((w - pw) / 2, 182);
+      tft->setCursor((w - pw) / 2, 156);
       tft->print(pctBuf);
 
+      // Dòng thông tin chi tiết dưới thanh nạp
+      tft->fillRect(18, 214, w - 36, 14, C_BLACK);
+      tft->setTextSize(1);
+      tft->setTextColor(C_SLATE, C_BLACK);
+      tft->setCursor(20, 214);
+      tft->printf("TIEN TRINH: %d / 100 PHAN TRAM", pct);
+
       if (pct >= 100) {
-        tft->fillRect(16, 218, w - 32, 28, C_BLACK);
+        tft->fillRect(18, 234, w - 36, 18, C_BLACK);
         tft->setTextSize(1);
-        tft->setTextColor(C_GREEN, C_BLACK);
-        const char* done = "HOAN TAT! DANG REBOOT...";
-        tft->setCursor((w - strlen(done) * 6) / 2, 222);
-        tft->print(done);
-        lastOtaDrawnPct = -1;
+        tft->setTextColor(C_NEON_GREEN, C_BLACK);
+        const char* doneMsg = "HOAN TAT! DANG REBOOT...";
+        tft->setCursor((w - strlen(doneMsg) * 6) / 2, 238);
+        tft->print(doneMsg);
+        s_otaScreenDrawn = false; // Reset cờ để lần OTA tiếp theo vẽ lại mới
       }
+
+      s_lastOtaPct = pct;
     }
   }
 
