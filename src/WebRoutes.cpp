@@ -813,14 +813,15 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           <input type="file" id="manual-ota-file" accept=".bin" style="flex:1;min-width:240px;color:#94a3b8;font-size:0.82rem;" />
           <button class="btn-secondary" style="width:auto;padding:8px 16px;font-size:0.82rem;white-space:nowrap;" onclick="window.uploadManualOta()">⬆️ Nạp Firmware Ngay</button>
         </div>
-        <div id="manual-ota-progress-box" style="display:none;margin-top:12px;">
-          <div style="display:flex;justify-content:space-between;font-size:0.75rem;color:#94a3b8;margin-bottom:4px;">
-            <span id="manual-ota-status">Đang nạp firmware...</span>
-            <span id="manual-ota-pct">0%</span>
+        <div id="manual-ota-progress-box" style="display:none;margin-top:14px;border:1px solid #0284c7;background:#032b43;padding:14px;border-radius:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;font-size:0.85rem;color:#e2e8f0;margin-bottom:6px;">
+            <span id="manual-ota-status" style="font-weight:600;color:#38bdf8;">Đang nạp firmware...</span>
+            <span id="manual-ota-pct" style="font-weight:700;font-size:1.0rem;color:#10b981;">0%</span>
           </div>
-          <div style="width:100%;height:8px;background:#1e293b;border-radius:4px;overflow:hidden;">
-            <div id="manual-ota-bar" style="width:0%;height:100%;background:#38bdf8;transition:width 0.2s;"></div>
+          <div style="width:100%;height:14px;background:#0f172a;border-radius:6px;overflow:hidden;border:1px solid #1e293b;">
+            <div id="manual-ota-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#0284c7,#38bdf8);transition:width 0.2s;box-shadow:0 0 10px #38bdf8;"></div>
           </div>
+          <div style="margin-top:6px;font-size:0.74rem;color:#f59e0b;">⚠️ Đang nạp trực tiếp vào Flash ESP32. Vui lòng giữ nguyên nguồn điện!</div>
         </div>
       </div>
     `;
@@ -1411,25 +1412,63 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     }
   };
 
-  // Bắt đầu cập nhật Cloud OTA
+  // Bắt đầu cập nhật Cloud OTA với thanh tiến trình trực quan thời gian thực
   window.startCloudOtaNow = async function() {
     if (!window.cloudOtaBinUrl) return;
     if (!confirm('Xác nhận tiến hành nâng cấp firmware từ xa?\\nTrong quá trình nạp, vui lòng KHÔNG ngắt nguồn điện của thiết bị.')) return;
     const box = document.getElementById('ota-check-result');
     if (box) {
-      box.innerHTML = '<div style="color:#f59e0b;font-weight:700;font-size:0.9rem;">⏳ Đang ra lệnh cho ESP32 tải và nạp Firmware... Màn hình thiết bị sẽ hiển thị tiến trình. Vui lòng đợi trong giây lát!</div>';
+      box.innerHTML = `
+        <div style="border:1px solid #0284c7;background:#032b43;padding:16px;border-radius:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+            <div style="font-weight:700;font-size:0.95rem;color:#38bdf8;">🚀 TIẾN TRÌNH CẬP NHẬT TỪ XA (OTA)</div>
+            <div id="cloud-ota-pct" style="font-size:1.1rem;font-weight:700;color:#10b981;">0%</div>
+          </div>
+          <div style="width:100%;height:14px;background:#0f172a;border-radius:6px;overflow:hidden;border:1px solid #1e293b;">
+            <div id="cloud-ota-bar" style="width:0%;height:100%;background:linear-gradient(90deg,#0284c7,#38bdf8);transition:width 0.3s;box-shadow:0 0 10px #38bdf8;"></div>
+          </div>
+          <div id="cloud-ota-status" style="margin-top:8px;font-size:0.82rem;color:#94a3b8;">Đang kết nối máy chủ GitHub & tải firmware...</div>
+          <div style="margin-top:6px;font-size:0.75rem;color:#f59e0b;">⚠️ Màn hình thiết bị và trang web đang đồng bộ tiến trình. Vui lòng giữ nguyên nguồn điện!</div>
+        </div>
+      `;
     }
+
     try {
-      await fetch('/api/ota_start', {
+      const res = await fetch('/api/ota_start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bin_url: window.cloudOtaBinUrl })
       });
-      setTimeout(() => {
-        alert('Thiết bị đang nạp firmware và sẽ tự động khởi động lại sau 1-2 phút!');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+
+      const pBar = document.getElementById('cloud-ota-bar');
+      const pPct = document.getElementById('cloud-ota-pct');
+      const pSt  = document.getElementById('cloud-ota-status');
+
+      let pollInterval = setInterval(async () => {
+        try {
+          const sRes = await fetch('/api/ota_status');
+          if (sRes.ok) {
+            const sData = await sRes.json();
+            const pct = sData.progress || 0;
+            if (pBar) pBar.style.width = pct + '%';
+            if (pPct) pPct.innerText = pct + '%';
+            if (pSt && sData.status) pSt.innerText = sData.status;
+
+            if (pct >= 100) {
+              clearInterval(pollInterval);
+              if (pBar) pBar.style.background = '#10b981';
+              if (pSt)  pSt.innerHTML = '<span style="color:#10b981;font-weight:700;">✅ NẠP HOÀN TẤT 100%! Thiết bị đang khởi động lại...</span>';
+              setTimeout(() => { window.location.reload(); }, 6000);
+            }
+          }
+        } catch (err) {
+          console.log('Polling OTA:', err);
+        }
       }, 500);
+
     } catch (e) {
-      alert('Lỗi: ' + e.message);
+      if (box) box.innerHTML += `<div style="color:#ef4444;font-size:0.82rem;margin-top:8px;">❌ Lỗi khởi động OTA: ${e.message}</div>`;
     }
   };
 
@@ -5737,7 +5776,19 @@ static void handleOtaCheck() {
   server.send(200, "application/json", json);
 }
 
+static void cloudOtaTask(void* param) {
+  String* url = (String*)param;
+  OtaManager::startCloudUpdate(*url);
+  delete url;
+  vTaskDelete(NULL);
+}
+
 static void handleOtaStart() {
+  if (OtaManager::isUpdating()) {
+    server.send(409, "application/json", "{\"error\":\"Already updating\"}");
+    return;
+  }
+
   String binUrl = "";
   if (server.hasArg("plain")) {
     JsonDocument doc;
@@ -5752,8 +5803,23 @@ static void handleOtaStart() {
     return;
   }
 
+  OtaManager::setUpdating(true);
   server.send(200, "application/json", "{\"status\":\"updating\"}");
-  OtaManager::startCloudUpdate(binUrl);
+
+  String* urlCopy = new String(binUrl);
+  xTaskCreatePinnedToCore(cloudOtaTask, "cloud_ota_task", 10240, urlCopy, 1, NULL, 0);
+}
+
+static void handleOtaStatus() {
+  JsonDocument doc;
+  doc["updating"] = OtaManager::isUpdating();
+  doc["progress"] = OtaManager::getUpdateProgress();
+  doc["status"]   = OtaManager::getUpdateStatus();
+  doc["version"]  = OtaManager::getFirmwareVersion();
+
+  String json;
+  serializeJson(doc, json);
+  server.send(200, "application/json", json);
 }
 
 static size_t s_localOtaTotalExpected = 0;
@@ -6253,6 +6319,7 @@ void WebRoutes::begin() {
   server.on("/api/system_info", HTTP_GET, handleSystemInfo);
   server.on("/api/ota_check", HTTP_GET, handleOtaCheck);
   server.on("/api/ota_start", HTTP_POST, handleOtaStart);
+  server.on("/api/ota_status", HTTP_GET, handleOtaStatus);
   server.on("/update", HTTP_POST, handleLocalUpdate, handleLocalUpdateUpload);
 
   // 6b2. REST API phát thử các âm báo S40 (Nokia Tune, OK, Delete, SMS Morse, Beep)
