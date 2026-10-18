@@ -9724,7 +9724,7 @@ namespace TestDisplay {
     uint32_t ramKb = ESP.getFreeHeap() / 1024;
     float psramMb = (float)ESP.getFreePsram() / (1024.0f * 1024.0f);
     char ramBuf[24];
-    snprintf(ramBuf, sizeof(ramBuf), "%uK + %.1fMB", (unsigned)ramKb, psramMb);
+    snprintf(ramBuf, sizeof(ramBuf), "%uK+%.1fM Trống", (unsigned)ramKb, psramMb);
     drawPostRow(0, "RAM/PSRAM", ramBuf, psramFound() || ramKb > 100);
     TestAudio::playKeyBeep();
     updateBootProgress(24, "Kiểm tra lưu trữ Flash...");

@@ -1354,12 +1354,13 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       if (el('sys-heap')) {
         let fH = d.free_heap_bytes ? (d.free_heap_bytes/1024).toFixed(0) : (d.free_heap_kb || '--');
         let tH = d.total_heap_bytes ? (d.total_heap_bytes/1024).toFixed(0) : '320';
-        el('sys-heap').innerText = `Heap: ${fH}KB / ${tH}KB`;
+        el('sys-heap').innerText = `Heap trống: ${fH}KB / ${tH}KB`;
       }
       if (el('sys-psram')) {
         let fP = d.free_psram_bytes ? (d.free_psram_bytes/(1024*1024)).toFixed(1) : (d.free_psram_mb ? Number(d.free_psram_mb).toFixed(1) : '--');
         let tP = d.total_psram_bytes ? (d.total_psram_bytes/(1024*1024)).toFixed(0) : '8';
-        el('sys-psram').innerText = `PSRAM: ${fP}MB / ${tP}MB`;
+        let uP = Math.max(0, Number(tP) - Number(fP)).toFixed(1);
+        el('sys-psram').innerText = `PSRAM: Trống ${fP}MB / ${tP}MB (Dùng ~${uP}MB)`;
       }
       if (el('sys-wifi')) el('sys-wifi').innerText = `${d.wifi_ssid || d.current_ssid || 'Chưa nối'} (${d.wifi_rssi || 0} dBm)`;
       if (el('sys-ip')) el('sys-ip').innerText = 'IP: ' + (d.wifi_ip || d.ip || '--');

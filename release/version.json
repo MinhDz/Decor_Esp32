@@ -4,6 +4,6 @@
   "build_date": "2026-10-18",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
   "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.1.4/firmware.bin",
-  "size": 1844944,
+  "size": 1845056,
   "changelog": "🚀 Space OS v3.1.4 Bản Cập Nhật Hoạt Ảnh Khởi Động Trạm Không Gian & Màn Hình OTA Không Nháy (Flicker-Free):\n- Nâng cấp hoạt ảnh khởi động Trạm Không Gian (Space Station Orbital Bootloader): hiệu ứng bung quang điểm tâm (Warp Expansion), Trạm Vệ tinh bay quỹ đạo Elip 3D quanh Trái Đất (tự động nhận diện và che khuất chiều sâu 3D), quả cầu Trái Đất xoay có chiếu sáng thực và quầng khí quyển Neon.\n- Tích hợp đệm kết nối Wi-Fi 1-2s trong quá trình nạp khởi động và kích hoạt chuỗi hiệu ứng đốt sáng lò phản ứng của cặp đèn Ống Edison sườn trái (GPIO 47) & phải (GPIO 21).\n- Khắc phục triệt để hiện tượng nhấp nháy màn hình khi cập nhật OTA: vẽ khung tĩnh duy nhất 1 lần, chỉ cập nhật bù phần tăng thêm (Differential Fill) cho thanh Loading Bar 0% -> 100%.\n- Đồng bộ tiến trình nạp Flash thời gian thực trên màn hình ST7789 và giao diện Web (hiển thị số KB đã tải/ghi, phần trăm số to rõ và phân vùng đích ota_0/ota_1).\n- Khóa mọi tác vụ vẽ nền (Đồng hồ, Menu, Toast, AOD/Sleep) trong suốt quá trình OTA để đảm bảo màn hình ổn định 100%.\n- Bảng điều khiển phím ảo trên Web (Web Virtual Keypad Simulator) mô phỏng cụm 7 phím bấm và đồng bộ màn hình chờ trực tiếp từ thiết bị."
 }
