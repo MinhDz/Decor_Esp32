@@ -10,6 +10,8 @@
 #include "tests/TestSpeakerMAX98357A.h"
 #include "CobLedController.h"
 #include "WebStreamManager.h"
+#include "WeatherManager.h"
+#include "TelemetryManager.h"
 
 void setup() {
   Serial.begin(115200);
@@ -35,6 +37,12 @@ void setup() {
   // 1C. Khởi tạo Trình quản lý Stream Đa Phương Tiện (Web Video & Audio)
   WebStreamManager::init();
 
+  // 1D. Cấp phát 1MB PSRAM Circular Buffer lưu Telemetry 48h & Kích hoạt FlashGuard
+  TelemetryManager::init();
+
+  // 1E. Khởi tạo Trình quản lý Thời tiết Real-Time (Open-Meteo & Geolocation)
+  WeatherManager::init();
+
   // 2. Khởi chạy Hệ thống 4 Màn hình ST7789 + Mic INMP441 + Cảm biến SHT31 + 7 Phím Bấm DIO
   ModuleTestRunner::init();
 
@@ -51,6 +59,7 @@ void setup() {
   if (WifiManager::isConnected()) {
     Serial.println("🌐 Đang kiểm tra OTA và lấy thông tin xác thực từ XiaoZhi Cloud...");
     XiaoZhiClient::queryOTA(true);
+    WeatherManager::refreshNow();
   }
 }
 
@@ -60,6 +69,12 @@ void loop() {
 
   // 1A. Cập nhật chu trình xung đổi chế độ non-blocking cho 2 Thanh LED COB
   CobLeds::update();
+
+  // 1B. Thu thập dữ liệu Telemetry vào 1MB PSRAM và cập nhật FlashGuard
+  TelemetryManager::loop();
+
+  // 1C. Vòng lặp định kỳ cập nhật Thời tiết Real-time
+  WeatherManager::loop();
 
   // 2. Xử lý DNS Captive Portal & các HTTP request từ giao diện Web
   WifiManager::loop();

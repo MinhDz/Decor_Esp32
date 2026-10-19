@@ -14,6 +14,8 @@
 #include "CobLedController.h"
 #include "OtaManager.h"
 #include "WebStreamManager.h"
+#include "WeatherManager.h"
+#include "TelemetryManager.h"
 
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -5060,6 +5062,477 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 </script>
 )rawliteral";
 
+static const char TELEMETRY_WEATHER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
+<script>
+(function(){
+  // 1. CSS cho Weather Pill và Telemetry Dashboard
+  const style = document.createElement('style');
+  style.textContent = `
+    .weather-pill-box {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid #0284c7;
+      border-radius: 8px;
+      padding: 4px 10px;
+      font-size: 0.78rem;
+      margin-top: 6px;
+      width: 100%;
+      box-shadow: 0 0 10px rgba(2, 132, 199, 0.15);
+      flex-wrap: wrap;
+    }
+    .weather-tag {
+      font-weight: 700;
+      color: #38bdf8;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .weather-refresh-btn {
+      background: none;
+      border: 1px solid #334155;
+      color: #38bdf8;
+      border-radius: 4px;
+      padding: 1px 6px;
+      font-size: 0.72rem;
+      cursor: pointer;
+      margin-left: auto;
+      transition: all 0.2s;
+    }
+    .weather-refresh-btn:hover {
+      background: #0284c7;
+      color: #fff;
+    }
+    .tele-stat-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .tele-card {
+      background: #0f172a;
+      border: 1px solid #1e293b;
+      border-radius: 10px;
+      padding: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+    }
+    .tele-card-title {
+      font-size: 0.72rem;
+      color: #94a3b8;
+      text-transform: uppercase;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      margin-bottom: 6px;
+    }
+    .tele-card-val {
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #38bdf8;
+    }
+    .tele-card-sub {
+      font-size: 0.7rem;
+      color: #64748b;
+      margin-top: 4px;
+    }
+    .tele-btn-group {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+    .tele-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #cbd5e1;
+      border-radius: 6px;
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.15s;
+    }
+    .tele-btn:hover {
+      background: #334155;
+      color: #fff;
+    }
+    .tele-btn.active {
+      background: #0284c7;
+      border-color: #38bdf8;
+      color: #fff;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.4);
+    }
+    .tele-chart-box {
+      background: #070d19;
+      border: 1px solid #1e293b;
+      border-radius: 12px;
+      padding: 14px;
+      margin-bottom: 16px;
+      position: relative;
+    }
+    .tele-canvas-wrapper {
+      position: relative;
+      width: 100%;
+      height: 240px;
+    }
+    #telemetryCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+  `;
+  document.head.appendChild(style);
+
+  // 2. Chèn Weather Pill vào Status Bar
+  function injectWeatherPill() {
+    const statusBar = document.querySelector('.status-bar');
+    if (!statusBar || document.getElementById('st-weather-pill')) return;
+
+    const pill = document.createElement('div');
+    pill.id = 'st-weather-pill';
+    pill.className = 'weather-pill-box';
+    pill.innerHTML = `
+      <span class="weather-tag" id="wp-icon">🌤️</span>
+      <span style="font-weight:700; color:#38bdf8" id="wp-city">Hà Nội</span>
+      <span id="wp-outdoor" style="color:#f8fafc">--°C (--%)</span>
+      <span style="color:#475569">|</span>
+      <span id="wp-indoor" style="color:#10b981">Phòng: --°C</span>
+      <span id="wp-cond" style="color:#94a3b8; font-size:0.72rem">--</span>
+      <button class="weather-refresh-btn" id="btn-wp-refresh" onclick="window.refreshWeatherApi()" title="Cập nhật thời tiết Open-Meteo">🔄 Cập nhật</button>
+    `;
+    statusBar.appendChild(pill);
+  }
+
+  // 3. Chèn Tab "Xu Hướng (Telemetry)" và nội dung Section
+  function injectTelemetryTabAndPage() {
+    const navTabs = document.getElementById('nav-tabs');
+    if (!navTabs || document.getElementById('tab-btn-telemetry')) return;
+
+    const btn = document.createElement('button');
+    btn.id = 'tab-btn-telemetry';
+    btn.className = 'tab-btn';
+    btn.innerHTML = '📈 Xu Hướng (1MB PSRAM)';
+    btn.onclick = () => window.switchTab('telemetry');
+    navTabs.appendChild(btn);
+
+    const container = document.querySelector('.container');
+    if (!container || document.getElementById('tab-telemetry')) return;
+
+    const section = document.createElement('div');
+    section.id = 'tab-telemetry';
+    section.className = 'section';
+    section.innerHTML = `
+      <div style="background:#0f172a; border:1px solid #1e293b; border-radius:12px; padding:16px; margin-bottom:16px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:12px;">
+          <div>
+            <h2 style="font-size:1.15rem; color:#38bdf8; display:flex; align-items:center; gap:8px;">
+              📊 BIỂU ĐỒ XU HƯỚNG TELEMETRY
+              <span class="badge" style="background:#0284c7; color:#fff; font-size:0.68rem;">1MB PSRAM</span>
+            </h2>
+            <p style="font-size:0.75rem; color:#64748b; margin-top:2px;">
+              Bộ đệm vòng Circular Buffer 87,381 mẫu lưu liên tục 48.5 giờ | Cơ chế bảo vệ FlashGuard chống chai Flash
+            </p>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="tele-btn" onclick="window.fetchTelemetryHistory()" style="background:#0369a1; color:#fff;">🔄 Tải lại</button>
+          </div>
+        </div>
+
+        <div class="tele-stat-grid">
+          <div class="tele-card">
+            <div class="tele-card-title">💾 PSRAM Circular Buffer</div>
+            <div class="tele-card-val" id="tc-psram-records">--</div>
+            <div class="tele-card-sub" id="tc-psram-desc">Dung lượng: 1MB (87,381 mẫu)</div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-card-title">🛡️ FlashGuard Protection</div>
+            <div class="tele-card-val" style="color:#10b981;" id="tc-flash-saved">--</div>
+            <div class="tele-card-sub">Lần ghi Flash đã bảo vệ (Debounce 2.0s)</div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-card-title">🌡️ Nhiệt độ Min / Max / TB</div>
+            <div class="tele-card-val" id="tc-temp-stats">--</div>
+            <div class="tele-card-sub" id="tc-temp-sub">Tính theo khung giờ đang chọn</div>
+          </div>
+          <div class="tele-card">
+            <div class="tele-card-title">💧 Độ ẩm Min / Max / TB</div>
+            <div class="tele-card-val" style="color:#06b6d4;" id="tc-hum-stats">--</div>
+            <div class="tele-card-sub">Đo đạc thực tế từ cảm biến</div>
+          </div>
+        </div>
+
+        <!-- Điều khiển biểu đồ -->
+        <div style="display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px;">
+          <div class="tele-btn-group" id="tele-metric-btns">
+            <button class="tele-btn active" data-metric="temp" onclick="window.setTeleMetric('temp')">🌡️ Nhiệt độ (°C)</button>
+            <button class="tele-btn" data-metric="hum" onclick="window.setTeleMetric('hum')">💧 Độ ẩm (%)</button>
+            <button class="tele-btn" data-metric="cpu" onclick="window.setTeleMetric('cpu')">⚡ Tải CPU (%)</button>
+            <button class="tele-btn" data-metric="bat" onclick="window.setTeleMetric('bat')">🔋 Dung lượng Pin (%)</button>
+          </div>
+          <div class="tele-btn-group" id="tele-range-btns">
+            <button class="tele-btn" data-range="1h" onclick="window.setTeleRange('1h')">1 Giờ</button>
+            <button class="tele-btn" data-range="6h" onclick="window.setTeleRange('6h')">6 Giờ</button>
+            <button class="tele-btn active" data-range="24h" onclick="window.setTeleRange('24h')">24 Giờ</button>
+            <button class="tele-btn" data-range="48h" onclick="window.setTeleRange('48h')">48 Giờ</button>
+          </div>
+        </div>
+
+        <!-- Khung vẽ biểu đồ Canvas -->
+        <div class="tele-chart-box">
+          <div class="tele-canvas-wrapper">
+            <canvas id="telemetryCanvas"></canvas>
+          </div>
+          <div id="tele-hover-info" style="font-size:0.75rem; color:#94a3b8; margin-top:8px; text-align:center;">
+            Biểu đồ đường thời gian thực cập nhật định kỳ từ 1MB Circular Buffer trong PSRAM
+          </div>
+        </div>
+      </div>
+    `;
+    container.appendChild(section);
+  }
+
+  // Quản lý trạng thái
+  let curTeleMetric = 'temp';
+  let curTeleRange = '24h';
+  let cachedTeleData = null;
+
+  window.setTeleMetric = function(m) {
+    curTeleMetric = m;
+    document.querySelectorAll('#tele-metric-btns .tele-btn').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-metric') === m);
+    });
+    drawTelemetryChart();
+  };
+
+  window.setTeleRange = function(r) {
+    curTeleRange = r;
+    document.querySelectorAll('#tele-range-btns .tele-btn').forEach(b => {
+      b.classList.toggle('active', b.getAttribute('data-range') === r);
+    });
+    window.fetchTelemetryHistory();
+  };
+
+  window.refreshWeatherApi = function() {
+    const btn = document.getElementById('btn-wp-refresh');
+    if (btn) btn.innerText = '⏳ Đang lấy...';
+    fetch('/api/weather/refresh', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        setTimeout(window.fetchWeatherStatus, 1500);
+      })
+      .catch(e => console.error(e));
+  };
+
+  window.fetchWeatherStatus = function() {
+    fetch('/api/weather')
+      .then(r => r.json())
+      .then(d => {
+        if (!d) return;
+        const iconEl = document.getElementById('wp-icon');
+        const cityEl = document.getElementById('wp-city');
+        const outEl  = document.getElementById('wp-outdoor');
+        const condEl = document.getElementById('wp-cond');
+        const btn    = document.getElementById('btn-wp-refresh');
+        if (btn) btn.innerText = '🔄 Cập nhật';
+
+        if (d.isAvailable) {
+          if (iconEl) {
+            const icons = ['☀️', '⛅', '☁️', '🌧️', '⛈️', '🌫️', '❄️'];
+            iconEl.innerText = icons[d.iconType] || '🌤️';
+          }
+          if (cityEl) cityEl.innerText = d.city || 'Hà Nội';
+          if (outEl)  outEl.innerText = `${d.temp.toFixed(1)}°C (${d.humidity}%)`;
+          if (condEl) condEl.innerText = `${d.condition} | Gió: ${d.windSpeed.toFixed(1)} km/h`;
+        } else {
+          if (cityEl) cityEl.innerText = 'Trạm ESP32';
+          if (outEl) outEl.innerText = 'Đang đồng bộ Open-Meteo...';
+        }
+      })
+      .catch(e => console.error(e));
+  };
+
+  window.fetchTelemetryHistory = function() {
+    fetch(`/api/telemetry/history?range=${curTeleRange}&points=80`)
+      .then(r => r.json())
+      .then(d => {
+        if (!d || d.status !== 'ok') return;
+        cachedTeleData = d;
+
+        // Cập nhật thẻ thông số
+        const recEl   = document.getElementById('tc-psram-records');
+        const saveEl  = document.getElementById('tc-flash-saved');
+        const tStatEl = document.getElementById('tc-temp-stats');
+        const hStatEl = document.getElementById('tc-hum-stats');
+
+        if (recEl && d.psram) {
+          recEl.innerText = `${d.psram.used.toLocaleString()} mẫu`;
+        }
+        if (saveEl && d.psram) {
+          saveEl.innerText = `${d.psram.flashWritesSaved.toLocaleString()} lần`;
+        }
+        if (tStatEl && d.stats) {
+          tStatEl.innerText = `${d.stats.minT.toFixed(1)}° / ${d.stats.maxT.toFixed(1)}° / ${d.stats.avgT.toFixed(1)}°C`;
+        }
+        if (hStatEl && d.stats) {
+          hStatEl.innerText = `${d.stats.minH}% / ${d.stats.maxH}% / ${d.stats.avgH.toFixed(0)}%`;
+        }
+
+        drawTelemetryChart();
+      })
+      .catch(e => console.error(e));
+  };
+
+  function drawTelemetryChart() {
+    const canvas = document.getElementById('telemetryCanvas');
+    if (!canvas || !cachedTeleData || !cachedTeleData.data) return;
+
+    const ctx = canvas.getContext('2d');
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return;
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.scale(dpr, dpr);
+
+    const w = rect.width;
+    const h = rect.height;
+    ctx.clearRect(0, 0, w, h);
+
+    const items = cachedTeleData.data;
+    if (items.length < 2) {
+      ctx.fillStyle = '#64748b';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('Đang thu thập mẫu Telemetry vào 1MB PSRAM...', w / 2, h / 2);
+      return;
+    }
+
+    // Chọn metric
+    let values = [];
+    let unit = '°C';
+    let strokeColor = '#38bdf8';
+    let gradTop = 'rgba(56, 189, 248, 0.4)';
+    let gradBot = 'rgba(56, 189, 248, 0.0)';
+
+    if (curTeleMetric === 'temp') {
+      values = items.map(p => p.t);
+      unit = '°C';
+      strokeColor = '#38bdf8';
+      gradTop = 'rgba(56, 189, 248, 0.4)';
+    } else if (curTeleMetric === 'hum') {
+      values = items.map(p => p.h);
+      unit = '%';
+      strokeColor = '#06b6d4';
+      gradTop = 'rgba(6, 182, 212, 0.4)';
+    } else if (curTeleMetric === 'cpu') {
+      values = items.map(p => p.c);
+      unit = '%';
+      strokeColor = '#f59e0b';
+      gradTop = 'rgba(245, 158, 11, 0.4)';
+    } else if (curTeleMetric === 'bat') {
+      values = items.map(p => p.b);
+      unit = '%';
+      strokeColor = '#10b981';
+      gradTop = 'rgba(16, 185, 129, 0.4)';
+    }
+
+    let minV = Math.min(...values);
+    let maxV = Math.max(...values);
+    if (minV === maxV) { minV -= 1; maxV += 1; }
+    const span = maxV - minV;
+    const padL = 44, padR = 20, padT = 20, padB = 25;
+    const plotW = w - padL - padR;
+    const plotH = h - padT - padB;
+
+    // Grid lines
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 1;
+    ctx.fillStyle = '#64748b';
+    ctx.font = '10px sans-serif';
+    ctx.textAlign = 'right';
+
+    for (let i = 0; i <= 4; i++) {
+      const gy = padT + (plotH / 4) * i;
+      const gv = maxV - (span / 4) * i;
+      ctx.beginPath();
+      ctx.moveTo(padL, gy);
+      ctx.lineTo(w - padR, gy);
+      ctx.stroke();
+      ctx.fillText(gv.toFixed(1) + unit, padL - 6, gy + 3);
+    }
+
+    // Path
+    ctx.beginPath();
+    for (let i = 0; i < values.length; i++) {
+      const px = padL + (i / (values.length - 1)) * plotW;
+      const py = padT + (1 - (values[i] - minV) / span) * plotH;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.strokeStyle = strokeColor;
+    ctx.lineWidth = 2.5;
+    ctx.shadowColor = strokeColor;
+    ctx.shadowBlur = 8;
+    ctx.stroke();
+    ctx.shadowBlur = 0;
+
+    // Gradient fill
+    const grad = ctx.createLinearGradient(0, padT, 0, padT + plotH);
+    grad.addColorStop(0, gradTop);
+    grad.addColorStop(1, gradBot);
+    ctx.fillStyle = grad;
+    ctx.lineTo(padL + plotW, padT + plotH);
+    ctx.lineTo(padL, padT + plotH);
+    ctx.closePath();
+    ctx.fill();
+
+    // Điểm mốc cuối cùng
+    const lastX = padL + plotW;
+    const lastY = padT + (1 - (values[values.length - 1] - minV) / span) * plotH;
+    ctx.fillStyle = '#fff';
+    ctx.beginPath();
+    ctx.arc(lastX, lastY, 4, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Hook tab switching
+  const origSwitchTab_Tele = window.switchTab;
+  window.switchTab = function(tabId) {
+    if (tabId === 'telemetry') {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      const sec = document.getElementById('tab-telemetry');
+      const btn = document.getElementById('tab-btn-telemetry');
+      if (sec) sec.classList.add('active');
+      if (btn) btn.classList.add('active');
+      window.fetchTelemetryHistory();
+      return;
+    }
+    const sec = document.getElementById('tab-telemetry');
+    const btn = document.getElementById('tab-btn-telemetry');
+    if (sec) sec.classList.remove('active');
+    if (btn) btn.classList.remove('active');
+
+    if (typeof origSwitchTab_Tele === 'function') origSwitchTab_Tele(tabId);
+  };
+
+  // Khởi động
+  setTimeout(() => {
+    injectWeatherPill();
+    injectTelemetryTabAndPage();
+    window.fetchWeatherStatus();
+    setInterval(() => {
+      window.fetchWeatherStatus();
+      const sec = document.getElementById('tab-telemetry');
+      if (sec && sec.classList.contains('active')) {
+        window.fetchTelemetryHistory();
+      }
+    }, 15000);
+  }, 500);
+})();
+</script>
+)rawliteral";
+
 static void handleRoot() {
   if (LittleFS.exists("/index.html")) {
     File file = LittleFS.open("/index.html", "r");
@@ -5077,6 +5550,7 @@ static void handleRoot() {
     server.sendContent_P(STREAM_PAGE_INJECT_SCRIPT);
     server.sendContent_P(DECOR_PAGE_INJECT_SCRIPT);
     server.sendContent_P(KEYPAD_PAGE_INJECT_SCRIPT);
+    server.sendContent_P(TELEMETRY_WEATHER_INJECT_SCRIPT);
     server.sendContent("");
   } else {
     server.send(404, "text/plain", "Chưa tìm thấy index.html trên LittleFS!");
@@ -5328,6 +5802,24 @@ static void handleSaveStandbyConfig() {
   if (err) {
     server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
     return;
+  }
+
+  // FlashGuard: Kiểm tra nếu nội dung không đổi so với tệp hiện có -> Bỏ qua ghi đè để bảo vệ Flash
+  if (LittleFS.exists(FILE_STANDBY_CONFIG)) {
+    File checkFile = LittleFS.open(FILE_STANDBY_CONFIG, "r");
+    if (checkFile) {
+      String curContent = checkFile.readString();
+      checkFile.close();
+      if (curContent == body) {
+        if (doc["bg_image"].is<const char*>()) {
+          String bgImg = doc["bg_image"].as<String>();
+          if (bgImg.length() > 0) ImageManager::selectActiveImage(bgImg);
+        }
+        TestDisplay::reloadStandbyConfig();
+        server.send(200, "application/json", "{\"status\":\"success\",\"message\":\"Cấu hình không đổi, FlashGuard đã ngăn ghi đè bảo vệ bộ nhớ Flash!\"}");
+        return;
+      }
+    }
   }
 
   File file = LittleFS.open(FILE_STANDBY_CONFIG, "w");
@@ -6290,6 +6782,79 @@ static void handleStreamStatus() {
   server.send(200, "application/json", out);
 }
 
+// 6d. REST APIs Thời tiết Real-Time & Telemetry (1MB PSRAM Circular Buffer)
+static void handleGetWeather() {
+  const WeatherData& w = WeatherManager::getData();
+  JsonDocument doc;
+  doc["status"] = "ok";
+  doc["isAvailable"] = WeatherManager::isAvailable();
+  doc["city"] = w.cityName;
+  doc["lat"] = w.latitude;
+  doc["lon"] = w.longitude;
+  doc["temp"] = w.outdoorTemp;
+  doc["humidity"] = w.outdoorHumidity;
+  doc["condition"] = w.conditionText;
+  doc["weatherCode"] = w.weatherCode;
+  doc["windSpeed"] = w.windSpeed;
+  doc["iconType"] = (int)w.iconType;
+  doc["iconStr"] = WeatherManager::getIconTypeString();
+  doc["lastUpdateEpoch"] = w.lastUpdateEpoch;
+  doc["lastFetchMs"] = w.lastFetchMs;
+
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleRefreshWeather() {
+  bool started = WeatherManager::refreshNow();
+  JsonDocument doc;
+  doc["status"] = started ? "ok" : "busy_or_offline";
+  doc["fetching"] = started;
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleGetTelemetryHistory() {
+  String range = server.hasArg("range") ? server.arg("range") : "24h";
+  size_t maxPoints = server.hasArg("points") ? server.arg("points").toInt() : 60;
+  if (maxPoints < 10) maxPoints = 10;
+  if (maxPoints > 200) maxPoints = 200;
+
+  JsonDocument doc;
+  TelemetryManager::getHistoryJson(doc, range, maxPoints);
+
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleGetTelemetryStats() {
+  String range = server.hasArg("range") ? server.arg("range") : "24h";
+  float minT = 0, maxT = 0, avgT = 0;
+  int minH = 0, maxH = 0;
+  float avgH = 0;
+  TelemetryManager::getStats(range, minT, maxT, avgT, minH, maxH, avgH);
+
+  JsonDocument doc;
+  doc["status"] = "ok";
+  doc["range"] = range;
+  doc["minTemp"] = minT;
+  doc["maxTemp"] = maxT;
+  doc["avgTemp"] = avgT;
+  doc["minHumidity"] = minH;
+  doc["maxHumidity"] = maxH;
+  doc["avgHumidity"] = avgH;
+  doc["psramRecords"] = (uint32_t)TelemetryManager::getRecordCount();
+  doc["psramCapacity"] = (uint32_t)TelemetryManager::getCapacity();
+  doc["flashWritesSaved"] = TelemetryManager::getFlashWritesSaved();
+
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
 // ================================================================
 //                     KHỞI CHẠY WEB SERVER & ROUTES
 // ================================================================
@@ -6297,6 +6862,12 @@ static void handleStreamStatus() {
 void WebRoutes::begin() {
   // 1. Phục vụ trang chủ "/"
   server.on("/", HTTP_GET, handleRoot);
+
+  // 1b. Các REST API Thời tiết Real-time & Telemetry (1MB PSRAM Circular Buffer)
+  server.on("/api/weather", HTTP_GET, handleGetWeather);
+  server.on("/api/weather/refresh", HTTP_POST, handleRefreshWeather);
+  server.on("/api/telemetry/history", HTTP_GET, handleGetTelemetryHistory);
+  server.on("/api/telemetry/stats", HTTP_GET, handleGetTelemetryStats);
 
   // 2. Các REST API Mạng & Hệ thống
   server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);

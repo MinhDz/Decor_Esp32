@@ -15,6 +15,8 @@
 #include "OtaManager.h"
 #include "HardwareManager.h"
 #include "SatelliteSprite.h"
+#include "WeatherManager.h"
+#include "TelemetryManager.h"
 #include <SPI.h>
 #include <WiFi.h>
 #include <LittleFS.h>
@@ -772,8 +774,8 @@ namespace TestDisplay {
     if (y >= 8 && y <= 25 && x >= 8 && x <= 92) return true;
     // 2. Pill ESP32-S3 góc trên phải (x: 164..231, y: 8..25)
     if (y >= 8 && y <= 25 && x >= 164 && x <= 231) return true;
-    // 3. Pill Thời tiết ở đáy (x: 42..198, y: 262..283)
-    if (stCfg.showWeather && y >= 262 && y <= 283 && x >= 42 && x <= 198) return true;
+    // 3. Pill Thời tiết ở đáy (x: 26..214, y: 258..286)
+    if (stCfg.showWeather && y >= 258 && y <= 286 && x >= 26 && x <= 214) return true;
     return false;
   }
 
@@ -1682,11 +1684,33 @@ namespace TestDisplay {
 
     // Bước 4: Vẽ Footer (Viên thuốc kính mờ Thời tiết + Lời chào Slogan ở đáy màn hình giống hệt Web UI)
     if (stCfg.showWeather) {
-      tft->drawRoundRect(42, 262, 156, 22, 10, 0x39E7);
-      char wBuf[32];
-      snprintf(wBuf, sizeof(wBuf), "%.1f°C  |  %d%%", stCfg.temp, stCfg.humidity);
-      int wx = (w - vnStrLen(wBuf) * 6) / 2;
-      drawShadowText(max(46, wx), 269, String(wBuf), C_WHITE, 1);
+      tft->drawRoundRect(26, 258, 188, 28, 8, 0x39E7);
+      if (WeatherManager::isAvailable()) {
+        WeatherManager::drawWeatherIcon(tft, 32, 264, WeatherManager::getIconType(), 16);
+        char line1[36];
+        String city = WeatherManager::getCityName();
+        if (vnStrLen(city) > 10) city = vnSubstr(city, 0, 10);
+        snprintf(line1, sizeof(line1), "%s: %.1f°C %d%%", city.c_str(), WeatherManager::getOutdoorTemp(), WeatherManager::getOutdoorHumidity());
+        drawShadowText(52, 262, String(line1), C_WHITE, 1);
+
+        char line2[36];
+        if (stCfg.temp > -40.0f) {
+          snprintf(line2, sizeof(line2), "Phòng: %.1f°C  %d%%", stCfg.temp, stCfg.humidity);
+        } else {
+          snprintf(line2, sizeof(line2), "%s", WeatherManager::getConditionText().c_str());
+        }
+        drawShadowText(52, 273, String(line2), C_NEON_CYAN, 1);
+      } else {
+        WeatherManager::drawWeatherIcon(tft, 32, 264, WEATHER_ICON_SUN, 16);
+        char line1[36];
+        if (stCfg.temp > -40.0f) {
+          snprintf(line1, sizeof(line1), "Phòng: %.1f°C  %d%%", stCfg.temp, stCfg.humidity);
+        } else {
+          snprintf(line1, sizeof(line1), "Trạm Decor ESP32");
+        }
+        drawShadowText(52, 262, String(line1), C_WHITE, 1);
+        drawShadowText(52, 273, "Đang lấy thời tiết...", C_SLATE, 1);
+      }
     }
 
     String msg = toCleanAscii(stCfg.customText);
@@ -2514,10 +2538,23 @@ namespace TestDisplay {
       tft->drawRoundRect(cx - 15, cy - 13, 30, 26, 4, C_NEON_GREEN);
       drawWifiArcIcon(cx, cy + 6, -55, true, C_NEON_GREEN, 0x31A6);
       tft->fillCircle(cx, cy + 6, 2, C_YELLOW);
+    } else if (idx == 15) {
+      // 15: XU HƯỚNG TELEMETRY (Biểu đồ đường / Trend chart Neon 1MB PSRAM)
+      tft->fillRoundRect(cx - 15, cy - 13, 30, 26, 4, C_DARK_BG);
+      tft->drawRoundRect(cx - 15, cy - 13, 30, 26, 4, C_NEON_AMBER);
+      // Trục tọa độ
+      tft->drawLine(cx - 11, cy + 8, cx + 11, cy + 8, C_SLATE);
+      tft->drawLine(cx - 11, cy - 8, cx - 11, cy + 8, C_SLATE);
+      // Đường biểu đồ neon
+      tft->drawLine(cx - 10, cy + 5, cx - 5, cy + 2, C_NEON_CYAN);
+      tft->drawLine(cx - 5, cy + 2, cx, cy - 4, C_NEON_CYAN);
+      tft->drawLine(cx, cy - 4, cx + 5, cy + 1, C_NEON_CYAN);
+      tft->drawLine(cx + 5, cy + 1, cx + 10, cy - 6, C_NEON_CYAN);
+      tft->fillCircle(cx + 10, cy - 6, 2, C_NEON_AMBER);
     }
   }
 
-  static const int S40_MENU_COUNT = 15;
+  static const int S40_MENU_COUNT = 16;
   static int s40MenuScrollRow     = 0; // Hàng bắt đầu hiển thị trên khung nhìn 4x3 (0 = hiện hàng 0..2, 1 = cuộn xuống hiện hàng 1..3)
   static int lastDrawnMenuCursor  = -1;
   static int lastDrawnMenuScroll  = -1;
@@ -2526,7 +2563,7 @@ namespace TestDisplay {
     "Hình nền", "Cài đặt",  "Máy tính", "Thư viện",
     "Bộ nhớ",   "Trợ lý AI","Âm nhạc",  "Đồng hồ",
     "Lịch",     "Thiết bị", "Sóng âm",  "Thẻ nhớ",
-    "Trò chơi", "Mã QR",    "Kết nối"
+    "Trò chơi", "Mã QR",    "Kết nối",  "Xu hướng"
   };
   static const char* S40_MENU_DESCS[S40_MENU_COUNT] = {
     "1. Tùy chỉnh Hình nền & Đồng hồ chờ",
@@ -2543,7 +2580,8 @@ namespace TestDisplay {
     "12. Thông tin Chi tiết Thẻ nhớ MicroSD",
     "13. Trò chơi: Rắn săn mồi, Flappy & Xếp gạch",
     "14. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý",
-    "15. Quản Lý Mạng Wi-Fi Đã Lưu & Chuyển Sóng"
+    "15. Quản Lý Mạng Wi-Fi Đã Lưu & Chuyển Sóng",
+    "16. Biểu đồ Xu hướng Telemetry (1MB PSRAM)"
   };
 
   static void drawSymbianMenuBanner() {
@@ -7798,6 +7836,52 @@ namespace TestDisplay {
     tft->print("Lên/Xuống: Chọn | Phím OK: Đổi Wi-Fi");
   }
 
+  // ============================================================================
+  // ỨNG DỤNG 16: BIỂU ĐỒ XU HƯỚNG TELEMETRY 1MB PSRAM (CHẾ ĐỘ 19)
+  // ============================================================================
+  static int s40TrendMetricIdx = 0; // 0: Nhiệt độ, 1: Độ ẩm, 2: Tải CPU, 3: Pin
+  static int s40TrendRangeIdx  = 2; // 0: 1h, 1: 6h, 2: 24h, 3: 48h
+
+  static void drawTrendAppScreen(bool fullRedraw = true) {
+    if (!tft) return;
+    int w = tft->width();
+    int h = tft->height();
+
+    if (fullRedraw) {
+      tft->fillRect(0, 22, w, h - 44, C_DARK_BG);
+    }
+
+    const char* metricKeys[]  = { "temp", "hum", "cpu", "bat" };
+    const char* rangeNames[]  = { "1h", "6h", "24h", "48h" };
+    const char* rangeKeys[]   = { "1h", "6h", "24h", "48h" };
+
+    char titleBuf[48];
+    snprintf(titleBuf, sizeof(titleBuf), "XU HUONG [%s]", rangeNames[s40TrendRangeIdx % 4]);
+    drawSymbianChrome(titleBuf, "Doi chi so", rangeNames[s40TrendRangeIdx % 4], "Thoat");
+
+    // Banner tóm tắt bộ nhớ PSRAM Circular Buffer
+    tft->fillRect(6, 25, w - 12, 20, C_CARD_BG);
+    tft->drawRoundRect(6, 25, w - 12, 20, 4, C_CARD_BORDER);
+    tft->setTextSize(1);
+    tft->setTextColor(C_NEON_AMBER, C_CARD_BG);
+    tft->setCursor(10, 31);
+    char psBuf[64];
+    snprintf(psBuf, sizeof(psBuf), "PSRAM: 1MB (%u/%u mau)", 
+             (uint32_t)TelemetryManager::getRecordCount(), 
+             (uint32_t)TelemetryManager::getCapacity());
+    tft->print(psBuf);
+
+    // Vẽ biểu đồ xu hướng chính
+    TelemetryManager::drawTrendGraphST7789(tft, 6, 48, w - 12, 224, 
+                                           metricKeys[s40TrendMetricIdx % 4], 
+                                           rangeKeys[s40TrendRangeIdx % 4]);
+
+    // Dòng hướng dẫn thao tác đáy
+    tft->setTextColor(C_SLATE, C_DARK_BG);
+    tft->setCursor(8, 276);
+    tft->print("Len/Xuong: Chi so | Trai/Phai: Gio");
+  }
+
   void refreshActiveScreen() {
     if (!tft) return;
     if (isScreenSleeping) {
@@ -7828,8 +7912,15 @@ namespace TestDisplay {
     else if (currentMode == 16) drawQrCodeWifiScreen(true);
     else if (currentMode == 17) drawStreamAppScreen(true);
     else if (currentMode == 18) drawWifiConnectionScreen(true);
+    else if (currentMode == 19) drawTrendAppScreen(true);
     if (s40PushAlertActive) {
       drawPushAlertModal(true);
+    }
+  }
+
+  void triggerStandbyRedraw() {
+    if (currentMode == 0 && !isScreenSleeping) {
+      drawStandbyScreenFull();
     }
   }
 
@@ -8290,15 +8381,11 @@ namespace TestDisplay {
       } else if (keyIndex == 2) { // DOWN (Xuống 1 hàng, tự động cuộn khung nhìn 4x3)
         if (s40MenuCursor + 4 < S40_MENU_COUNT) {
           s40MenuCursor += 4;
-        } else if (s40MenuCursor >= 8 && s40MenuCursor <= 11) {
-          if (s40MenuCursor == 8) s40MenuCursor = 12;
-          else if (s40MenuCursor == 9) s40MenuCursor = 13;
-          else s40MenuCursor = 14;
         } else {
           s40MenuCursor = s40MenuCursor % 4;
         }
         drawSymbianMenuScreen(false);
-      } else if (keyIndex == 0) { // OK -> Mở ứng dụng tương ứng trong 15 biểu tượng
+      } else if (keyIndex == 0) { // OK -> Mở ứng dụng tương ứng trong 16 biểu tượng
         if (s40MenuCursor == 0)      currentMode = 5;  // 1. Hình nền
         else if (s40MenuCursor == 1) currentMode = 6;  // 2. Cài đặt
         else if (s40MenuCursor == 2) currentMode = 2;  // 3. Máy tính (PC)
@@ -8325,6 +8412,9 @@ namespace TestDisplay {
           }
           currentMode = 18;
         } // 15. Quản Lý Kết Nối Wi-Fi
+        else if (s40MenuCursor == 15) {
+          currentMode = 19;
+        } // 16. Biểu đồ Xu hướng Telemetry 1MB PSRAM
         refreshActiveScreen();
       } else if (keyIndex == 5) { // MENU -> Nếu đang ở icon Trợ lý AI: Buộc lấy mã OTP mới!
         if (s40MenuCursor == 5) {
@@ -8540,6 +8630,26 @@ namespace TestDisplay {
         showSymbianToast("ĐÃ CẬP NHẬT SÓNG MẠNG!");
         drawWifiConnectionScreen(true);
       } else if (keyIndex == 6) { // EXIT / THOÁT -> Về Menu S40
+        currentMode = 4;
+        refreshActiveScreen();
+      }
+    } else if (currentMode == 19) {
+      if (keyIndex == 1) { // LÊN: đổi chỉ số trước
+        s40TrendMetricIdx = (s40TrendMetricIdx + 3) % 4;
+        drawTrendAppScreen(true);
+      } else if (keyIndex == 2) { // XUỐNG: đổi chỉ số tiếp theo
+        s40TrendMetricIdx = (s40TrendMetricIdx + 1) % 4;
+        drawTrendAppScreen(true);
+      } else if (keyIndex == 3) { // TRÁI: đổi khung giờ lùi (1h, 6h, 24h, 48h)
+        s40TrendRangeIdx = (s40TrendRangeIdx + 3) % 4;
+        drawTrendAppScreen(true);
+      } else if (keyIndex == 4) { // PHẢI: đổi khung giờ tiến
+        s40TrendRangeIdx = (s40TrendRangeIdx + 1) % 4;
+        drawTrendAppScreen(true);
+      } else if (keyIndex == 0) { // OK: xoay vòng chỉ số
+        s40TrendMetricIdx = (s40TrendMetricIdx + 1) % 4;
+        drawTrendAppScreen(true);
+      } else if (keyIndex == 6) { // EXIT: Về Menu S40
         currentMode = 4;
         refreshActiveScreen();
       }
@@ -10134,6 +10244,9 @@ namespace TestDisplay {
       newMode = 17;
       lastStreamFrameMs = millis(); // Reset ngay để không bị timeout đá về màn hình chờ
     }
+    else if (mode == "telemetry" || mode == "trends" || mode == "trend") {
+      newMode = 19;
+    }
 
     if (newMode != currentMode) {
       currentMode = newMode;
@@ -10149,6 +10262,8 @@ namespace TestDisplay {
     } else if (!isScreenSleeping && currentMode == 18) {
       s_savedWifiListCache = WifiManager::getSavedWifiWithStatus();
       drawWifiConnectionScreen(true);
+    } else if (!isScreenSleeping && currentMode == 19) {
+      drawTrendAppScreen(true);
     }
   }
 
@@ -10210,6 +10325,7 @@ namespace TestDisplay {
     if (currentMode == 16) return "qr_wifi";
     if (currentMode == 17) return "stream";
     if (currentMode == 18) return "wifi_manager";
+    if (currentMode == 19) return "telemetry_trends";
     if (currentMode >= 4) return "symbian";
     return "standby";
   }
@@ -10241,6 +10357,7 @@ namespace TestDisplay {
     if (currentMode == 16) return "Mã QR Wi-Fi";
     if (currentMode == 17) return "Stream Video";
     if (currentMode == 18) return "Kết Nối Wi-Fi";
+    if (currentMode == 19) return "Xu Hướng Telemetry";
     return "Symbian OS";
   }
 

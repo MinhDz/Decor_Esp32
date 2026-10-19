@@ -95,5 +95,6 @@ namespace TestDisplay {
   void onWifiConnectFailed(const String& ssid);
   void showSymbianToast(const String& msg, unsigned long durationMs = 2500);
   void refreshActiveScreen();
+  void triggerStandbyRedraw();
 }
 
