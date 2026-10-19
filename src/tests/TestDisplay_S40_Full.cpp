@@ -654,38 +654,14 @@ namespace TestDisplay {
   static SPIClass* spiBus = nullptr;
   VnST7789* tft7789 = nullptr;
   VnILI9341* tft9341 = nullptr;
-  static VnPsramCanvas16* tft = nullptr;
-  static VnPsramCanvas16* g_frameCanvas[2] = { nullptr, nullptr };
-  static uint8_t g_activeCanvasIdx = 0;
-  static volatile bool s_displayDirty = false;
+  static Adafruit_SPITFT* tft = nullptr;
   static volatile bool s_standbyNeedsRedraw = false;
 
   static bool useST7789 = true;
   static bool inverted = false;
   static uint8_t rotation = 0;      // 0: Dọc (240x320)
 
-  // ============================================================================
-  // ĐẨY TOÀN KHUNG HÌNH (FULL-FRAME 240x320) QUA SPI 80 MHz (~15.36ms / 65 FPS)
-  // KẾT HỢP HOÁN ĐỔI 2 TẦNG BỘ ĐỆM DOUBLE-BUFFERING CHỐNG XÉ HÌNH & NHẤP NHÁY
-  // ============================================================================
-  static void commitFrame() {
-    Adafruit_SPITFT* hwTft = useST7789 ? (Adafruit_SPITFT*)tft7789 : (Adafruit_SPITFT*)tft9341;
-    if (!hwTft || !tft) return;
-    uint16_t* frontBuf = tft->getBuffer();
-    if (!frontBuf) return;
-
-    hwTft->startWrite();
-    hwTft->setAddrWindow(0, 0, 240, 320);
-    hwTft->writePixels(frontBuf, 240 * 320);
-    hwTft->endWrite();
-
-    uint8_t nextIdx = 1 - g_activeCanvasIdx;
-    if (g_frameCanvas[nextIdx] && g_frameCanvas[nextIdx]->getBuffer()) {
-      memcpy(g_frameCanvas[nextIdx]->getBuffer(), frontBuf, 240 * 320 * sizeof(uint16_t));
-      g_activeCanvasIdx = nextIdx;
-      tft = g_frameCanvas[g_activeCanvasIdx];
-    }
-  }
+  static inline void commitFrame() {}
 
   // Chế độ hiển thị:
   // 0: Màn Hình Chờ (Standby Clock + Wallpaper - MẶC ĐỊNH)
@@ -1260,10 +1236,10 @@ namespace TestDisplay {
   }
 
   static void flushCacheToTft() {
-    if (!tft || !tft->getBuffer()) return;
+    if (!tft) return;
     for (int s = 0; s < 4; s++) {
       if (standbyStripCache[s]) {
-        memcpy(tft->getBuffer() + s * 80 * 240, standbyStripCache[s], 240 * 80 * sizeof(uint16_t));
+        tft->drawRGBBitmap(0, s * 80, standbyStripCache[s], 240, 80);
       }
     }
   }
@@ -9804,17 +9780,13 @@ namespace TestDisplay {
       tft7789->setSPISpeed(80000000); // Tăng tốc độ xung SPI phần cứng lên 80 MHz tối đa của ESP32-S3!
       tft7789->invertDisplay(inverted);
       tft7789->setRotation(rotation);
+      tft = tft7789;
     } else {
       tft9341->begin(80000000);
       tft9341->invertDisplay(inverted);
       tft9341->setRotation(rotation);
+      tft = tft9341;
     }
-    // Khởi tạo 2 tầng bộ đệm toàn khung hình (Full-Frame 240x320) trên PSRAM
-    if (!g_frameCanvas[0]) g_frameCanvas[0] = new VnPsramCanvas16(240, 320);
-    if (!g_frameCanvas[1]) g_frameCanvas[1] = new VnPsramCanvas16(240, 320);
-    g_activeCanvasIdx = 0;
-    tft = g_frameCanvas[0];
-    tft->fillScreen(C_BLACK);
   }
 
   // ============================================================================
@@ -11127,11 +11099,6 @@ namespace TestDisplay {
 
     // Luôn vẽ Toast nổi nếu có thông báo toàn cục (WiFi mới kết nối, trạng thái hệ thống...)
     drawGlobalToastIfNeeded();
-
-    if (s_displayDirty && !isScreenSleeping) {
-      s_displayDirty = false;
-      commitFrame();
-    }
   }
 
   // ============================================================================
