@@ -29,6 +29,8 @@ Desktop.ini
 # Large Media & Archives
 *.rar
 *.bin
+!release/*.bin
+!backup/*.bin
 sample/issue/*.mp4
 sample/musics/*.mp4
 

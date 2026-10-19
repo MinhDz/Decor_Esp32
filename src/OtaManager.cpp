@@ -71,6 +71,23 @@ void OtaManager::drawMinimalOtaProgress(const String& status, int progressPct) {
   TestDisplay::drawOtaProgressScreen(status.c_str(), progressPct);
 }
 
+// So sánh phiên bản SemVer (ví dụ: v3.1.8 so với v3.1.7) để tránh nâng cấp nhầm bản cũ
+static bool isVersionNewer(const String& remoteVer, const String& localVer) {
+  int rMaj = 0, rMin = 0, rPatch = 0;
+  int lMaj = 0, lMin = 0, lPatch = 0;
+  const char* r = remoteVer.c_str();
+  while (*r && (*r < '0' || *r > '9')) r++;
+  sscanf(r, "%d.%d.%d", &rMaj, &rMin, &rPatch);
+
+  const char* l = localVer.c_str();
+  while (*l && (*l < '0' || *l > '9')) l++;
+  sscanf(l, "%d.%d.%d", &lMaj, &lMin, &lPatch);
+
+  if (rMaj != lMaj) return rMaj > lMaj;
+  if (rMin != lMin) return rMin > lMin;
+  return rPatch > lPatch;
+}
+
 bool OtaManager::checkCloudUpdate(OtaUpdateInfo& info, const String& manifestUrl) {
   info.hasUpdate = false;
   info.latestVersion = "";
@@ -86,7 +103,8 @@ bool OtaManager::checkCloudUpdate(OtaUpdateInfo& info, const String& manifestUrl
   String url = manifestUrl;
   if (url.length() == 0) {
     // URL manifest mặc định kiểm tra phiên bản trên GitHub của MinhDz
-    url = "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/version.json";
+    // Thêm query timestamp vô hiệu hóa cache CDN (Fastly 300s cache buster)
+    url = "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/version.json?t=" + String(millis());
   }
 
   Serial.printf("🔍 [OTA CHECK] Đang kiểm tra bản cập nhật từ: %s\n", url.c_str());
@@ -111,7 +129,7 @@ bool OtaManager::checkCloudUpdate(OtaUpdateInfo& info, const String& manifestUrl
   String payload = http.getString();
   http.end();
 
-  StaticJsonDocument<1024> doc;
+  JsonDocument doc;
   DeserializationError err = deserializeJson(doc, payload);
   if (err) {
     Serial.printf("❌ [OTA CHECK] Lỗi giải mã JSON: %s\n", err.c_str());
@@ -123,7 +141,7 @@ bool OtaManager::checkCloudUpdate(OtaUpdateInfo& info, const String& manifestUrl
   info.changelog     = doc["changelog"] | "";
   info.binSize       = doc["size"] | 0;
 
-  if (info.latestVersion.length() > 0 && info.latestVersion != FIRMWARE_VERSION) {
+  if (info.latestVersion.length() > 0 && isVersionNewer(info.latestVersion, FIRMWARE_VERSION)) {
     info.hasUpdate = true;
     Serial.printf("🎉 [OTA CHECK] Có bản nâng cấp mới: %s (Hiện tại: %s)!\n",
                   info.latestVersion.c_str(), FIRMWARE_VERSION);

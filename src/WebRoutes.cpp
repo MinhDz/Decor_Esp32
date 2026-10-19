@@ -757,7 +757,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           <div style="background:#0f172a;padding:12px;border-radius:8px;border:1px solid #1e293b;">
             <div style="font-size:0.75rem;color:#94a3b8;">Hệ Điều Hành & Phiên Bản</div>
             <div id="sys-os-name" style="font-size:1.15rem;font-weight:700;color:#38bdf8;margin-top:4px;">Space OS</div>
-            <div id="sys-fw-ver" style="font-size:0.8rem;color:#e2e8f0;margin-top:2px;">Phiên bản: v3.1.0</div>
+            <div id="sys-fw-ver" style="font-size:0.8rem;color:#e2e8f0;margin-top:2px;">Phiên bản: Đang tải...</div>
             <div id="sys-build-date" style="font-size:0.7rem;color:#64748b;margin-top:2px;"></div>
           </div>
           <div style="background:#0f172a;padding:12px;border-radius:8px;border:1px solid #1e293b;">
@@ -1344,7 +1344,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       const d = await res.json();
       const el = id => document.getElementById(id);
       if (el('sys-os-name')) el('sys-os-name').innerText = d.os_name || 'Space OS';
-      if (el('sys-fw-ver')) el('sys-fw-ver').innerText = 'Phiên bản: ' + (d.firmware_version || 'v3.1.0');
+      if (el('sys-fw-ver')) el('sys-fw-ver').innerText = 'Phiên bản: ' + (d.firmware_version || '--');
       if (el('sys-build-date')) el('sys-build-date').innerText = 'Build: ' + (d.build_date || '--');
       if (el('sys-running-part')) el('sys-running-part').innerText = 'Phân vùng: ' + (d.running_partition || 'ota_0');
       if (el('sys-next-part')) el('sys-next-part').innerText = 'Dự phòng: ' + (d.next_partition || 'ota_1');

@@ -3724,7 +3724,7 @@ namespace TestDisplay {
 
       tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
       tft->setCursor(mx + 14, my + 44);
-      tft->print("Space OS v3.1.0");
+      tft->printf("%s %s", OtaManager::getOsName().c_str(), FIRMWARE_VERSION);
 
       tft->setTextColor(C_WHITE, C_CARD_BG);
       tft->setCursor(mx + 14, my + 64);
