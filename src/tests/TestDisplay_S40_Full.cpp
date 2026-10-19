@@ -439,6 +439,104 @@ namespace TestDisplay {
   using VnILI9341  = VnGfxAdapter<Adafruit_ILI9341>;
   using VnCanvas16 = VnGfxAdapter<GFXcanvas16>;
 
+  extern VnST7789* tft7789;
+  extern VnILI9341* tft9341;
+
+  // ============================================================================
+  // LỚP CANVAS 16-BIT RGB565 TOÀN KHUNG HÌNH (240x320) NẰM TRÊN BỘ NHỚ PSRAM
+  // Hỗ trợ Double-Buffering 2 tầng, memcpy dòng cực nhanh & SPI 80MHz Non-blocking
+  // ============================================================================
+  class PsramCanvas16 : public Adafruit_GFX {
+  public:
+    uint16_t* buffer;
+    PsramCanvas16(uint16_t w, uint16_t h) : Adafruit_GFX(w, h), buffer(nullptr) {
+      size_t bytes = (size_t)w * h * sizeof(uint16_t);
+      if (psramFound()) {
+        buffer = (uint16_t*)ps_malloc(bytes);
+      }
+      if (!buffer) {
+        buffer = (uint16_t*)malloc(bytes);
+      }
+      if (buffer) {
+        memset(buffer, 0, bytes);
+      }
+    }
+
+    virtual ~PsramCanvas16() {
+      if (buffer) free(buffer);
+      buffer = nullptr;
+    }
+
+    void drawPixel(int16_t x, int16_t y, uint16_t color) override {
+      if (buffer && (x >= 0) && (x < _width) && (y >= 0) && (y < _height)) {
+        buffer[y * _width + x] = color;
+      }
+    }
+
+    void fillScreen(uint16_t color) override {
+      if (!buffer) return;
+      int count = _width * _height;
+      for (int i = 0; i < count; i++) {
+        buffer[i] = color;
+      }
+    }
+
+    void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color) override {
+      if (!buffer || y < 0 || y >= _height) return;
+      if (x < 0) { w += x; x = 0; }
+      if (x + w > _width) w = _width - x;
+      if (w <= 0) return;
+      uint16_t* p = &buffer[y * _width + x];
+      for (int i = 0; i < w; i++) p[i] = color;
+    }
+
+    void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color) override {
+      if (!buffer || x < 0 || x >= _width) return;
+      if (y < 0) { h += y; y = 0; }
+      if (y + h > _height) h = _height - y;
+      if (h <= 0) return;
+      uint16_t* p = &buffer[y * _width + x];
+      for (int i = 0; i < h; i++) {
+        *p = color;
+        p += _width;
+      }
+    }
+
+    void drawRGBBitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h) {
+      if (!buffer || !bitmap) return;
+      int16_t x2 = x + w - 1;
+      int16_t y2 = y + h - 1;
+      if (x >= _width || y >= _height || x2 < 0 || y2 < 0) return;
+
+      int16_t bx1 = 0, by1 = 0, saveW = w;
+      if (x < 0) { w += x; bx1 = -x; x = 0; }
+      if (y < 0) { h += y; by1 = -y; y = 0; }
+      if (x2 >= _width)  w = _width - x;
+      if (y2 >= _height) h = _height - y;
+      if (w <= 0 || h <= 0) return;
+
+      const uint16_t* src = bitmap + by1 * saveW + bx1;
+      for (int row = 0; row < h; row++) {
+        uint16_t* dst = &buffer[(y + row) * _width + x];
+        memcpy(dst, src, w * sizeof(uint16_t));
+        src += saveW;
+      }
+    }
+
+    void drawRGBBitmap(int16_t x, int16_t y, uint16_t *bitmap, int16_t w, int16_t h) {
+      drawRGBBitmap(x, y, (const uint16_t*)bitmap, w, h);
+    }
+
+    void invertDisplay(bool i) {
+      if (tft7789) tft7789->invertDisplay(i);
+      else if (tft9341) tft9341->invertDisplay(i);
+    }
+
+    uint16_t* getBuffer() const { return buffer; }
+  };
+
+  using VnPsramCanvas16 = VnGfxAdapter<PsramCanvas16>;
+
   // Đếm số ký tự hiển thị thực tế của chuỗi UTF-8 (mỗi chữ Tiếng Việt có dấu tính đúng 1 ô 6px)
   static int vnStrLen(const char* s) {
     if (!s) return 0;
@@ -554,13 +652,40 @@ namespace TestDisplay {
   #define C_NEON_PURPLE (curTheme().neonPurple)
 
   static SPIClass* spiBus = nullptr;
-  static VnST7789* tft7789 = nullptr;
-  static VnILI9341* tft9341 = nullptr;
-  static Adafruit_SPITFT* tft = nullptr;
+  VnST7789* tft7789 = nullptr;
+  VnILI9341* tft9341 = nullptr;
+  static VnPsramCanvas16* tft = nullptr;
+  static VnPsramCanvas16* g_frameCanvas[2] = { nullptr, nullptr };
+  static uint8_t g_activeCanvasIdx = 0;
+  static volatile bool s_displayDirty = false;
+  static volatile bool s_standbyNeedsRedraw = false;
 
   static bool useST7789 = true;
   static bool inverted = false;
   static uint8_t rotation = 0;      // 0: Dọc (240x320)
+
+  // ============================================================================
+  // ĐẨY TOÀN KHUNG HÌNH (FULL-FRAME 240x320) QUA SPI 80 MHz (~15.36ms / 65 FPS)
+  // KẾT HỢP HOÁN ĐỔI 2 TẦNG BỘ ĐỆM DOUBLE-BUFFERING CHỐNG XÉ HÌNH & NHẤP NHÁY
+  // ============================================================================
+  static void commitFrame() {
+    Adafruit_SPITFT* hwTft = useST7789 ? (Adafruit_SPITFT*)tft7789 : (Adafruit_SPITFT*)tft9341;
+    if (!hwTft || !tft) return;
+    uint16_t* frontBuf = tft->getBuffer();
+    if (!frontBuf) return;
+
+    hwTft->startWrite();
+    hwTft->setAddrWindow(0, 0, 240, 320);
+    hwTft->writePixels(frontBuf, 240 * 320);
+    hwTft->endWrite();
+
+    uint8_t nextIdx = 1 - g_activeCanvasIdx;
+    if (g_frameCanvas[nextIdx] && g_frameCanvas[nextIdx]->getBuffer()) {
+      memcpy(g_frameCanvas[nextIdx]->getBuffer(), frontBuf, 240 * 320 * sizeof(uint16_t));
+      g_activeCanvasIdx = nextIdx;
+      tft = g_frameCanvas[g_activeCanvasIdx];
+    }
+  }
 
   // Chế độ hiển thị:
   // 0: Màn Hình Chờ (Standby Clock + Wallpaper - MẶC ĐỊNH)
@@ -1135,10 +1260,10 @@ namespace TestDisplay {
   }
 
   static void flushCacheToTft() {
-    if (!tft) return;
+    if (!tft || !tft->getBuffer()) return;
     for (int s = 0; s < 4; s++) {
       if (standbyStripCache[s]) {
-        tft->drawRGBBitmap(0, s * 80, standbyStripCache[s], 240, 80);
+        memcpy(tft->getBuffer() + s * 80 * 240, standbyStripCache[s], 240 * 80 * sizeof(uint16_t));
       }
     }
   }
@@ -1377,6 +1502,7 @@ namespace TestDisplay {
   // Vẽ chữ có bóng đổ đen (Drop Shadow) trong suốt trên nền ảnh Wallpaper
   static void drawShadowText(int x, int y, const String& text, uint16_t color, uint8_t size = 1) {
     if (!tft) return;
+    tft->setTextWrap(false);
     tft->setTextSize(size);
     tft->setTextColor(C_BLACK);
     tft->setCursor(x + 1, y + 1);
@@ -1635,31 +1761,36 @@ namespace TestDisplay {
 
     // Đẩy duy nhất dải 240x44 ra màn hình SPI -> Mượt 100%, giữ nguyên ảnh nền phía dưới!
     tft->drawRGBBitmap(0, activeClockStripY, clockCanvas->getBuffer(), CLOCK_STRIP_W, CLOCK_STRIP_H);
+    commitFrame();
   }
 
   // Vẽ toàn bộ bố cục Màn Hình Chờ đồng bộ 100% với màn hình ảo trên Web UI (240x320 Portrait)
   static void drawStandbyScreenFull() {
     if (!tft || isScreenSleeping) return;
     int w = tft->width();
+    tft->setTextWrap(false);
 
     // Bước 1: Vẽ toàn bộ Ảnh nền JPEG từ LittleFS (hoặc Gradient) + làm mờ sẵn các ô kính mờ
     renderStandbyBackground();
 
     // Bước 2: Vẽ Top Bar (2 viên thuốc kính mờ: Trái = Wi-Fi/STA, Phải = ESP32-S3)
     bool connected = (WiFi.status() == WL_CONNECTED);
-    tft->drawRoundRect(8, 8, 84, 18, 8, 0x39E7);
+    // Xóa nền viên thuốc bằng màu kính mờ trước khi vẽ chữ để chống đè chữ tuyệt đối
+    tft->fillRoundRect(8, 8, 86, 20, 8, 0x10A2);
+    tft->drawRoundRect(8, 8, 86, 20, 8, 0x39E7);
     int curRssi = connected ? WiFi.RSSI() : -100;
-    drawWifiArcIcon(17, 22, curRssi, connected, C_NEON_GREEN, 0x39E7);
+    drawWifiArcIcon(17, 23, curRssi, connected, C_NEON_GREEN, 0x31A6);
     String wifiTag = "AP MODE";
     if (connected) {
       String s = toCleanAscii(WifiManager::getCurrentSsid());
       if (s.length() > 8) s = s.substring(0, 8);
       wifiTag = s.length() > 0 ? s : "STA";
     }
-    drawShadowText(27, 13, wifiTag, C_WHITE, 1);
+    drawShadowText(28, 14, wifiTag, C_WHITE, 1);
 
-    tft->drawRoundRect(164, 8, 68, 18, 8, 0x39E7);
-    drawShadowText(174, 13, "ESP32-S3", C_NEON_CYAN, 1);
+    tft->fillRoundRect(158, 8, 74, 20, 8, 0x10A2);
+    tft->drawRoundRect(158, 8, 74, 20, 8, 0x39E7);
+    drawShadowText(168, 14, "ESP32-S3", C_NEON_CYAN, 1);
 
     // Bước 3: Vẽ Đồng hồ số trung tâm (nổi trong suốt trên ảnh nền) + Ngày tháng bên dưới
     lastDrawnMinute = -1;
@@ -1682,41 +1813,46 @@ namespace TestDisplay {
       drawShadowText(max(8, dateX), activeClockStripY + CLOCK_STRIP_H + 4, String(dateBuf), C_WHITE, 1);
     }
 
-    // Bước 4: Vẽ Footer (Viên thuốc kính mờ Thời tiết + Lời chào Slogan ở đáy màn hình giống hệt Web UI)
+    // Bước 4: Vẽ Footer (Viên thuốc kính mờ Thời tiết + Lời chào Slogan ở đáy màn hình)
     if (stCfg.showWeather) {
-      tft->drawRoundRect(26, 258, 188, 28, 8, 0x39E7);
+      tft->fillRoundRect(22, 256, 196, 30, 8, 0x10A2);
+      tft->drawRoundRect(22, 256, 196, 30, 8, 0x39E7);
       if (WeatherManager::isAvailable()) {
-        WeatherManager::drawWeatherIcon(tft, 32, 264, WeatherManager::getIconType(), 16);
+        WeatherManager::drawWeatherIcon(tft, 28, 263, WeatherManager::getIconType(), 16);
         char line1[36];
         String city = WeatherManager::getCityName();
-        if (vnStrLen(city) > 10) city = vnSubstr(city, 0, 10);
+        if (vnStrLen(city) > 8) city = vnSubstr(city, 0, 8);
         snprintf(line1, sizeof(line1), "%s: %.1f°C %d%%", city.c_str(), WeatherManager::getOutdoorTemp(), WeatherManager::getOutdoorHumidity());
-        drawShadowText(52, 262, String(line1), C_WHITE, 1);
+        drawShadowText(48, 260, String(line1), C_WHITE, 1);
 
         char line2[36];
         if (stCfg.temp > -40.0f) {
           snprintf(line2, sizeof(line2), "Phòng: %.1f°C  %d%%", stCfg.temp, stCfg.humidity);
         } else {
-          snprintf(line2, sizeof(line2), "%s", WeatherManager::getConditionText().c_str());
+          String cond = WeatherManager::getConditionText();
+          if (vnStrLen(cond) > 20) cond = vnSubstr(cond, 0, 20);
+          snprintf(line2, sizeof(line2), "%s", cond.c_str());
         }
-        drawShadowText(52, 273, String(line2), C_NEON_CYAN, 1);
+        drawShadowText(48, 273, String(line2), C_NEON_CYAN, 1);
       } else {
-        WeatherManager::drawWeatherIcon(tft, 32, 264, WEATHER_ICON_SUN, 16);
+        WeatherManager::drawWeatherIcon(tft, 28, 263, WEATHER_ICON_SUN, 16);
         char line1[36];
         if (stCfg.temp > -40.0f) {
           snprintf(line1, sizeof(line1), "Phòng: %.1f°C  %d%%", stCfg.temp, stCfg.humidity);
         } else {
           snprintf(line1, sizeof(line1), "Trạm Decor ESP32");
         }
-        drawShadowText(52, 262, String(line1), C_WHITE, 1);
-        drawShadowText(52, 273, "Đang lấy thời tiết...", C_SLATE, 1);
+        drawShadowText(48, 260, String(line1), C_WHITE, 1);
+        drawShadowText(48, 273, "Đang lấy thời tiết...", C_SLATE, 1);
       }
     }
 
     String msg = toCleanAscii(stCfg.customText);
-    if (vnStrLen(msg) > 34) msg = vnSubstr(msg, 0, 34);
+    if (vnStrLen(msg) > 32) msg = vnSubstr(msg, 0, 32);
     int msgX = (w - vnStrLen(msg) * 6) / 2;
     drawShadowText(max(8, msgX), 292, msg, stCfg.textColor, 1);
+
+    commitFrame();
   }
 
   // Vẽ hộp Phụ đề XiaoZhi ở phần dưới màn hình Emoji
@@ -4647,7 +4783,65 @@ namespace TestDisplay {
   static int    lastDrawnMemPopupCursor = -1;
   static String lastDrawnMemDir         = "";
 
-  // Vẽ riêng 1 dòng tệp tin trong danh sách (Chỉ tốn ~0.8ms, hoàn toàn không vẽ lại tiêu đề hay nền màn hình)
+  // ============================================================================
+  // BIỂU TƯỢNG ĐỒ HỌA ĐỆM SẴN CHO CÁC ĐỊNH DẠNG TỆP TRONG BỘ DUYỆT TỆP (MODE 10)
+  // 📁 Thư mục, 🎵 Nhạc, 🖼️ Ảnh, ⚙️ Config, 📦 Binary Firmware, 📄 File thông thường
+  // ============================================================================
+  static void drawFileTypeIcon(int x, int y, const String& filename, bool isDir, bool isSelected) {
+    if (!tft) return;
+    if (isDir || filename == "..") {
+      // 📁 Biểu tượng Thư mục (Màu vàng kim / Neon Amber)
+      uint16_t col = isSelected ? C_YELLOW : C_NEON_AMBER;
+      tft->fillRoundRect(x, y + 2, 13, 9, 2, col);
+      tft->fillRect(x + 1, y, 5, 3, col); // Tab thư mục
+      tft->drawFastHLine(x + 2, y + 4, 9, 0x0821);
+    } else {
+      String low = filename;
+      low.toLowerCase();
+      if (low.endsWith(".mp3") || low.endsWith(".wav") || low.endsWith(".flac") || low.endsWith(".ogg") || low.endsWith(".aac") || low.endsWith(".m4a")) {
+        // 🎵 Biểu tượng Âm nhạc (Nốt nhạc đôi Neon Green)
+        uint16_t col = isSelected ? C_YELLOW : C_NEON_GREEN;
+        tft->fillCircle(x + 3, y + 9, 2, col);
+        tft->fillCircle(x + 10, y + 7, 2, col);
+        tft->drawFastVLine(x + 5, y + 2, 8, col);
+        tft->drawFastVLine(x + 12, y, 8, col);
+        tft->drawFastHLine(x + 5, y + 1, 8, col);
+        tft->drawFastHLine(x + 5, y + 2, 8, col);
+      } else if (low.endsWith(".jpg") || low.endsWith(".jpeg") || low.endsWith(".png") || low.endsWith(".bmp") || low.endsWith(".rgb565")) {
+        // 🖼️ Biểu tượng Hình ảnh (Khung ảnh + Mặt trời + Núi Neon Cyan)
+        uint16_t col = isSelected ? C_YELLOW : C_NEON_CYAN;
+        tft->drawRoundRect(x, y + 1, 13, 10, 2, col);
+        tft->fillCircle(x + 9, y + 4, 1, C_YELLOW); // Mặt trời
+        tft->drawLine(x + 2, y + 9, x + 5, y + 5, col); // Dãy núi
+        tft->drawLine(x + 5, y + 5, x + 8, y + 8, col);
+        tft->drawLine(x + 8, y + 8, x + 11, y + 6, col);
+      } else if (low.endsWith(".json") || low.endsWith(".txt") || low.endsWith(".log") || low.endsWith(".csv") || low.endsWith(".ini")) {
+        // ⚙️ Biểu tượng Tệp Cấu hình / Văn bản (Trang giấy kẻ dòng Neon Amber)
+        uint16_t col = isSelected ? C_YELLOW : C_NEON_AMBER;
+        tft->drawRoundRect(x + 1, y, 11, 12, 1, col);
+        tft->drawFastHLine(x + 3, y + 3, 7, col);
+        tft->drawFastHLine(x + 3, y + 6, 7, col);
+        tft->drawFastHLine(x + 3, y + 9, 5, col);
+      } else if (low.endsWith(".bin") || low.endsWith(".hex")) {
+        // 📦 Biểu tượng Firmware / Binary (Vi mạch ROM Neon Pink)
+        uint16_t col = isSelected ? C_YELLOW : C_NEON_PINK;
+        tft->drawRoundRect(x + 2, y + 1, 9, 10, 2, col);
+        tft->fillRect(x + 4, y + 3, 5, 6, col);
+        tft->drawFastHLine(x, y + 3, 2, col);
+        tft->drawFastHLine(x, y + 8, 2, col);
+        tft->drawFastHLine(x + 11, y + 3, 2, col);
+        tft->drawFastHLine(x + 11, y + 8, 2, col);
+      } else {
+        // 📄 Tệp thông thường (Tài liệu trắng)
+        uint16_t col = isSelected ? C_YELLOW : C_WHITE;
+        tft->drawRoundRect(x + 1, y, 11, 12, 1, col);
+        tft->drawFastHLine(x + 3, y + 4, 7, 0x7BEF);
+        tft->drawFastHLine(x + 3, y + 7, 7, 0x7BEF);
+      }
+    }
+  }
+
+  // Vẽ riêng 1 dòng tệp tin trong danh sách với Biểu tượng loại tệp đồ họa chuyên nghiệp
   static void drawSingleMemFileRow(int idx, int visRow, bool sel, const String& name, size_t sizeBytes, bool isDir) {
     if (!tft || visRow < 0 || visRow >= 7) return;
     int W = tft->width();
@@ -4658,31 +4852,35 @@ namespace TestDisplay {
     if (sel) tft->drawRoundRect(12, ry, W - 24, 27, 4, C_NEON_CYAN);
     else     tft->drawRoundRect(12, ry, W - 24, 27, 4, 0x2124);
 
+    // 1. Vẽ Icon loại tệp đồ họa sắc nét ở x=16, y=ry+6
+    drawFileTypeIcon(16, ry + 6, name, isDir, sel);
+
+    tft->setTextWrap(false);
     tft->setTextSize(1);
     tft->setTextColor(sel ? C_YELLOW : C_WHITE, cardBg);
-    tft->setCursor(18, ry + 5);
+    tft->setCursor(34, ry + 5);
     if (name == "..") {
-      tft->print("[..] Quay lại thư mục trước");
+      tft->print(".. Quay lại thư mục");
       tft->setTextColor(C_NEON_CYAN, cardBg);
-      tft->setCursor(18, ry + 16);
+      tft->setCursor(34, ry + 16);
       tft->print("Bấm [OK] hoặc [EXIT] để lùi ra");
     } else if (isDir) {
-      String shortDir = "[THƯ MỤC] " + name;
-      if (vnStrLen(shortDir) > 28) shortDir = vnSubstr(shortDir, 0, 28);
+      String shortDir = name;
+      if (vnStrLen(shortDir) > 22) shortDir = vnSubstr(shortDir, 0, 19) + "...";
       tft->print(shortDir);
       tft->setTextColor(C_NEON_GREEN, cardBg);
-      tft->setCursor(18, ry + 16);
-      tft->printf("#%d - Chứa %u tệp (Bấm OK để mở)", idx + 1, (unsigned)sizeBytes);
+      tft->setCursor(34, ry + 16);
+      tft->printf("#%d - Thư mục (%u tệp)", idx + 1, (unsigned)sizeBytes);
     } else {
       String dispFile = name;
       if (s40MemCurrentDir != "/" && dispFile.startsWith(s40MemCurrentDir + "/")) {
         dispFile = dispFile.substring(s40MemCurrentDir.length() + 1);
       }
-      if (vnStrLen(dispFile) > 28) dispFile = vnSubstr(dispFile, 0, 28);
+      if (vnStrLen(dispFile) > 22) dispFile = vnSubstr(dispFile, 0, 19) + "...";
       tft->print(dispFile);
 
       tft->setTextColor(C_NEON_GREEN, cardBg);
-      tft->setCursor(18, ry + 16);
+      tft->setCursor(34, ry + 16);
       if (sizeBytes >= 1048576) {
         tft->printf("#%d - Dung lượng: %.2f MB", idx + 1, sizeBytes / 1048576.0f);
       } else {
@@ -5706,6 +5904,28 @@ namespace TestDisplay {
     TestAudio::stopVoicePlaybackAsync();
   }
 
+  // Tìm tệp ảnh bìa (Album Cover Art) cho bài hát hiện tại:
+  // 1. Tệp cùng tên bài hát: /Musics/<trackName>.jpg hoặc .png hoặc /recording/<trackName>.jpg
+  // 2. Tệp ảnh bìa album thư mục: /Musics/cover.jpg, /Musics/folder.jpg, /cover.jpg
+  static String findCoverArtForCurrentTrack() {
+    if (s40MediaTrackCount == 0 || s40MediaTrackIdx < 0 || s40MediaTrackIdx >= s40MediaTrackCount) return "";
+    String trackName = s40MediaTracks[s40MediaTrackIdx];
+    int dotIdx = trackName.lastIndexOf('.');
+    String baseName = (dotIdx > 0) ? trackName.substring(0, dotIdx) : trackName;
+
+    if (TestSDCard::isMounted()) {
+      if (SD.exists("/Musics/" + baseName + ".jpg")) return "/Musics/" + baseName + ".jpg";
+      if (SD.exists("/Musics/" + baseName + ".png")) return "/Musics/" + baseName + ".png";
+      if (SD.exists("/recording/" + baseName + ".jpg")) return "/recording/" + baseName + ".jpg";
+      if (SD.exists("/Musics/cover.jpg")) return "/Musics/cover.jpg";
+      if (SD.exists("/Musics/folder.jpg")) return "/Musics/folder.jpg";
+      if (SD.exists("/Musics/album.jpg")) return "/Musics/album.jpg";
+      if (SD.exists("/cover.jpg")) return "/cover.jpg";
+    }
+    if (LittleFS.exists("/cover.jpg")) return "/cover.jpg";
+    return "";
+  }
+
   // Vẽ vùng 1/3 Màn hình trên cùng (Top Visualizer Box: 224x82) bằng Canvas chống nháy 100%
   static void drawMediaTopVisualizerOnly() {
     if (!tft || s40MediaSubState != 0) return;
@@ -5738,66 +5958,149 @@ namespace TestDisplay {
     if (ampScale > 1.25f) ampScale = 1.25f;
 
     if (s40MediaVisMode == 0) {
-      // --- CHẾ ĐỘ 0: ĐĨA QUAY VINYL / CD (SPINNING TURNTABLE) ---
-      int dcx = 48, dcy = 41, dr = 33;
-      // Thân đĩa than đen + các vòng rãnh đồng tâm
-      mediaVisCanvas->fillCircle(dcx, dcy, dr, C_BLACK);
-      mediaVisCanvas->drawCircle(dcx, dcy, dr, C_NEON_PINK);
-      mediaVisCanvas->drawCircle(dcx, dcy, dr - 5, 0x2124);
-      mediaVisCanvas->drawCircle(dcx, dcy, dr - 11, 0x3186);
-      mediaVisCanvas->drawCircle(dcx, dcy, dr - 17, 0x2124);
+      String coverPath = findCoverArtForCurrentTrack();
+      bool hasCover = (coverPath.length() > 0);
 
-      // Nan quạt phản chiếu ánh sáng xoay theo góc s40MediaDiscAngle
-      for (int k = 0; k < 2; k++) {
-        float a1 = s40MediaDiscAngle + k * 3.14159f;
-        float a2 = a1 + 0.35f;
-        int x1 = dcx + (int)(cosf(a1) * (dr - 3));
-        int y1 = dcy + (int)(sinf(a1) * (dr - 3));
-        int x2 = dcx + (int)(cosf(a2) * (dr - 3));
-        int y2 = dcy + (int)(sinf(a2) * (dr - 3));
-        mediaVisCanvas->fillTriangle(dcx, dcy, x1, y1, x2, y2, 0x1949);
-        mediaVisCanvas->drawLine(dcx, dcy, x1, y1, C_NEON_CYAN);
-      }
+      if (hasCover) {
+        // --- CÓ ẢNH BÌA ALBUM: Hiển thị Khung Ảnh Bìa 68x68 nổi bật bo tròn góc ---
+        int cbX = 14, cbY = 7, cbW = 68, cbH = 68;
+        mediaVisCanvas->fillRoundRect(cbX, cbY, cbW, cbH, 6, C_BLACK);
+        mediaVisCanvas->drawRoundRect(cbX, cbY, cbW, cbH, 6, C_NEON_PINK);
+        mediaVisCanvas->drawRoundRect(cbX - 1, cbY - 1, cbW + 2, cbH + 2, 7, C_NEON_CYAN);
 
-      // Nhãn đĩa trung tâm (Record Label) + dấu chấm xoay
-      mediaVisCanvas->fillCircle(dcx, dcy, 11, C_NEON_PINK);
-      mediaVisCanvas->drawCircle(dcx, dcy, 11, C_YELLOW);
-      int dotX = dcx + (int)(cosf(s40MediaDiscAngle) * 6);
-      int dotY = dcy + (int)(sinf(s40MediaDiscAngle) * 6);
-      mediaVisCanvas->fillCircle(dotX, dotY, 2, C_YELLOW);
-      mediaVisCanvas->fillCircle(dcx, dcy, 3, C_BLACK);
-
-      // Cần kim đọc đĩa (Tonearm)
-      mediaVisCanvas->fillCircle(88, 12, 4, C_SLATE);
-      if (s40MediaPlaying) {
-        mediaVisCanvas->drawLine(88, 12, 74, 48, C_WHITE);
-        mediaVisCanvas->fillRect(71, 46, 5, 4, C_YELLOW);
-      } else {
-        mediaVisCanvas->drawLine(88, 12, 88, 54, C_SLATE);
-        mediaVisCanvas->fillRect(86, 52, 5, 4, C_NEON_AMBER);
-      }
-
-      // Phần thông tin & Equalizer mini bên phải đĩa (Dừng hẳn về 3px khi Pause/Stop)
-      mediaVisCanvas->setTextSize(1);
-      mediaVisCanvas->setTextColor(C_YELLOW);
-      mediaVisCanvas->setCursor(100, 10);
-      mediaVisCanvas->print("ĐĨA QUAY VINYL");
-      mediaVisCanvas->setTextColor(s40MediaPlaying ? C_NEON_CYAN : C_SLATE);
-      mediaVisCanvas->setCursor(100, 22);
-      mediaVisCanvas->printf("TRẠNG THÁI: %s", s40MediaPlaying ? "ĐANG PHÁT" : "TẠM DỪNG ");
-
-      for (int b = 0; b < 8; b++) {
-        int bh = 3;
-        if (s40MediaPlaying) {
-          int realBar = (realSpec16[b * 2] * 34) / 100;
-          int simBar  = 6 + (int)(fabsf(sinf(s40MediaWavePhase + b * 0.7f)) * 24.0f * ampScale);
-          bh = hasLiveAudioSignal ? max(realBar, simBar / 2) : simBar;
-          bh = constrain(bh, 3, 34);
+        // Đọc và vẽ ảnh thumbnail bìa vào khung 64x64 bên trong
+        bool drawnCover = false;
+        if (coverPath.endsWith(".jpg") || coverPath.endsWith(".jpeg")) {
+          uint16_t jw = 0, jh = 0;
+          bool isSd = !coverPath.startsWith("[FS]");
+          if (isSd && TestSDCard::isMounted()) {
+            File f = SD.open(coverPath, FILE_READ);
+            if (f) {
+              size_t sz = f.size();
+              if (sz > 0 && sz <= 65536) {
+                uint8_t* jBuf = (uint8_t*)malloc(sz);
+                if (jBuf && f.read(jBuf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, jBuf, sz) == JDR_OK && jw > 0 && jh > 0) {
+                  uint8_t scale = 1;
+                  if (jw >= 256 || jh >= 256) scale = 4;
+                  else if (jw >= 128 || jh >= 128) scale = 2;
+                  TJpgDec.setJpgScale(scale);
+                  int ox = cbX + 2 + max(0, (64 - (int)(jw / scale)) / 2);
+                  int oy = cbY + 2 + max(0, (64 - (int)(jh / scale)) / 2);
+                  TJpgDec.setCallback([](int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) -> bool {
+                    if (!mediaVisCanvas) return false;
+                    for (uint16_t r = 0; r < h; r++) {
+                      int py = y + r;
+                      if (py < 9 || py >= 73) continue;
+                      for (uint16_t c = 0; c < w; c++) {
+                        int px = x + c;
+                        if (px < 16 || px >= 80) continue;
+                        mediaVisCanvas->drawPixel(px, py, bitmap[r * w + c]);
+                      }
+                    }
+                    return true;
+                  });
+                  if (TJpgDec.drawJpg(ox, oy, jBuf, sz) == JDR_OK) drawnCover = true;
+                }
+                if (jBuf) free(jBuf);
+              }
+              f.close();
+            }
+          }
         }
-        int bx = 100 + b * 14;
-        int by = 72 - bh;
-        uint16_t bCol = !s40MediaPlaying ? C_SLATE : ((b % 2 == 0) ? C_NEON_GREEN : C_NEON_PINK);
-        mediaVisCanvas->fillRect(bx, by, 9, bh, bCol);
+        if (!drawnCover) {
+          // Biểu tượng đĩa nhạc / nốt nhạc phát sáng nếu chưa đọc được ảnh bìa
+          mediaVisCanvas->fillCircle(cbX + 34, cbY + 34, 22, 0x1949);
+          mediaVisCanvas->drawCircle(cbX + 34, cbY + 34, 22, C_NEON_PINK);
+          mediaVisCanvas->fillCircle(cbX + 34, cbY + 34, 8, C_YELLOW);
+          mediaVisCanvas->fillCircle(cbX + 34, cbY + 34, 3, C_BLACK);
+        }
+
+        // Phần nhãn thông tin bài hát & Phổ sóng âm mini 8 cột bên phải ảnh bìa
+        mediaVisCanvas->setTextSize(1);
+        mediaVisCanvas->setTextColor(C_YELLOW);
+        mediaVisCanvas->setCursor(92, 10);
+        mediaVisCanvas->print("ẢNH BÌA ALBUM");
+        mediaVisCanvas->setTextColor(s40MediaPlaying ? C_NEON_GREEN : C_SLATE);
+        mediaVisCanvas->setCursor(92, 22);
+        mediaVisCanvas->printf("TRẠNG THÁI: %s", s40MediaPlaying ? "ĐANG PHÁT" : "TẠM DỪNG ");
+
+        for (int b = 0; b < 8; b++) {
+          int bh = 3;
+          if (s40MediaPlaying) {
+            int realBar = (realSpec16[b * 2] * 38) / 100;
+            float s = fabsf(sinf(s40MediaWavePhase + b * 0.7f));
+            int simBar  = 6 + (int)(s * 28.0f * ampScale);
+            bh = hasLiveAudioSignal ? max(realBar, simBar / 2) : simBar;
+            bh = constrain(bh, 3, 38);
+          }
+          int bx = 92 + b * 15;
+          int by = 73 - bh;
+          uint16_t bCol = !s40MediaPlaying ? C_SLATE : ((b % 2 == 0) ? C_NEON_GREEN : C_NEON_PINK);
+          mediaVisCanvas->fillRect(bx, by, 10, bh, bCol);
+          mediaVisCanvas->drawFastHLine(bx, by, 10, C_WHITE);
+        }
+      } else {
+        // --- KHÔNG CÓ ẢNH BÌA: HIỂN THỊ ĐĨA QUAY VINYL / CD (SPINNING TURNTABLE) ---
+        int dcx = 48, dcy = 41, dr = 33;
+        // Thân đĩa than đen + các vòng rãnh đồng tâm
+        mediaVisCanvas->fillCircle(dcx, dcy, dr, C_BLACK);
+        mediaVisCanvas->drawCircle(dcx, dcy, dr, C_NEON_PINK);
+        mediaVisCanvas->drawCircle(dcx, dcy, dr - 5, 0x2124);
+        mediaVisCanvas->drawCircle(dcx, dcy, dr - 11, 0x3186);
+        mediaVisCanvas->drawCircle(dcx, dcy, dr - 17, 0x2124);
+
+        // Nan quạt phản chiếu ánh sáng xoay theo góc s40MediaDiscAngle
+        for (int k = 0; k < 2; k++) {
+          float a1 = s40MediaDiscAngle + k * 3.14159f;
+          float a2 = a1 + 0.35f;
+          int x1 = dcx + (int)(cosf(a1) * (dr - 3));
+          int y1 = dcy + (int)(sinf(a1) * (dr - 3));
+          int x2 = dcx + (int)(cosf(a2) * (dr - 3));
+          int y2 = dcy + (int)(sinf(a2) * (dr - 3));
+          mediaVisCanvas->fillTriangle(dcx, dcy, x1, y1, x2, y2, 0x1949);
+          mediaVisCanvas->drawLine(dcx, dcy, x1, y1, C_NEON_CYAN);
+        }
+
+        // Nhãn đĩa trung tâm (Record Label) + dấu chấm xoay
+        mediaVisCanvas->fillCircle(dcx, dcy, 11, C_NEON_PINK);
+        mediaVisCanvas->drawCircle(dcx, dcy, 11, C_YELLOW);
+        int dotX = dcx + (int)(cosf(s40MediaDiscAngle) * 6);
+        int dotY = dcy + (int)(sinf(s40MediaDiscAngle) * 6);
+        mediaVisCanvas->fillCircle(dotX, dotY, 2, C_YELLOW);
+        mediaVisCanvas->fillCircle(dcx, dcy, 3, C_BLACK);
+
+        // Cần kim đọc đĩa (Tonearm)
+        mediaVisCanvas->fillCircle(88, 12, 4, C_SLATE);
+        if (s40MediaPlaying) {
+          mediaVisCanvas->drawLine(88, 12, 74, 48, C_WHITE);
+          mediaVisCanvas->fillRect(71, 46, 5, 4, C_YELLOW);
+        } else {
+          mediaVisCanvas->drawLine(88, 12, 88, 54, C_SLATE);
+          mediaVisCanvas->fillRect(86, 52, 5, 4, C_NEON_AMBER);
+        }
+
+        // Phần thông tin & Equalizer mini bên phải đĩa (Dừng hẳn về 3px khi Pause/Stop)
+        mediaVisCanvas->setTextSize(1);
+        mediaVisCanvas->setTextColor(C_YELLOW);
+        mediaVisCanvas->setCursor(100, 10);
+        mediaVisCanvas->print("ĐĨA QUAY VINYL");
+        mediaVisCanvas->setTextColor(s40MediaPlaying ? C_NEON_CYAN : C_SLATE);
+        mediaVisCanvas->setCursor(100, 22);
+        mediaVisCanvas->printf("TRẠNG THÁI: %s", s40MediaPlaying ? "ĐANG PHÁT" : "TẠM DỪNG ");
+
+        for (int b = 0; b < 8; b++) {
+          int bh = 3;
+          if (s40MediaPlaying) {
+            int realBar = (realSpec16[b * 2] * 34) / 100;
+            int simBar  = 6 + (int)(fabsf(sinf(s40MediaWavePhase + b * 0.7f)) * 24.0f * ampScale);
+            bh = hasLiveAudioSignal ? max(realBar, simBar / 2) : simBar;
+            bh = constrain(bh, 3, 34);
+          }
+          int bx = 100 + b * 14;
+          int by = 72 - bh;
+          uint16_t bCol = !s40MediaPlaying ? C_SLATE : ((b % 2 == 0) ? C_NEON_GREEN : C_NEON_PINK);
+          mediaVisCanvas->fillRect(bx, by, 9, bh, bCol);
+        }
       }
     } else if (s40MediaVisMode == 1) {
       // --- CHẾ ĐỘ 1: HIỂN THỊ SÓNG ÂM DẠNG HÌNH SIN (PHẲNG TĨNH KHI PAUSE/STOP) ---
@@ -7916,12 +8219,11 @@ namespace TestDisplay {
     if (s40PushAlertActive) {
       drawPushAlertModal(true);
     }
+    commitFrame();
   }
 
   void triggerStandbyRedraw() {
-    if (currentMode == 0 && !isScreenSleeping) {
-      drawStandbyScreenFull();
-    }
+    s_standbyNeedsRedraw = true;
   }
 
   // --- HOẠT ẢNH LOADING KẾT NỐI WI-FI (CHẤM XOAY ĐUỔI NHAU) & TOAST THÔNG BÁO ---
@@ -9502,13 +9804,17 @@ namespace TestDisplay {
       tft7789->setSPISpeed(80000000); // Tăng tốc độ xung SPI phần cứng lên 80 MHz tối đa của ESP32-S3!
       tft7789->invertDisplay(inverted);
       tft7789->setRotation(rotation);
-      tft = tft7789;
     } else {
       tft9341->begin(80000000);
       tft9341->invertDisplay(inverted);
       tft9341->setRotation(rotation);
-      tft = tft9341;
     }
+    // Khởi tạo 2 tầng bộ đệm toàn khung hình (Full-Frame 240x320) trên PSRAM
+    if (!g_frameCanvas[0]) g_frameCanvas[0] = new VnPsramCanvas16(240, 320);
+    if (!g_frameCanvas[1]) g_frameCanvas[1] = new VnPsramCanvas16(240, 320);
+    g_activeCanvasIdx = 0;
+    tft = g_frameCanvas[0];
+    tft->fillScreen(C_BLACK);
   }
 
   // ============================================================================
@@ -10417,6 +10723,13 @@ namespace TestDisplay {
 
     TestSDCard::loop();
 
+    if (s_standbyNeedsRedraw) {
+      s_standbyNeedsRedraw = false;
+      if (currentMode == 0 && !isScreenSleeping) {
+        drawStandbyScreenFull();
+      }
+    }
+
     // 1. Đọc cảm biến chạm điện dung TTP223 trên chân GPIO 21 (PIN_TOUCH_TTP223)
     // Tăng debounce lên 150ms để lọc hoàn toàn các xung nhiễu điện dung khi loa MAX98357A phát công suất lớn
     bool ttpNow = (digitalRead(PIN_TOUCH_TTP223) == HIGH);
@@ -10814,6 +11127,11 @@ namespace TestDisplay {
 
     // Luôn vẽ Toast nổi nếu có thông báo toàn cục (WiFi mới kết nối, trạng thái hệ thống...)
     drawGlobalToastIfNeeded();
+
+    if (s_displayDirty && !isScreenSleeping) {
+      s_displayDirty = false;
+      commitFrame();
+    }
   }
 
   // ============================================================================
