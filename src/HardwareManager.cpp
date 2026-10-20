@@ -71,9 +71,12 @@ void HardwareManager::heartbeat() {
   unsigned long now = millis();
   if (now - lastSerialHeartbeat >= 5000) {
     lastSerialHeartbeat = now;
-    Serial.printf("💓 [Decor ESP32] Uptime: %lu s | RAM: %u KB | IP: %s\n",
+    Serial.printf("💓 [Decor ESP32] Uptime: %lu s | RAM: %uK (Đáy: %uK) | PSRAM: %.1fM (Đáy: %.1fM) | IP: %s\n",
                   now / 1000,
                   getFreeHeapKb(),
+                  getMinFreeHeapKb(),
+                  getFreePsramMb(),
+                  getMinFreePsramMb(),
                   WiFi.status() == WL_CONNECTED ? WiFi.localIP().toString().c_str() : "AP Mode (192.168.4.1)");
   }
 }
@@ -108,8 +111,34 @@ uint32_t HardwareManager::getFreeHeapKb() {
   return ESP.getFreeHeap() / 1024;
 }
 
+uint32_t HardwareManager::getMinFreeHeapKb() {
+  return ESP.getMinFreeHeap() / 1024;
+}
+
 float HardwareManager::getFreePsramMb() {
   return (float)ESP.getFreePsram() / (1024.0 * 1024.0);
+}
+
+float HardwareManager::getMinFreePsramMb() {
+  return (float)ESP.getMinFreePsram() / (1024.0 * 1024.0);
+}
+
+uint32_t HardwareManager::getMaxAllocHeapKb() {
+  return ESP.getMaxAllocHeap() / 1024;
+}
+
+uint32_t HardwareManager::getMaxAllocPsramKb() {
+  return ESP.getMaxAllocPsram() / 1024;
+}
+
+static uint32_t s_allocFailures = 0;
+
+void HardwareManager::recordAllocFailure() {
+  s_allocFailures++;
+}
+
+uint32_t HardwareManager::getAllocFailures() {
+  return s_allocFailures;
 }
 
 float HardwareManager::getFsUsedMb() {

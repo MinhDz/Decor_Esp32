@@ -1,192 +1,148 @@
-# DIY Decor ESP32
-## Tài liệu định hướng dự án
+# SPACE OS — TRẠM DECOR VŨ TRỤ (ESP32-S3 FREEFORM COPPER SCULPTURE)
+## Tài liệu Kiến trúc Hệ thống & Hiện trạng Dự án Chính thức
+*Phiên bản Firmware: Space OS v3.1.8 | Cập nhật: 20/10/2026*
 
-## 1. Mục tiêu dự án
+---
 
-Dự án này là một thiết bị DIY decor dùng ESP32, hướng tới một màn hình để bàn có tính trang trí và thông tin. Ở giai đoạn hiện tại, dự án **chưa có board phần cứng thật đầy đủ**, nên toàn bộ quá trình sẽ **mô phỏng trên Wokwi trước** để kiểm tra giao diện, luồng xử lý và logic chức năng.
+## 1. Tổng quan Dự án
 
-Mục tiêu trước mắt là xây dựng một nguyên mẫu chạy ổn định, đủ để:
-- hiển thị ảnh và trạng thái lên màn hình
-- chạy web server để tải ảnh
-- mô phỏng các chế độ hiển thị cơ bản
-- chuẩn bị khung kiến trúc cho phiên bản phần cứng thật sau này
+Dự án **Trạm Decor Bàn Làm Việc Thông Minh (Space Station Decor)** là một tác phẩm công nghệ kết hợp giữa **Nghệ thuật Điêu Khắc Mạch Điện Bằng Đồng Thau (Freeform Brass/Copper Circuit Sculpture)** và **Hệ điều hành Nhúng Đa Nhiệm (Space OS)** chạy trên vi điều khiển **ESP32-S3 (N16R8: 16MB Flash, 8MB Octal PSRAM)**.
 
-## 2. Tình trạng hiện tại
+Thiết bị không chỉ là một chiếc đồng hồ để bàn trang trí độc bản phong cách Cyberpunk / Retro-Futuristic, mà còn tích hợp đầy đủ hệ sinh thái thông minh:
+- **Màn hình màu IPS 2.4" 240x320 (ST7789VW)** giao diện Symbian S40 Nokia kinh điển với 19 chế độ hiển thị chuyên sâu.
+- **Hệ thống Âm thanh Số I2S Kép Độc Lập**: DAC khuếch đại MAX98357A (Loa 3W) và Microphone MEMS kỹ thuật số INMP441.
+- **Trợ lý Giọng nói Trí Tuệ Nhân Tạo (XiaoZhi AI Hub)** đàm thoại trực tiếp hai chiều thời gian thực qua WebSocket & Opus Codec.
+- **Thời tiết Thực tế Toàn Cầu (Open-Meteo & IP Geolocation)** hiển thị nhiệt độ ngoài trời, độ ẩm, mã thời tiết WMO và biểu tượng vector sinh động.
+- **Hệ thống Cảm biến Môi trường SHT31 & Cảm ứng Điện dung TTP223** đo nhiệt độ, độ ẩm phòng chính xác và nhận diện thao tác chạm vỏ đồng.
+- **Hệ thống Truyền động & Ánh sáng Nghệ thuật**: Cối xay gió N20 (cầu H L298N), 2 đèn ống năng lượng Edison filament dẻo (nhịp theo nhạc VU meter, phản hồi giọng AI), 2 thanh LED nước chảy sao băng COB.
+- **Kiến trúc Bảo vệ FlashGuard & Bộ đệm Telemetry 1MB PSRAM**: Lưu trữ 87,381 mẫu dữ liệu chuỗi thời gian liên tục 48.5h không ghi mòn bộ nhớ Flash.
+- **Giao diện Web Dashboard Quản trị Toàn diện**: Điều khiển thời gian thực, bàn phím ảo, tải nhạc/hình nền, vẽ biểu đồ canvas và nâng cấp phần mềm OTA trực tiếp từ GitHub.
 
-### 2.1 Giai đoạn phát triển
-- Chưa có board thật / module thật hoàn chỉnh
-- Chạy mô phỏng trên Wokwi
-- Ưu tiên kiểm tra luồng logic hơn là tối ưu phần cứng
+---
 
-### 2.2 Phạm vi đang làm
-- Web server upload ảnh
-- Xử lý và nén ảnh xuống khoảng 200–300 KB
-- Màn hình chờ có hiển thị thời gian
-- Màn hình trạng thái PC
-- Màn hình emoji biểu cảm trạng thái
+## 2. Hiện trạng Phần cứng Thực tế (Official Hardware Pinout)
 
-## 3. Chức năng cốt lõi
+Hệ thống được thi công bằng kỹ thuật uốn thanh đồng nguyên khối $1.2\,\text{mm}$ làm khung chịu lực kiêm mặt phẳng tiếp địa (GND) chung, kết hợp dây đồng men cách điện siêu nhỏ $0.1\,\text{mm}$ chạy ẩn mặt sau.
 
-### 3.1 Web server tải ảnh
-Thiết bị chạy một web server đơn giản để người dùng có thể:
-- truy cập bằng trình duyệt
-- tải ảnh lên thiết bị
-- thay đổi nội dung hiển thị mà không cần nạp lại firmware
+### Bảng phân bổ chân GPIO vi điều khiển ESP32-S3 DevKitC-1:
 
-### 3.2 Nén ảnh đầu vào
-Ảnh tải lên sẽ được xử lý để giảm dung lượng xuống khoảng **200–300 KB** nhằm:
-- phù hợp giới hạn bộ nhớ
-- giảm tải khi lưu trữ và hiển thị
-- đảm bảo chạy ổn định trên mô phỏng và sau này là phần cứng thật
+| Khối Chức Năng | Linh Kiện Phần Cứng | Chân Giao Tiếp ESP32-S3 | Chế Độ & Giao Thức |
+| :--- | :--- | :--- | :--- |
+| **Màn hình ST7789** | 2.4" IPS TFT 240x320 | **MOSI: GPIO 11, SCK: GPIO 12, DC: GPIO 13, CS: GPIO 14, RST: GPIO 10, BL: GPIO 7** | Phần cứng SPI 80 MHz, PWM Backlight (LEDC kênh 0) |
+| **Thẻ nhớ MicroSD** | Wemos D1 MicroSD Shield | **MOSI: GPIO 40, MISO: GPIO 41, SCK: GPIO 42, CS: GPIO 39** | Bus SPI phần cứng riêng biệt, định dạng FAT32 |
+| **Âm thanh Ra (Loa)** | Module MAX98357A I2S DAC | **DIN: GPIO 15, BCLK: GPIO 16, LRC/WS: GPIO 17** | Cổng I2S1 chuyên dụng, phát MP3, WAV, TTS Opus |
+| **Âm thanh Vào (Mic)** | Module INMP441 MEMS Mic | **SCK: GPIO 4, WS: GPIO 5, SD: GPIO 6** | Cổng I2S0 chuyên dụng, thu âm 16kHz 16-bit Mono |
+| **Cảm biến Môi trường** | Module SHT31 | **SDA: GPIO 8, SCL: GPIO 9** | Bus phần cứng I2C (tần số 400 kHz) |
+| **Cảm biến Chạm** | Module TTP223 | **SIG: GPIO 20** | Active HIGH, kết nối vỏ đồng trang trí chạm tay |
+| **Bàn phím 7 Nút** | Keypad 7 phím thang điện trở | **KEY_ADC: GPIO 3 (ADC1_CH2)** | 1 dây tín hiệu chia thang điện áp qua trở kéo lên $10\,\text{k}\Omega$ |
+| **Trạng thái Sạc & Pin** | Mạch sạc TP4056 & Pin 18650 | **CHG_STAT: GPIO 46, BAT_ADC: GPIO 2** | GPIO 46 (Input-Only đọc STAT), GPIO 2 đọc điện áp pin |
+| **Cối xay gió** | Motor giảm tốc N20 + Vành LED | **IN1: GPIO 1** | Mạch cầu H L298N Mini / MX1508, điều tốc PWM |
+| **Đèn Ống Edison** | 2 Ống LED Edison Filament 30mm | **Sườn TRÁI: GPIO 47, Sườn PHẢI: GPIO 21** | Điều chế xung PWM (LEDC), trở nối tiếp $47\,\Omega$ |
+| **Đèn Dải Tín hiệu** | 2 Thanh LED Nước Chảy COB 3V | **Thanh TRÁI: GPIO 18, Thanh PHẢI: GPIO 38** | Điều khiển bật/tắt Digital HIGH |
+| **Đèn Trạng Thái Bo** | WS2812 RGB Onboard | **DATA: GPIO 48** | Báo trạng thái Wi-Fi, SoftAP và cảnh báo hệ thống |
 
-### 3.3 Màn hình chờ có thời gian
-Thiết kế màn hình standby dùng khi thiết bị không có tương tác, gồm:
-- đồng hồ / thời gian hiện tại
-- bố cục gọn, giống một thiết bị để bàn
-- có thể mở rộng thêm ngày tháng hoặc thông tin phụ sau này
+---
 
-### 3.4 Màn hình trạng thái PC
-Thiết kế một màn hình hiển thị trạng thái PC theo dạng HUD đơn giản.
+## 3. Hệ Điều Hành Space OS v3.1.8 & 19 Chế Độ Màn Hình
 
-Trong giai đoạn mô phỏng:
-- dữ liệu có thể là giả lập
-- hoặc nhập tay để test giao diện
-- chưa cần kết nối phần mềm PC thật
-
-### 3.5 Màn hình biểu cảm emoji
-Thiết kế bộ biểu cảm trạng thái theo phong cách đơn giản, lấy cảm hứng từ kiểu biểu cảm như XiaoZhi.
-
-Các trạng thái cần có:
-- Idle
-- Liếc mắt trái
-- Liếc mắt phải
-- Nháy 2 mắt
-- Giận
-- Bối rối (@@)
-
-## 4. Hướng triển khai trong Wokwi
-
-Vì chưa có phần cứng thật, cách làm hợp lý nhất là chia dự án thành các phần mô phỏng nhỏ:
-
-1. **Khởi tạo màn hình cơ bản**
-   - vẽ layout
-   - hiển thị trạng thái mặc định
-
-2. **Tạo state machine cho màn hình**
-   - chuyển giữa standby, PC status, emoji mode
-   - đảm bảo trạng thái không bị rối
-
-3. **Dựng web server**
-   - phục vụ giao diện upload ảnh
-   - nhận request từ trình duyệt
-
-4. **Xử lý ảnh**
-   - nhận file ảnh
-   - nén ảnh về dung lượng mục tiêu
-   - chuẩn bị cho bước hiển thị lên màn hình
-
-5. **Mô phỏng dữ liệu PC**
-   - dựng dữ liệu giả cho CPU, RAM, nhiệt độ
-   - dùng để kiểm tra layout HUD
-
-6. **Hoàn thiện bộ emoji**
-   - xây dựng từng biểu cảm riêng
-   - đảm bảo chuyển đổi mượt, dễ mở rộng
-
-## 5. Mục tiêu ngắn hạn
-
-Trong giai đoạn đầu, ưu tiên các mục tiêu sau:
-- chạy được trên Wokwi ổn định
-- web server hoạt động được
-- upload ảnh thành công
-- ảnh được nén đúng mục tiêu dung lượng
-- màn hình chờ hiển thị thời gian
-- màn hình PC status hiển thị dữ liệu mô phỏng
-- emoji trạng thái chuyển được giữa các biểu cảm
-
-## 6. Định hướng sau này (Roadmap & Tính năng mở rộng)
-
-Khi chuyển sang phần cứng thật đầy đủ (ESP32-S3 N16R8, màn hình TFT/OLED, microphone I2S, loa DAC I2S):
-- Đồng bộ thời gian qua Internet (NTP Server).
-- Lưu ảnh và cấu hình lâu dài trên bộ nhớ ngoài (Flash LittleFS / thẻ nhớ SD).
-- Kết nối đồng bộ trạng thái PC thật qua phần mềm giám sát.
-- Mở rộng thành một thiết bị decor để bàn thông minh và tương tác hoàn chỉnh.
-
-### 6.1 Bố cục Màn hình Biểu Cảm XiaoZhi (Chia 2 phần: Biểu Cảm & Phụ Đề 2-3 Dòng)
-Màn hình dọc 240x320 được phân chia thành 2 khu vực chức năng trực quan:
-1. **Phần trên (Chiếm ~70% chiều cao - Emoji Eyes Stage)**:
-   - Dành riêng cho đôi mắt biểu cảm sinh động (Neon Cyan, Amber, Rose Red).
-   - Chuyển động liếc nhìn 4 hướng (Trái, Phải, Lên, Xuống), nháy mắt đơn, chớp mắt kép và các trạng thái cảm xúc (Vui vẻ, Giận dữ, Bối rối, Ngái ngủ, Lắng nghe).
-2. **Phần dưới (Chiếm ~30% chiều cao - Subtitle / Text Box 2-3 dòng chữ)**:
-   - Khung viền bán trong suốt công nghệ cao (Frosted Glass).
-   - Hiển thị văn bản phụ đề phản hồi thời gian thực của XiaoZhi trả về từ Cloud (hoặc câu lệnh vừa thu âm từ người dùng).
-   - Font chữ rõ nét, giới hạn vừa vặn 2-3 dòng chữ giúp trạm decor vừa sinh động vừa truyền tải thông điệp nhanh chóng mà không che mất đôi mắt biểu cảm.
-
-### 6.2 Các Tiện ích Để Bàn Mở Rộng (Desktop Smart Utilities)
-Bên cạnh chức năng đồng hồ chờ và trợ lý AI XiaoZhi, thiết bị sẽ mở rộng thêm cụm tiện ích thời gian hữu dụng:
-1. **Đồng hồ bấm giờ (Stopwatch)**:
-   - Đo thời gian chính xác từng phần trăm giây (hh:mm:ss.ms).
-   - Hỗ trợ nút Bắt đầu, Tạm dừng, Ghi vòng (Lap) và Đặt lại (Reset) trực tiếp từ phím bấm hoặc giao diện Web.
-2. **Báo thức thông minh (Smart Alarm Clock)**:
-   - Cài đặt nhiều mốc giờ báo thức lặp lại theo ngày trong tuần qua Web.
-   - Khi đến giờ, phát chuông báo qua chip I2S DAC MAX98357A và nhấp nháy đèn LED góc màn hình kèm biểu cảm gọi dậy.
-   - Hỗ trợ tính năng báo lại (Snooze) qua cảm biến chạm TTP223.
-3. **Hẹn giờ đếm ngược & Pomodoro (Countdown Timer & Productivity)**:
-   - Đặt thời gian đếm ngược (nấu ăn, giải lao, tập trung làm việc 25 phút Pomodoro).
-   - Mắt XiaoZhi chuyển sang trạng thái tập trung làm việc, hết giờ phát chuông thông báo và nháy mắt chúc mừng.
-
-### 6.3 Kiến trúc Tương tác Giọng nói XiaoZhi AI (Voice Chat Pipeline)
-
-Hệ thống sẽ kết hợp nhịp nhàng giữa giao diện Web nhúng (Web UI) và phần cứng ESP32-S3 để thực hiện chu trình đàm thoại AI thông minh hai chiều:
+Giao diện đồ họa được tối ưu hóa toàn diện trên màn hình dọc 240x320 pixel, kế thừa phong cách điện thoại Nokia Symbian S40 kết hợp giao diện Cyberpunk HUD với 6 bộ Theme màu sắc (Vũ trụ, Chill Thảo Mộc, Mecha, Lofi Hoàng Hôn, S40 Cổ Điển, Mèo Gome Chibi):
 
 ```mermaid
-sequenceDiagram
-    autonumber
-    actor User as Người dùng
-    participant Web as Web Nhúng (Web UI)
-    participant ESP as ESP32-S3 Firmware
-    participant Cloud as XiaoZhi Cloud AI
-    participant AudioOut as Loa ESP32 (I2S DAC)
-
-    User->>Web: 1. Bấm nút [Micro] trên hộp thoại chat
-    Web->>ESP: 2. Gửi lệnh kích hoạt lắng nghe (WebSocket / REST API)
-    ESP->>ESP: 3. Bật I2S IN (Mic INMP441/ICS-43434) thu âm giọng nói
-    User->>ESP: 4. Nói câu hỏi / mệnh lệnh
-    ESP->>ESP: 5. Phát hiện dừng nói (VAD) & mã hóa Opus 16kHz
-    ESP->>Cloud: 6. Stream gói âm thanh lên server XiaoZhi (WebSocket Voice API)
-    Cloud-->>ESP: 7. Trả về kết quả nhận diện giọng nói (STT text)
-    ESP-->>Web: 8. Cập nhật và hiển thị câu nói của user lên hộp thoại chat
-    Cloud-->>ESP: 9. Trả về luồng âm thanh phản hồi (TTS Opus) & nội dung văn bản (LLM text)
-    par Phát âm thanh phản hồi
-        ESP->>AudioOut: 10. Giải mã Opus và phát ra Loa (I2S MAX98357A)
-    and Hiển thị phản hồi
-        ESP-->>Web: 11. Đồng thời hiển thị câu trả lời của XiaoZhi lên hộp thoại chat
-    end
+flowchart TD
+    Standby["Mode 0: Màn Hình Chờ (Standby Clock & Wallpaper)"]
+    Menu["Mode 4: Menu Chính Symbian S40 (Lưới 16 Biểu Tượng 4x3)"]
+    AOD["Chế độ Khóa Màn Hình (Always On Display / Sleep)"]
+    
+    Standby -- "Bấm MENU" --> Menu
+    Standby -- "Bấm EXIT" --> AOD
+    AOD -- "Bấm phím bất kỳ" --> Standby
+    Menu -- "Bấm EXIT" --> Standby
+    
+    Menu --> App1["Mode 5: Hình Nền"]
+    Menu --> App2["Mode 6: Cài Đặt Hệ Thống"]
+    Menu --> App3["Mode 2: PC Status HUD"]
+    Menu --> App4["Mode 7: Thư Viện Ảnh"]
+    Menu --> App5["Mode 10: Quản Lý Bộ Nhớ SD"]
+    Menu --> App6["Mode 11: Trợ Lý XiaoZhi AI"]
+    Menu --> App7["Mode 12: Trình Phát Nhạc"]
+    Menu --> App8["Mode 13: Cụm Tiện Ích Đồng Hồ"]
+    Menu --> App9["Mode 14: Lịch Vạn Niên"]
+    Menu --> App10["Mode 8: Thông Tin Thiết Bị & OTA"]
+    Menu --> App11["Mode 3: Chẩn Đoán & Sóng Âm"]
+    Menu --> App12["Mode 9: Test Tốc Độ Thẻ Nhớ"]
+    Menu --> App13["Mode 15: Trung Tâm Trò Chơi"]
+    Menu --> App14["Mode 16: Mã QR Cài Đặt Wi-Fi"]
+    Menu --> App15["Mode 18: Quản Lý Mạng Wi-Fi"]
+    Menu --> App16["Mode 19: Biểu Đồ Telemetry 48h"]
 ```
 
-#### Chi tiết quy trình xử lý 5 bước:
-1. **Nút Micro trên Web Nhúng**:
-   - Trên thanh nhập tin nhắn của Web nhúng (`chat-input-bar`), trang bị nút bấm biểu tượng Micro (`🎙️`).
-   - Khi người dùng bấm vào nút Mic, giao diện chuyển sang trạng thái đang ghi nhận (hiệu ứng sóng âm động).
-2. **Kích hoạt chế độ lắng nghe trên ESP32**:
-   - Web nhúng gửi lệnh điều khiển tới ESP32 thông qua kênh WebSocket nội bộ hoặc REST API (`/api/audio/listen`).
-   - ESP32 kích hoạt bộ điều khiển ngoại vi I2S thu âm (kết nối Module Microphone kỹ thuật số như INMP441, ICS-43434 hoặc ES8388 codec).
-   - Màn hình decor tự động chuyển sang biểu cảm lắng nghe (`Listening...`).
-3. **Thu âm, Nén Opus và Gửi lên XiaoZhi Cloud**:
-   - ESP32 thu tín hiệu âm thanh mẫu chuẩn 16kHz, 16-bit Mono.
-   - Xử lý phát hiện ngưng giọng (VAD - Voice Activity Detection) hoặc kết thúc theo thời gian/thao tác người dùng.
-   - Mã hóa luồng âm thanh sang định dạng Opus (frame 60ms) và stream trực tiếp lên cổng âm thanh của XiaoZhi Cloud qua kết nối WebSocket bảo mật (WSS).
-4. **Nhận diện giọng nói và Phản hồi trên Hộp thoại Web (Speech-to-Text)**:
-   - XiaoZhi Cloud xử lý nhận diện giọng nói và trả về bản tin văn bản (STT).
-   - ESP32 nhận bản tin này và lập tức chuyển tiếp (forward) về Web nhúng qua WebSocket.
-   - Giao diện Web tự động thêm bong bóng chat của người dùng hiển thị văn bản vừa được nói.
-5. **Phát âm thanh ra loa và Hiển thị câu trả lời của XiaoZhi**:
-   - XiaoZhi Cloud trả về đồng thời:
-     - **Dữ liệu văn bản (LLM text response)**: Gửi về Web nhúng để hiển thị câu trả lời của XiaoZhi trong hộp thoại chat.
-     - **Dữ liệu âm thanh (TTS Opus)**: Stream về ESP32 để giải mã sang PCM và xuất ra loa thông qua mạch khuếch đại công suất I2S DAC (MAX98357A / ES8388).
-   - Màn hình decor hiển thị biểu cảm cử động miệng/nói chuyện (`Speaking...`) khớp với thời lượng âm thanh phát ra loa.
+### Danh sách chi tiết 19 Chế độ Hiển thị:
+1. **Mode 0: Màn Hình Chờ (Standby Screen)**: Đồng hồ trung tâm (hỗ trợ 4 kiểu: Digital, Retro Flip, Analog, Compact), cập nhật vùng nhỏ 240x44 không quét lại nền; 2 viên thuốc kính mờ trên đỉnh (Wi-Fi SSID & Tên thiết bị); Widget thời tiết kính mờ đáy màn hình (thời tiết Open-Meteo, icon vector, địa điểm và nhiệt độ phòng SHT31).
+2. **Mode 1: Biểu Cảm XiaoZhi AI**: Đôi mắt biểu cảm Neon sống động với 12 trạng thái cảm xúc (Blink, Happy, Looking 4 hướng, Angry, Confused, Wink, Sleepy).
+3. **Mode 2: PC Status HUD**: Màn hình giám sát máy tính thời gian thực (CPU, GPU, RAM, Nhiệt độ, Network) với 4 phong cách giao diện (Gauges, Bars, Graphs, Cyberpunk Matrix).
+4. **Mode 3: Bảng Chẩn Đoán Phần Cứng & Máy Hiện Sóng (Oscilloscope)**: Vẽ sóng âm thời gian thực từ Micro I2S INMP441, đọc nhiệt ẩm SHT31 và trực quan hóa điện áp 7 phím bấm ADC.
+5. **Mode 4: Giao Diện Điều Khiển Symbian S40**: Lưới 16 biểu tượng ứng dụng bố cục 4x3 có cuộn dọc mượt mà, khung viền chọn phát sáng theo theme.
+6. **Mode 5: Trình Quản Lý Hình Nền**: Đổi hình nền động từ thẻ nhớ SD hoặc Flash LittleFS, hỗ trợ nạp nhanh ảnh định dạng `.rgb565` (153.6KB) không tốn CPU giải mã.
+7. **Mode 6: Cài Đặt Hệ Thống**: 14 mục cài đặt (6 theme màu, độ sáng màn hình, thời gian chờ tắt màn hình, kiểu AOD, âm lượng, âm phím, nhạc chuông báo thức, độ nhạy mic, motor cối xay, các cụm LED).
+8. **Mode 7: Thư Viện Hình Ảnh**: Xem duyệt slide ảnh chất lượng cao trên thẻ nhớ SD.
+9. **Mode 8: Thông Tin Thiết Bị & Cập Nhật OTA**: 3 trang chi tiết (Hệ thống & Mạng, Bộ nhớ & Phân vùng OTA, Mã QR kết nối Wi-Fi) và hộp thoại kiểm tra nâng cấp firmware trực tiếp từ GitHub với so sánh SemVer an toàn.
+10. **Mode 9: Đo Kiểm Tốc Độ Thẻ Nhớ**: Benchmark tốc độ đọc/ghi khối tuần tự trên MicroSD FAT32.
+11. **Mode 10: Quản Lý Thẻ Nhớ & Tệp Tin (File Explorer)**: Đệm biểu tượng nhận diện từng định dạng tệp (📁 Thư mục, 🎵 Âm thanh, 🖼️ Hình ảnh, ⚙️ Cấu hình, 📦 Firmware), tự động rút gọn tên tệp dài `...`.
+12. **Mode 11: Trợ Lý Giọng Nói XiaoZhi AI**: Màn hình chia 2/3 (Mắt AI) + 1/3 (Khung hội thoại tròn dòng tự động cuộn chữ tiếng Việt), tích hợp quy trình hiển thị mã OTP liên kết với XiaoZhi Cloud Hub.
+13. **Mode 12: Trình Phát Nhạc Đa Phương Tiện**: Phát nhạc MP3/WAV từ thẻ nhớ SD, đọc và hiển thị Album Cover Art (`[tên_bài].jpg`, `cover.jpg`) trong khung neon 68x68, tự động chuyển về đĩa than cổ điển Vinyl Turntable xoay 360° nếu không có ảnh bìa; cột sóng âm 8 băng tần nhịp theo nhạc.
+14. **Mode 13: Bộ Tiện Ích Thời Gian**: Báo thức 3 mốc kèm hoãn chuông (Snooze), Đồng hồ bấm giờ (Stopwatch), Hẹn giờ đếm ngược (Countdown Timer) và Chỉnh giờ thủ công.
+15. **Mode 14: Lịch Vạn Niên (Solar / Lunar Calendar)**: Tra cứu lịch dương và âm lịch truyền thống, can chi, ngày hoàng đạo.
+16. **Mode 15: Trung Tâm Trò Chơi (Retro Game Center)**: 3 tựa game cổ điển điều khiển bằng cụm 7 phím bấm (Rắn săn mồi Snake, Bắn ruồi không gian Space Invaders, Flappy Bird).
+17. **Mode 16: Mã QR Cài Đặt Nhanh**: Tự động sinh mã QR chuẩn xác trên màn hình để điện thoại quét kết nối Wi-Fi SoftAP hoặc mở trang cấu hình Web.
+18. **Mode 17: Trình Phát Stream Video/Audio Trực Tuyến**: Nhận luồng video JPEG và audio PCM UDP từ máy tính / server qua cổng mạng.
+19. **Mode 18: Quản Lý Kết Nối Wi-Fi**: Quét danh sách sóng Wi-Fi xung quanh, xem trạng thái kết nối, độ mạnh sóng RSSI và chuyển đổi AP tiện lợi.
+20. **Mode 19: Biểu Đồ Xu Hướng Telemetry 48 Giờ**: Vẽ đồ thị đường neon tương tác trực tiếp trên màn hình ST7789 từ 1MB circular buffer trong PSRAM với 4 chỉ số (Nhiệt độ, Độ ẩm, CPU, Pin) và 4 khung thời gian (1h, 6h, 24h, 48h).
 
-## 7. Tài liệu kỹ thuật liên quan
+---
 
-- Sơ đồ nối chân phần cứng chi tiết: [PINOUT.md](file:///c:/Users/admin/Documents/GitHub/Decor_Esp32/PINOUT.md) (Quy hoạch chân ESP32-S3 N16R8, màn hình ST7789VW, thẻ MicroSD chung bus SPI, I2S MAX98357A, I2S INMP441, SHT31, TTP223).
-- Tài liệu này được cập nhật bám sát tiến độ dự án: hoàn thiện giao diện Web và các màn hình decor mô phỏng trước, sau đó tích hợp phần cứng âm thanh I2S và kết nối Voice XiaoZhi Cloud toàn diện.
+## 4. Các Công Nghệ Cốt Lõi Đã Triển Khai
+
+### 4.1 Cơ chế Bảo vệ Bộ nhớ FlashGuard
+- Bộ nhớ Flash SPI trên vi điều khiển có tuổi thọ hữu hạn số lần xóa/ghi sector (~100,000 chu kỳ).
+- **Giải pháp FlashGuard**:
+  - Chuyển 100% dữ liệu telemetry sang **1MB PSRAM Circular Buffer** (dung lượng 87,381 mẫu), hoàn toàn không ghi vào Flash.
+  - Bộ đệm ghi hoãn (Write Debouncer 2.0 giây) và kiểm tra dữ liệu thay đổi thực sự (`dirty check`) ngăn chặn tình trạng kéo thanh trượt giao diện Web ghi liên tục vào Preferences NVS.
+
+### 4.2 Tối ưu Đồ họa ST7789 ở 80 MHz SPI
+- Driver xuất hình trực tiếp qua phần cứng SPI 80 MHz của ESP32-S3, tối đa hóa băng thông truyền dữ liệu.
+- Cơ chế **Đệm Đồng Hồ Cục Bộ (Partial Clock Strip Buffer 240x44)**: Chỉ cập nhật vùng số giờ phút giây nổi trên nền ảnh mà không quét lại toàn màn hình.
+- Phục hồi hình nền tức thì từ bộ đệm 4 dải trong RAM/PSRAM (`standbyStripCache`) mất chưa đầy 1 ms.
+- Cơ chế an toàn đa nhân (**Thread-Safe Display Flag** `s_standbyNeedsRedraw`): Mọi tác vụ ngầm chạy trên Core 0 (như cập nhật thời tiết hay kiểm tra mạng) chỉ gửi cờ báo hiệu, nhường việc xuất bus SPI đồng bộ cho Core 1, triệt tiêu hoàn toàn hiện tượng xung đột bus gây đè chữ và rách hình.
+
+### 4.3 Trợ lý Trí Tuệ Nhân Tạo XiaoZhi Voice Chat
+- Kết nối WebSocket hai chiều bảo mật trực tiếp tới XiaoZhi Cloud AI Server.
+- Tự động mã hóa/giải mã giọng nói qua thư viện Opus 16kHz.
+- Quy trình đăng ký và liên kết thiết bị nhanh chóng thông qua mã OTP hiển thị trực quan trên màn hình.
+
+---
+
+## 5. Đánh Giá Hiện Trạng Xử Lý UI & Kế Hoạch Tối Ưu Hệ Thống
+
+Dựa trên quá trình vận hành thực tế, 4 hạng mục kiến trúc then chốt được đánh giá và đặt ra mục tiêu cải tiến:
+
+| Hạng Mục | Hiện Trạng Quan Sát Được | Vấn Đề Tiềm Ẩn | Giải Pháp Kỹ Thuật Đang Triển Khai |
+| :--- | :--- | :--- | :--- |
+| **1. Vòng lặp chính (`loop()`)** | Nhiều tác vụ (`ModuleTestRunner`, `CobLeds`, `Telemetry`, `Weather`, `Wifi`, `WebRoutes`, `XiaoZhi`, `Hardware`) gọi tuần tự trong `loop()` trên Core 1. | Một tác vụ mạng hoặc xử lý file SD kéo dài có thể chặn đứng (block) `loop()`, gây lag bàn phím và giảm tốc độ làm tươi màn hình. | **Task Profiler**: Đo lường thời gian thực thi của từng tác vụ trong `loop()`; chuyển các tác vụ mạng/I-O nặng sang Task FreeRTOS độc lập trên Core 0; giữ Core 1 ưu tiên tuyệt đối cho UI và phím bấm. |
+| **2. Đồng hồ Màn hình chờ** | Có cơ chế vẽ riêng dải đồng hồ 240x44 pixel qua `clockCanvas` và `clockBgBuf`. | Cần đảm bảo khi chỉ thay đổi giây hoặc nhấp nháy dấu `:` không bao giờ kích hoạt giải mã ảnh nền lớn 240x320. | **Micro-Region Update**: Duy trì và tối ưu hóa vùng cập nhật nhỏ, giữ nguyên 100% nền xung quanh, đưa thời gian cập nhật dải đồng hồ về < 1.2 ms. |
+| **3. Luồng Chuyển Màn hình** | 19 chế độ hiển thị chuyển đổi qua lại qua phím bấm hoặc giao diện Web. | Khi chuyển trang trong lúc đang phát nhạc I2S, đọc file thẻ nhớ hoặc có HTTP request nền có thể gây xung đột tài nguyên hoặc thiếu hụt đệm âm thanh. | **State Decoupling**: Tách biệt máy trạng thái giao diện (UI State Machine) khỏi tác vụ mạng và âm thanh; trang bị hàm cleanup dọn dẹp tài nguyên an toàn trước khi nạp trang mới. |
+| **4. Quản lý Bộ nhớ (Heap & PSRAM)** | Hệ thống dùng 8MB PSRAM cho Telemetry và Canvas, nhưng rò rỉ bộ nhớ (leak) vẫn có thể xảy ra từ đối tượng `String` hoặc parse JSON phân mảnh. | Hoạt động nhiều ngày liên tục có thể dẫn đến phân mảnh Heap (Heap Fragmentation) hoặc tràn RAM dẫn đến khởi động lại ngoài ý muốn. | **Memory Watermark Monitor**: Theo dõi liên tục `MinFreeHeap` và `MinFreePsram`, đếm số lần cấp phát thất bại; hiển thị cảnh báo bộ nhớ trên Web Dashboard và trang About để phát hiện sớm rò rỉ. |
+
+---
+
+## 6. Lộ Trình Phát Triển Tiếp Theo (Next Milestones)
+
+1. **Tích hợp Task Profiler & Memory Health Monitor**:
+   - Ghi nhận thời gian micro-giây của từng tác vụ trong `loop()`.
+   - Giám sát đáy Heap/PSRAM và phát hiện sớm các hiện tượng nghẽn luồng.
+2. **Sci-Fi Command Center / Fallout Pip-Boy HUD (Bản Sao Số 3D - Digital Twin)**:
+   - Dựng model 3D tương tác của trạm từ ảnh chụp thực tế bằng Blender.
+   - Bổ sung Tab 3D WebGL (Three.js) trên Web Dashboard với cơ chế Tải lười (Lazy-loading từ GitHub/CDN).
+   - Mô phỏng 3D xoay 360° trạm bên trái (click vào module để camera zoom tới và hiện popup trạng thái), kết hợp màn hình Terminal DOS CRT quét dòng bên phải.
+3. **Mở rộng Hệ sinh thái Trợ lý AI XiaoZhi**:
+   - Nâng cấp độ nhạy thu âm mic INMP441 và thuật toán lọc nhiễu nền khi loa phát công suất lớn.
+   - Thêm các kịch bản phản hồi nhà thông minh (Smart Home IoT Control) từ câu lệnh giọng nói.

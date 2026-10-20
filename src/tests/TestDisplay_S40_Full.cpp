@@ -876,7 +876,7 @@ namespace TestDisplay {
     // 2. Pill ESP32-S3 góc trên phải (x: 164..231, y: 8..25)
     if (y >= 8 && y <= 25 && x >= 164 && x <= 231) return true;
     // 3. Pill Thời tiết ở đáy (x: 26..214, y: 258..286)
-    if (stCfg.showWeather && y >= 258 && y <= 286 && x >= 26 && x <= 214) return true;
+    if (stCfg.showWeather && y >= 256 && y <= 286 && x >= 22 && x <= 218) return true;
     return false;
   }
 
@@ -1740,6 +1740,45 @@ namespace TestDisplay {
     commitFrame();
   }
 
+  // Vẽ riêng viên thuốc kính mờ thời tiết ở đáy Màn Hình Chờ (tránh giật hình/flicker toàn màn hình)
+  static void drawStandbyWeatherPillOnly() {
+    if (!tft || isScreenSleeping || currentMode != 0) return;
+    if (!stCfg.showWeather) return;
+
+    tft->setTextWrap(false);
+    tft->fillRoundRect(22, 256, 196, 30, 8, 0x10A2);
+    tft->drawRoundRect(22, 256, 196, 30, 8, 0x39E7);
+    if (WeatherManager::isAvailable()) {
+      WeatherManager::drawWeatherIcon(tft, 28, 263, WeatherManager::getIconType(), 16);
+      char line1[36];
+      String city = WeatherManager::getCityName();
+      if (vnStrLen(city) > 8) city = vnSubstr(city, 0, 8);
+      snprintf(line1, sizeof(line1), "%s: %.1f°C %d%%", city.c_str(), WeatherManager::getOutdoorTemp(), WeatherManager::getOutdoorHumidity());
+      drawShadowText(48, 260, String(line1), C_WHITE, 1);
+
+      char line2[36];
+      if (stCfg.temp > -40.0f) {
+        snprintf(line2, sizeof(line2), "Phòng: %.1f°C  %d%%", stCfg.temp, stCfg.humidity);
+      } else {
+        String cond = WeatherManager::getConditionText();
+        if (vnStrLen(cond) > 20) cond = vnSubstr(cond, 0, 20);
+        snprintf(line2, sizeof(line2), "%s", cond.c_str());
+      }
+      drawShadowText(48, 273, String(line2), C_NEON_CYAN, 1);
+    } else {
+      WeatherManager::drawWeatherIcon(tft, 28, 263, WEATHER_ICON_SUN, 16);
+      char line1[36];
+      if (stCfg.temp > -40.0f) {
+        snprintf(line1, sizeof(line1), "Phòng: %.1f°C  %d%%", stCfg.temp, stCfg.humidity);
+      } else {
+        snprintf(line1, sizeof(line1), "Trạm Decor ESP32");
+      }
+      drawShadowText(48, 260, String(line1), C_WHITE, 1);
+      drawShadowText(48, 273, "Đang lấy thời tiết...", C_SLATE, 1);
+    }
+    commitFrame();
+  }
+
   // Vẽ toàn bộ bố cục Màn Hình Chờ đồng bộ 100% với màn hình ảo trên Web UI (240x320 Portrait)
   static void drawStandbyScreenFull() {
     if (!tft || isScreenSleeping) return;
@@ -1791,36 +1830,7 @@ namespace TestDisplay {
 
     // Bước 4: Vẽ Footer (Viên thuốc kính mờ Thời tiết + Lời chào Slogan ở đáy màn hình)
     if (stCfg.showWeather) {
-      tft->fillRoundRect(22, 256, 196, 30, 8, 0x10A2);
-      tft->drawRoundRect(22, 256, 196, 30, 8, 0x39E7);
-      if (WeatherManager::isAvailable()) {
-        WeatherManager::drawWeatherIcon(tft, 28, 263, WeatherManager::getIconType(), 16);
-        char line1[36];
-        String city = WeatherManager::getCityName();
-        if (vnStrLen(city) > 8) city = vnSubstr(city, 0, 8);
-        snprintf(line1, sizeof(line1), "%s: %.1f°C %d%%", city.c_str(), WeatherManager::getOutdoorTemp(), WeatherManager::getOutdoorHumidity());
-        drawShadowText(48, 260, String(line1), C_WHITE, 1);
-
-        char line2[36];
-        if (stCfg.temp > -40.0f) {
-          snprintf(line2, sizeof(line2), "Phòng: %.1f°C  %d%%", stCfg.temp, stCfg.humidity);
-        } else {
-          String cond = WeatherManager::getConditionText();
-          if (vnStrLen(cond) > 20) cond = vnSubstr(cond, 0, 20);
-          snprintf(line2, sizeof(line2), "%s", cond.c_str());
-        }
-        drawShadowText(48, 273, String(line2), C_NEON_CYAN, 1);
-      } else {
-        WeatherManager::drawWeatherIcon(tft, 28, 263, WEATHER_ICON_SUN, 16);
-        char line1[36];
-        if (stCfg.temp > -40.0f) {
-          snprintf(line1, sizeof(line1), "Phòng: %.1f°C  %d%%", stCfg.temp, stCfg.humidity);
-        } else {
-          snprintf(line1, sizeof(line1), "Trạm Decor ESP32");
-        }
-        drawShadowText(48, 260, String(line1), C_WHITE, 1);
-        drawShadowText(48, 273, "Đang lấy thời tiết...", C_SLATE, 1);
-      }
+      drawStandbyWeatherPillOnly();
     }
 
     String msg = toCleanAscii(stCfg.customText);
@@ -8202,6 +8212,59 @@ namespace TestDisplay {
     s_standbyNeedsRedraw = true;
   }
 
+  // ============================================================================
+  // VÒNG ĐỜI CHUYỂN MÀN HÌNH (SCREEN LIFECYCLE: onExitMode & onEnterMode)
+  // Tách rời tuyệt đối máy trạng thái giao diện khỏi các tác vụ nền âm thanh & mạng
+  // ============================================================================
+  static void onExitMode(uint8_t oldMode) {
+    if (oldMode == 12) {
+      // Rời Trình phát nhạc: dừng phát âm thanh an toàn, giải phóng tệp MP3/WAV trên SD
+      stopMediaAudioPlayback();
+    } else if (oldMode == 17) {
+      // Rời Màn hình Stream: dừng luồng stream và đóng socket UDP
+      stopStreamMode();
+    } else if (oldMode == 11 || oldMode == 1) {
+      // Rời màn hình XiaoZhi: dừng thu âm nếu đang dở dang
+      if (s40AiState == AI_STATE_LISTENING) {
+        s40AiState = AI_STATE_IDLE;
+      }
+    } else if (oldMode == 15) {
+      // Rời Trung tâm Trò chơi: reset trạng thái game loop
+      s40GameActiveId = 0;
+    } else if (oldMode == 18) {
+      // Rời Quản lý Wi-Fi: giải phóng bộ đệm danh sách AP
+      s_savedWifiListCache.clear();
+    }
+  }
+
+  static void onEnterMode(uint8_t newMode) {
+    if (newMode == 12) {
+      s40MediaSubState = 0;
+      refreshMediaPlaylist();
+    } else if (newMode == 17) {
+      lastStreamFrameMs = millis();
+    } else if (newMode == 18) {
+      s40WifiConnCursor = 0;
+      s40WifiConnScroll = 0;
+      s_savedWifiListCache = WifiManager::getSavedWifiWithStatus();
+      for (int i = 0; i < (int)s_savedWifiListCache.size(); i++) {
+        if (s_savedWifiListCache[i].connected) {
+          s40WifiConnCursor = i;
+          break;
+        }
+      }
+    }
+  }
+
+  static void switchModeSafe(uint8_t targetMode) {
+    if (targetMode == currentMode) return;
+    uint8_t oldMode = currentMode;
+    onExitMode(oldMode);
+    currentMode = targetMode;
+    onEnterMode(currentMode);
+    refreshActiveScreen();
+  }
+
   // --- HOẠT ẢNH LOADING KẾT NỐI WI-FI (CHẤM XOAY ĐUỔI NHAU) & TOAST THÔNG BÁO ---
   static bool s_isWifiConnecting = false;
   static String s_connectingSsid = "";
@@ -10458,7 +10521,7 @@ namespace TestDisplay {
     stCfg.humidity = newHum;
 
     if (tft && !isScreenSleeping && currentMode == 0 && (diffT >= 0.2f || diffH >= 1)) {
-      drawStandbyScreenFull();
+      drawStandbyWeatherPillOnly();
     }
   }
 
@@ -10469,8 +10532,7 @@ namespace TestDisplay {
       refreshActiveScreen();
       return;
     }
-    currentMode = (currentMode + 1) % 4;
-    refreshActiveScreen();
+    switchModeSafe((currentMode + 1) % 4);
   }
 
   void cycleHudStyle(int dir) {
@@ -10527,9 +10589,7 @@ namespace TestDisplay {
     }
 
     if (newMode != currentMode) {
-      currentMode = newMode;
-      if (currentMode == 17) lastStreamFrameMs = millis();
-      refreshActiveScreen();
+      switchModeSafe(newMode);
     } else if (!isScreenSleeping && currentMode == 0) {
       drawStandbyScreenFull();
     } else if (!isScreenSleeping && currentMode == 3) {
@@ -10698,7 +10758,7 @@ namespace TestDisplay {
     if (s_standbyNeedsRedraw) {
       s_standbyNeedsRedraw = false;
       if (currentMode == 0 && !isScreenSleeping) {
-        drawStandbyScreenFull();
+        drawStandbyWeatherPillOnly();
       }
     }
 

@@ -16,6 +16,7 @@
 #include "WebStreamManager.h"
 #include "WeatherManager.h"
 #include "TelemetryManager.h"
+#include "TaskProfiler.h"
 
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -1357,13 +1358,16 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       if (el('sys-heap')) {
         let fH = d.free_heap_bytes ? (d.free_heap_bytes/1024).toFixed(0) : (d.free_heap_kb || '--');
         let tH = d.total_heap_bytes ? (d.total_heap_bytes/1024).toFixed(0) : '320';
-        el('sys-heap').innerText = `Heap trống: ${fH}KB / ${tH}KB`;
+        let minH = d.min_free_heap_bytes ? ` (Đáy: ${(d.min_free_heap_bytes/1024).toFixed(0)}KB)` : '';
+        let loopStr = d.loop_fps ? ` • Vòng lặp: ${Number(d.loop_fps).toFixed(0)} FPS` : '';
+        el('sys-heap').innerText = `Heap: ${fH}/${tH}KB${minH}${loopStr}`;
       }
       if (el('sys-psram')) {
         let fP = d.free_psram_bytes ? (d.free_psram_bytes/(1024*1024)).toFixed(1) : (d.free_psram_mb ? Number(d.free_psram_mb).toFixed(1) : '--');
         let tP = d.total_psram_bytes ? (d.total_psram_bytes/(1024*1024)).toFixed(0) : '8';
         let uP = Math.max(0, Number(tP) - Number(fP)).toFixed(1);
-        el('sys-psram').innerText = `PSRAM: Trống ${fP}MB / ${tP}MB (Dùng ~${uP}MB)`;
+        let minP = d.min_free_psram_bytes ? ` (Đáy: ${(d.min_free_psram_bytes/(1024*1024)).toFixed(1)}MB)` : '';
+        el('sys-psram').innerText = `PSRAM: Trống ${fP}/${tP}MB (Dùng ~${uP}M)${minP}`;
       }
       if (el('sys-wifi')) el('sys-wifi').innerText = `${d.wifi_ssid || d.current_ssid || 'Chưa nối'} (${d.wifi_rssi || 0} dBm)`;
       if (el('sys-ip')) el('sys-ip').innerText = 'IP: ' + (d.wifi_ip || d.ip || '--');
@@ -6298,9 +6302,18 @@ static void handleSystemInfo() {
   doc["cpu_freq_mhz"]       = ESP.getCpuFreqMHz();
   doc["flash_size_bytes"]   = ESP.getFlashChipSize();
   doc["free_heap_bytes"]    = ESP.getFreeHeap();
+  doc["min_free_heap_bytes"]= ESP.getMinFreeHeap();
+  doc["max_alloc_heap_bytes"]= ESP.getMaxAllocHeap();
   doc["total_heap_bytes"]   = ESP.getHeapSize();
   doc["free_psram_bytes"]   = ESP.getFreePsram();
+  doc["min_free_psram_bytes"]= ESP.getMinFreePsram();
+  doc["max_alloc_psram_bytes"]= ESP.getMaxAllocPsram();
   doc["total_psram_bytes"]  = ESP.getPsramSize();
+  doc["alloc_failures"]     = HardwareManager::getAllocFailures();
+  doc["loop_last_us"]       = TaskProfiler::getLoopLastUs();
+  doc["loop_avg_us"]        = TaskProfiler::getLoopAvgUs();
+  doc["loop_max_us"]        = TaskProfiler::getLoopMaxUs();
+  doc["loop_fps"]           = TaskProfiler::getFps();
   doc["wifi_connected"]     = (WiFi.status() == WL_CONNECTED);
   doc["wifi_ssid"]          = WiFi.SSID();
   doc["wifi_rssi"]          = WiFi.RSSI();

@@ -12,6 +12,7 @@
 #include "WebStreamManager.h"
 #include "WeatherManager.h"
 #include "TelemetryManager.h"
+#include "TaskProfiler.h"
 
 void setup() {
   Serial.begin(115200);
@@ -43,6 +44,9 @@ void setup() {
   // 1E. Khởi tạo Trình quản lý Thời tiết Real-Time (Open-Meteo & Geolocation)
   WeatherManager::init();
 
+  // 1F. Khởi tạo bộ đo đạc hiệu năng vòng lặp chính (Task Profiler)
+  TaskProfiler::init();
+
   // 2. Khởi chạy Hệ thống 4 Màn hình ST7789 + Mic INMP441 + Cảm biến SHT31 + 7 Phím Bấm DIO
   ModuleTestRunner::init();
 
@@ -64,32 +68,52 @@ void setup() {
 }
 
 void loop() {
+  TaskProfiler::beginLoop();
+
   // 1. Vòng lặp cập nhật 4 Màn hình ST7789, Mic INMP441, Cảm biến SHT31 & 7 Phím DIO
+  TaskProfiler::start(PROF_MODULES);
   ModuleTestRunner::loop();
+  TaskProfiler::stop(PROF_MODULES);
 
   // 1A. Cập nhật chu trình xung đổi chế độ non-blocking cho 2 Thanh LED COB
+  TaskProfiler::start(PROF_COB_LEDS);
   CobLeds::update();
+  TaskProfiler::stop(PROF_COB_LEDS);
 
   // 1B. Thu thập dữ liệu Telemetry vào 1MB PSRAM và cập nhật FlashGuard
+  TaskProfiler::start(PROF_TELEMETRY);
   TelemetryManager::loop();
+  TaskProfiler::stop(PROF_TELEMETRY);
 
   // 1C. Vòng lặp định kỳ cập nhật Thời tiết Real-time
+  TaskProfiler::start(PROF_WEATHER);
   WeatherManager::loop();
+  TaskProfiler::stop(PROF_WEATHER);
 
   // 2. Xử lý DNS Captive Portal & các HTTP request từ giao diện Web
+  TaskProfiler::start(PROF_WIFI);
   WifiManager::loop();
+  TaskProfiler::stop(PROF_WIFI);
+
+  TaskProfiler::start(PROF_WEB_ROUTES);
   WebRoutes::handleClient();
+  TaskProfiler::stop(PROF_WEB_ROUTES);
+
+  TaskProfiler::start(PROF_WEB_STREAM);
   WebStreamManager::loop();
+  TaskProfiler::stop(PROF_WEB_STREAM);
 
   // 2B. Duy trì kết nối WebSocket nền tới XiaoZhi Cloud (giữ Online trên Hub)
+  TaskProfiler::start(PROF_XIAOZHI);
   XiaoZhiClient::loopWebSocket();
+  TaskProfiler::stop(PROF_XIAOZHI);
 
-  // 3. Nhấp nháy đèn LED RGB chỉ báo trạng thái kết nối
+  // 3. Cập nhật trạng thái phần cứng, LED RGB, nhịp tim và lệnh Serial
+  TaskProfiler::start(PROF_HARDWARE);
   HardwareManager::updateLedStatus();
-
-  // 4. In nhịp tim hệ thống định kỳ 5 giây qua Serial
   HardwareManager::heartbeat();
-
-  // 5. Lắng nghe phím tắt điều khiển nhanh từ Serial Monitor ('1','2','3','4','s','t','b','m','h')
   HardwareManager::handleSerialCommands();
+  TaskProfiler::stop(PROF_HARDWARE);
+
+  TaskProfiler::endLoop();
 }
