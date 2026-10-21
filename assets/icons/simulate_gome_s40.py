@@ -4,19 +4,21 @@ from PIL import Image, ImageDraw, ImageFont
 folder = r'assets/icons/gome'
 
 mapping = [
-    (0, "Hình nền", "gome_09.png"),
-    (1, "Cài đặt",  "gome_10.png"),
-    (2, "Máy tính", "gome_11.png"),
-    (3, "Thư viện", "gome_12.png"),
-    (4, "Bộ nhớ",   "gome_13.png"),
-    (5, "Trợ lý AI","gome_16.png"),
-    (6, "Âm nhạc",  "gome_17.png"),
-    (7, "Đồng hồ",  "gome_18.png"),
-    (8, "Lịch",     "gome_19.png"),
-    (9, "Thiết bị", "gome_38.png"),
-    (10, "Sóng âm", "gome_32.png"),
-    (11, "Thẻ nhớ", "gome_33.png"),
-    (12, "Trò chơi","gome_39.png"),
+    (0, "Hình nền",  "gome_09.png"),
+    (1, "Cài đặt",   "gome_10.png"),
+    (2, "Máy tính",  "gome_11.png"),
+    (3, "Thư viện",  "gome_12.png"),
+    (4, "Bộ nhớ",    "gome_13.png"),
+    (5, "Trợ lý AI", "gome_16.png"),
+    (6, "Âm nhạc",   "gome_17.png"),
+    (7, "Đồng hồ",   "gome_18.png"),
+    (8, "Lịch",      "gome_19.png"),
+    (9, "Thiết bị",  "gome_38.png"),
+    (10, "Sóng âm",  "gome_32.png"),
+    (11, "Trò chơi", "gome_39.png"),
+    (12, "Mã QR",    "gome_qr.png"),
+    (13, "Kết nối",  "gome_27.png"),
+    (14, "Hệ thống", "gome_40.png"),
 ]
 
 # Simulate S40 grid: 4 columns, 4 rows (240x320 screen)
@@ -31,7 +33,7 @@ draw.text((195, 6), "100%", fill=(255, 180, 220))
 
 # Sub-banner
 draw.rectangle([4, 26, 236, 47], fill=(22, 32, 58), outline=(60, 130, 200))
-draw.text((10, 32), "Theme 6: Mèo Gome Chibi", fill=(255, 230, 100))
+draw.text((10, 32), "Theme 6: Mèo Gome Chibi (15 Apps)", fill=(255, 230, 100))
 
 # Cells
 cellW = 54
@@ -62,11 +64,12 @@ for idx, title, fname in mapping[:12]:
     # Load and process icon
     img = Image.open(os.path.join(folder, fname))
     w, h = img.size
-    crop_h = int(h * 0.78)
-    cropped = img.crop((0, 0, w, crop_h))
-    
-    # Resize to 36x36
-    icon = cropped.resize((36, 36), Image.Resampling.LANCZOS)
+    if fname == "gome_qr.png":
+        icon = img.resize((36, 36), Image.Resampling.LANCZOS)
+    else:
+        crop_frac = 0.70 if fname in ["gome_27.png", "gome_40.png"] else 0.78
+        cropped = img.crop((0, 0, w, int(h * crop_frac)))
+        icon = cropped.resize((36, 36), Image.Resampling.LANCZOS)
     
     # Center icon
     ix = x + (cellW - 36) // 2
@@ -78,5 +81,4 @@ for idx, title, fname in mapping[:12]:
     draw.text((x + 8, y + 58), title, fill=txt_col)
 
 canvas.save(r'assets/icons/gome_s40_simulation.png')
-print("Saved gome_s40_simulation.png")
-
+print("Saved gome_s40_simulation.png with 15 app grid")

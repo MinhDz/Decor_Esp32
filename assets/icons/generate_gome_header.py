@@ -16,8 +16,10 @@ mapping = [
     (8, "gome_19.png", "LICH"),
     (9, "gome_38.png", "THIET_BI"),
     (10, "gome_32.png", "SONG_AM"),
-    (11, "gome_33.png", "THE_NHO"),
-    (12, "gome_39.png", "TRO_CHOI"),
+    (11, "gome_39.png", "TRO_CHOI"),
+    (12, "gome_qr.png", "MA_QR"),
+    (13, "gome_27.png", "KET_NOI"),
+    (14, "gome_40.png", "HE_THONG"),
 ]
 
 ICON_SIZE = 36
@@ -43,19 +45,20 @@ header_content.append("#pragma once")
 header_content.append("#include <Arduino.h>\n")
 header_content.append("#define GOME_ICON_W 36")
 header_content.append("#define GOME_ICON_H 36")
-header_content.append("#define GOME_ICON_COUNT 13\n")
+header_content.append(f"#define GOME_ICON_COUNT {len(mapping)}\n")
 
 for idx, fname, name_tag in mapping:
     p = os.path.join(folder, fname)
     img = Image.open(p).convert('RGBA')
     w, h = img.size
     
-    # Crop off bottom text pill
-    crop_h = int(h * 0.78)
-    cropped = img.crop((0, 0, w, crop_h))
-    
-    # Scale to 36x36 with high quality Lanczos resampling
-    resized = cropped.resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
+    if fname == "gome_qr.png":
+        resized = img.resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
+    else:
+        crop_frac = 0.70 if fname in ["gome_27.png", "gome_40.png"] else 0.78
+        crop_h = int(h * crop_frac)
+        cropped = img.crop((0, 0, w, crop_h))
+        resized = cropped.resize((ICON_SIZE, ICON_SIZE), Image.Resampling.LANCZOS)
     
     pixels = list(resized.getdata())
     header_content.append(f"// Icon {idx}: {fname} ({name_tag})")
@@ -72,7 +75,7 @@ for idx, fname, name_tag in mapping:
     header_content.append(",\n".join(row_strings))
     header_content.append("};\n")
 
-header_content.append("// Mảng con trỏ 13 Icon tương ứng 13 mục Menu S40")
+header_content.append(f"// Mảng con trỏ {len(mapping)} Icon tương ứng {len(mapping)} mục Menu S40")
 header_content.append("static const uint16_t* const GOME_ICONS[GOME_ICON_COUNT] PROGMEM = {")
 for idx, _, _ in mapping:
     comma = "," if idx < len(mapping) - 1 else ""
@@ -83,4 +86,3 @@ with open(output_header, 'w', encoding='utf-8') as f:
     f.write("\n".join(header_content))
 
 print(f"Generated {output_header} successfully with {len(mapping)} icons of {ICON_SIZE}x{ICON_SIZE}!")
-
