@@ -1,5 +1,6 @@
 #include "tests/TestSDCard.h"
 #include "tests/TestDisplay.h"
+#include "SystemLogger.h"
 #include "Config.h"
 #include <SPI.h>
 #include <SD.h>
@@ -291,6 +292,8 @@ namespace TestSDCard {
       snprintf(sumBuf, sizeof(sumBuf), "OK %s %uMB (%d file)",
                cardTypeStr.c_str(), (unsigned)detectedSizeMB, rootFileCount);
       statusSummary = String(sumBuf);
+      LOG_I("SD", "Ket noi the nho SD THANH CONG! Type: %s, Dung luong: %u MB, Files: %d",
+            cardTypeStr.c_str(), (unsigned)detectedSizeMB, rootFileCount);
     } else {
       sdMounted = false;
       if (cmd0R1Byte == 0x01) {
@@ -300,6 +303,7 @@ namespace TestSDCard {
       } else {
         statusSummary = "MISO=0xFF (The chua tra loi CMD0)";
       }
+      LOG_W("SD", "Chua the mount the nho SD: %s (CMD0 R1=0x%02X)", statusSummary.c_str(), cmd0R1Byte);
     }
 
     Serial.printf("\n================ [SD SHIELD PROBE #%lu] ================\n", (unsigned long)scanCounter);

@@ -17,6 +17,7 @@
 #include "WeatherManager.h"
 #include "TelemetryManager.h"
 #include "TaskProfiler.h"
+#include "SystemLogger.h"
 
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -837,12 +838,174 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     }
   }
 
-  // Mở rộng hàm switchTab để hỗ trợ cả tab 'music' và 'system'
+  function injectLogsTabAndPage() {
+    const navTabs = document.getElementById('nav-tabs');
+    if (!navTabs || document.getElementById('tab-btn-logs')) return;
+
+    // Nút Tab "📜 Nhật Ký (Logs)"
+    const btn = document.createElement('button');
+    btn.id = 'tab-btn-logs';
+    btn.className = 'tab-btn';
+    btn.innerHTML = '📜 Nhật Ký (Logs)';
+    btn.onclick = function() { window.switchTab('logs'); };
+    navTabs.appendChild(btn);
+
+    // Section Page "#tab-logs"
+    const sec = document.createElement('div');
+    sec.id = 'tab-logs';
+    sec.className = 'section';
+    sec.innerHTML = `
+      <div class="designer-panel" style="width:100%;max-width:100%;">
+        <div class="designer-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+            <span>📜 Nhật Ký Hoạt Động Toàn Hệ Thống (System Logs)</span>
+            <span id="log-sd-badge" style="padding:3px 9px;border-radius:12px;font-size:0.72rem;background:#064e3b;color:#34d399;font-weight:600;">💾 Thẻ nhớ: Đang tải...</span>
+            <span id="log-stat-badge" style="padding:3px 9px;border-radius:12px;font-size:0.72rem;background:#1e293b;color:#94a3b8;font-weight:600;">0 dòng</span>
+            <span id="log-err-badge" style="padding:3px 9px;border-radius:12px;font-size:0.72rem;background:#7f1d1d;color:#fca5a5;font-weight:600;display:none;">0 lỗi</span>
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
+            <select id="log-level-filter" onchange="window.fetchSystemLogs()" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:5px 8px;font-size:0.75rem;">
+              <option value="all">Tất cả cấp độ</option>
+              <option value="info">INFO trở lên</option>
+              <option value="warn">WARN trở lên</option>
+              <option value="error">Chỉ ERROR</option>
+            </select>
+            <button class="btn-secondary" style="width:auto;padding:5px 10px;font-size:0.74rem;" onclick="window.takeLogSnapshot()">📸 Snapshot</button>
+            <button class="btn-secondary" style="width:auto;padding:5px 10px;font-size:0.74rem;" onclick="window.downloadSysLogs()">📥 Tải File (.txt)</button>
+            <button class="btn-secondary" style="width:auto;padding:5px 10px;font-size:0.74rem;" onclick="window.clearSysLogs()">🧹 Xóa</button>
+            <button class="btn-secondary" style="width:auto;padding:5px 10px;font-size:0.74rem;" onclick="window.fetchSystemLogs()">🔄 Làm mới</button>
+          </div>
+        </div>
+
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;margin-bottom:6px;font-size:0.75rem;color:#94a3b8;flex-wrap:wrap;gap:8px;">
+          <div id="log-file-desc" style="color:#64748b;">Lưu trữ: /logs/sys_YYYYMMDD.log (Tự động xoay vòng khi đạt 512KB)</div>
+          <div style="display:flex;gap:12px;align-items:center;">
+            <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+              <input type="checkbox" id="log-auto-scroll" checked style="accent-color:#38bdf8;"> Tự động cuộn
+            </label>
+            <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+              <input type="checkbox" id="log-auto-refresh" checked style="accent-color:#38bdf8;"> Tự động cập nhật (3s)
+            </label>
+          </div>
+        </div>
+
+        <div id="log-terminal" style="width:100%;height:460px;background:#050811;border:1px solid #1e293b;border-radius:8px;padding:12px;box-sizing:border-box;overflow-y:auto;overflow-x:auto;font-family:Consolas, 'Cascadia Code', 'Fira Code', Menlo, Monaco, monospace;font-size:0.76rem;line-height:1.45;color:#e2e8f0;white-space:pre-wrap;box-shadow:inset 0 0 15px rgba(0,0,0,0.6);">
+          <div style="color:#64748b;">Đang kết nối tới trạm Decor ESP32 và nạp nhật ký hoạt động...</div>
+        </div>
+      </div>
+    `;
+
+    const wifiSec = document.getElementById('tab-wifi');
+    if (wifiSec && wifiSec.parentNode) {
+      wifiSec.parentNode.appendChild(sec);
+    } else {
+      document.body.appendChild(sec);
+    }
+  }
+
+  let logPollTimer = null;
+
+  window.downloadSysLogs = function() {
+    window.open('/api/logs/download', '_blank');
+  };
+
+  window.takeLogSnapshot = async function() {
+    try {
+      await fetch('/api/logs/snapshot', { method: 'POST' });
+      window.fetchSystemLogs();
+    } catch(e) { console.error(e); }
+  };
+
+  window.clearSysLogs = async function() {
+    if (!confirm("Bạn có chắc chắn muốn xóa bộ đệm nhật ký hệ thống không?")) return;
+    try {
+      await fetch('/api/logs/clear', { method: 'POST' });
+      window.fetchSystemLogs();
+    } catch(e) { console.error(e); }
+  };
+
+  window.fetchSystemLogs = async function() {
+    try {
+      let lvl = document.getElementById('log-level-filter') ? document.getElementById('log-level-filter').value : 'all';
+      let [resLogs, resStats] = await Promise.all([
+        fetch('/api/logs?format=json&limit=150&level=' + lvl),
+        fetch('/api/logs/stats')
+      ]);
+
+      let logData = await resLogs.json();
+      let statData = await resStats.json();
+
+      const sdB = document.getElementById('log-sd-badge');
+      if (sdB) {
+        if (statData.sd_active) {
+          sdB.style.background = '#064e3b';
+          sdB.style.color = '#34d399';
+          sdB.textContent = '💾 Thẻ nhớ: Đang ghi (' + (statData.written_kb || 0) + ' KB)';
+        } else if (statData.sd_ready) {
+          sdB.style.background = '#1e3a8a';
+          sdB.style.color = '#60a5fa';
+          sdB.textContent = '💾 Thẻ nhớ: Sẵn sàng';
+        } else {
+          sdB.style.background = '#78350f';
+          sdB.style.color = '#fbbf24';
+          sdB.textContent = '⚠️ Thẻ nhớ: Chưa cắm (Đệm PSRAM)';
+        }
+      }
+
+      const statB = document.getElementById('log-stat-badge');
+      if (statB) statB.textContent = (statData.total || 0) + ' dòng';
+
+      const errB = document.getElementById('log-err-badge');
+      if (errB) {
+        let errCount = (statData.error || 0) + (statData.fatal || 0);
+        if (errCount > 0) {
+          errB.style.display = 'inline-block';
+          errB.textContent = errCount + ' lỗi';
+        } else {
+          errB.style.display = 'none';
+        }
+      }
+
+      const desc = document.getElementById('log-file-desc');
+      if (desc && statData.current_file) {
+        desc.textContent = 'Tệp: ' + statData.current_file + ' | Chờ ghi: ' + (statData.pending_bytes || 0) + ' B';
+      }
+
+      const term = document.getElementById('log-terminal');
+      if (term && logData.logs) {
+        let html = '';
+        logData.logs.forEach(item => {
+          let line = item.line || '';
+          let color = '#94a3b8';
+          if (line.includes(' [I] ')) color = '#38bdf8';
+          else if (line.includes(' [W] ')) color = '#f59e0b';
+          else if (line.includes(' [E] ') || line.includes(' [F] ')) color = '#ef4444;font-weight:bold;background:#450a0a;';
+          else if (line.includes('====')) color = '#a855f7;font-weight:bold;';
+
+          let esc = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          html += '<div style="color:' + color + ';">' + esc + '</div>';
+        });
+
+        term.innerHTML = html.length > 0 ? html : '<div style="color:#64748b;">(Chưa có bản ghi nhật ký phù hợp)</div>';
+
+        const autoScroll = document.getElementById('log-auto-scroll');
+        if (autoScroll && autoScroll.checked) {
+          term.scrollTop = term.scrollHeight;
+        }
+      }
+    } catch(e) {
+      console.error("fetchSystemLogs error:", e);
+    }
+  };
+
+  // Mở rộng hàm switchTab để hỗ trợ cả tab 'music', 'system' và 'logs'
   const origSwitchTab = window.switchTab;
   window.switchTab = function(tabId) {
     injectMusicTabAndPage();
     injectSystemTabAndPage();
+    injectLogsTabAndPage();
     if (tabId === 'music') {
+      if (logPollTimer) { clearInterval(logPollTimer); logPollTimer = null; }
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       const mSec = document.getElementById('tab-music');
@@ -854,6 +1017,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       return;
     }
     if (tabId === 'system') {
+      if (logPollTimer) { clearInterval(logPollTimer); logPollTimer = null; }
       document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
       document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
       const sSec = document.getElementById('tab-system');
@@ -863,6 +1027,25 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       window.loadSystemInfo();
       return;
     }
+    if (tabId === 'logs') {
+      document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      const lSec = document.getElementById('tab-logs');
+      const lBtn = document.getElementById('tab-btn-logs');
+      if (lSec) lSec.classList.add('active');
+      if (lBtn) lBtn.classList.add('active');
+      window.fetchSystemLogs();
+      if (!logPollTimer) {
+        logPollTimer = setInterval(function() {
+          const autoRef = document.getElementById('log-auto-refresh');
+          if (autoRef && autoRef.checked && document.getElementById('tab-logs') && document.getElementById('tab-logs').classList.contains('active')) {
+            window.fetchSystemLogs();
+          }
+        }, 3000);
+      }
+      return;
+    }
+    if (logPollTimer) { clearInterval(logPollTimer); logPollTimer = null; }
     const mSec = document.getElementById('tab-music');
     const mBtn = document.getElementById('tab-btn-music');
     if (mSec) mSec.classList.remove('active');
@@ -1560,6 +1743,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   setTimeout(() => {
     injectMusicTabAndPage();
     injectSystemTabAndPage();
+    injectLogsTabAndPage();
     injectWifiQrShortcut();
     window.loadMusicPlaylist();
     window.pollMediaStatus();
@@ -6478,6 +6662,95 @@ static void handleLocalUpdateUpload() {
   }
 }
 
+// ---------------- REST APIS NHẬT KÝ HỆ THỐNG & THẺ NHỚ SD ----------------
+
+static void handleGetLogs() {
+  String fmt = server.hasArg("format") ? server.arg("format") : "json";
+  size_t limit = server.hasArg("limit") ? (size_t)server.arg("limit").toInt() : 120;
+  if (limit == 0 || limit > 500) limit = 120;
+
+  String lvlStr = server.hasArg("level") ? server.arg("level") : "all";
+  LogLevel minLvl = LOG_LVL_DEBUG;
+  if (lvlStr == "info") minLvl = LOG_LVL_INFO;
+  else if (lvlStr == "warn") minLvl = LOG_LVL_WARN;
+  else if (lvlStr == "error") minLvl = LOG_LVL_ERROR;
+
+  if (fmt == "text") {
+    String txt = SystemLogger::getRecentLogsText(limit, minLvl);
+    server.send(200, "text/plain; charset=utf-8", txt);
+  } else {
+    JsonDocument doc;
+    SystemLogger::getLogsJson(doc, limit, minLvl);
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+  }
+}
+
+static void handleDownloadLogs() {
+  File logFile = SystemLogger::openCurrentLogFileForReading();
+  if (logFile) {
+    server.sendHeader("Content-Disposition", "attachment; filename=\"decor_esp32_syslog.log\"");
+    server.streamFile(logFile, "text/plain");
+    logFile.close();
+  } else {
+    String txt = SystemLogger::getRecentLogsText(1000, LOG_LVL_DEBUG);
+    server.sendHeader("Content-Disposition", "attachment; filename=\"decor_esp32_ram_syslog.txt\"");
+    server.send(200, "text/plain; charset=utf-8", txt);
+  }
+}
+
+static void handleGetLogStats() {
+  LogStats st = SystemLogger::getStats();
+  JsonDocument doc;
+  doc["total"] = st.totalLogged;
+  doc["written_bytes"] = st.totalWrittenBytes;
+  doc["written_kb"] = (uint32_t)(st.totalWrittenBytes / 1024);
+  doc["debug"] = st.debugCount;
+  doc["info"] = st.infoCount;
+  doc["warn"] = st.warnCount;
+  doc["error"] = st.errorCount;
+  doc["fatal"] = st.fatalCount;
+  doc["buffer_drops"] = st.bufferDrops;
+  doc["pending_bytes"] = st.pendingBytes;
+  doc["sd_active"] = st.sdLoggingActive;
+  doc["current_file"] = st.currentLogFile;
+  doc["sd_ready"] = SystemLogger::isSdReady();
+
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleGetLogFiles() {
+  JsonDocument doc;
+  SystemLogger::getLogFileList(doc);
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handlePostLogSnapshot() {
+  SystemLogger::logSystemSnapshot();
+  JsonDocument doc;
+  doc["success"] = true;
+  doc["message"] = "Snapshot da duoc ghi vao nhat ky he thong";
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handlePostLogClear() {
+  bool deleteSd = server.hasArg("delete_sd") && (server.arg("delete_sd") == "1" || server.arg("delete_sd") == "true");
+  bool ok = SystemLogger::clearLogs(deleteSd);
+  JsonDocument doc;
+  doc["success"] = ok;
+  doc["deleted_sd"] = deleteSd;
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
 // ================================================================
 //     REST APIS ĐA PHƯƠNG TIỆN & THƯ MỤC /Musics TRÊN THẺ NHỚ SD
 // ================================================================
@@ -6999,6 +7272,14 @@ void WebRoutes::begin() {
   server.on("/api/stream/start_url", HTTP_POST, handleStreamStartUrl);
   server.on("/api/stream/stop", HTTP_POST, handleStreamStop);
   server.on("/api/stream/status", HTTP_GET, handleStreamStatus);
+
+  // 6b4. REST APIs Nhật Ký Hệ Thống & Thẻ Nhớ SD (Smartphone-Style Syslog)
+  server.on("/api/logs", HTTP_GET, handleGetLogs);
+  server.on("/api/logs/download", HTTP_GET, handleDownloadLogs);
+  server.on("/api/logs/stats", HTTP_GET, handleGetLogStats);
+  server.on("/api/logs/files", HTTP_GET, handleGetLogFiles);
+  server.on("/api/logs/snapshot", HTTP_POST, handlePostLogSnapshot);
+  server.on("/api/logs/clear", HTTP_POST, handlePostLogClear);
 
   // 6c. Captive Portal Probes cho iOS / Android / Windows (Tự động mở trang Cấu hình Wi-Fi)
   auto handleCaptiveRedirect = []() {

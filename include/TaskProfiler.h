@@ -11,6 +11,7 @@ enum ProfiledTask {
   PROF_WEB_STREAM,
   PROF_XIAOZHI,
   PROF_HARDWARE,
+  PROF_LOGGER,
   PROF_TASK_COUNT
 };
 

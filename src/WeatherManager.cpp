@@ -3,6 +3,7 @@
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
 #include "tests/TestDisplay.h"
+#include "SystemLogger.h"
 
 static WeatherData s_weatherData;
 static bool s_isFetching = false;
@@ -103,14 +104,19 @@ static void doFetchWeatherTask(void* arg) {
                     s_weatherData.cityName.c_str(), s_weatherData.outdoorTemp,
                     s_weatherData.outdoorHumidity, s_weatherData.conditionText.c_str(),
                     s_weatherData.weatherCode, s_weatherData.windSpeed);
+      LOG_I("WEATHER", "Cap nhat Open-Meteo thanh cong: %s | %.1fC | %d%% | %s",
+            s_weatherData.cityName.c_str(), s_weatherData.outdoorTemp,
+            s_weatherData.outdoorHumidity, s_weatherData.conditionText.c_str());
 
       // Kích hoạt vẽ lại màn hình chờ Standby nếu đang hiển thị
       TestDisplay::triggerStandbyRedraw();
     } else {
       Serial.println("⚠️ [WEATHER API] Lỗi phân tích JSON từ Open-Meteo!");
+      LOG_W("WEATHER", "Loi phan tich JSON tu Open-Meteo");
     }
   } else {
     Serial.printf("❌ [WEATHER API] Lỗi kết nối Open-Meteo HTTP: %d\n", httpCode);
+    LOG_W("WEATHER", "Loi ket noi Open-Meteo HTTP: %d", httpCode);
   }
   http.end();
 

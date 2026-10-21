@@ -10,7 +10,8 @@ static TaskStats s_taskStats[PROF_TASK_COUNT] = {
   { "WebRoutes",  0, 0, 0, 0 },
   { "WebStream",  0, 0, 0, 0 },
   { "XiaoZhi",    0, 0, 0, 0 },
-  { "Hardware",   0, 0, 0, 0 }
+  { "Hardware",   0, 0, 0, 0 },
+  { "Logger",     0, 0, 0, 0 }
 };
 
 static int64_t s_taskStartUs[PROF_TASK_COUNT] = {0};

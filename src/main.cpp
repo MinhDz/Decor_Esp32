@@ -13,6 +13,7 @@
 #include "WeatherManager.h"
 #include "TelemetryManager.h"
 #include "TaskProfiler.h"
+#include "SystemLogger.h"
 
 void setup() {
   Serial.begin(115200);
@@ -28,6 +29,9 @@ void setup() {
 
   // 1. Khởi tạo phần cứng (PSRAM, LittleFS, LED RGB, Tệp cấu hình mặc định)
   HardwareManager::init();
+
+  // 1-Log. Khởi tạo Trình Ghi Nhật Ký Thẻ Nhớ SD & Bộ Đệm Octal PSRAM (Smartphone-Style Syslog)
+  SystemLogger::init();
 
   // 1A. Khởi tạo 2 Thanh LED COB Nước Chảy Sao Băng (GPIO 18 & 38 - Digital HIGH)
   CobLeds::init(true);
@@ -114,6 +118,11 @@ void loop() {
   HardwareManager::heartbeat();
   HardwareManager::handleSerialCommands();
   TaskProfiler::stop(PROF_HARDWARE);
+
+  // 4. Xả bộ đệm nhật ký hệ thống xuống Thẻ Nhớ SD (Non-blocking Flush & Auto-Rotation)
+  TaskProfiler::start(PROF_LOGGER);
+  SystemLogger::loop();
+  TaskProfiler::stop(PROF_LOGGER);
 
   TaskProfiler::endLoop();
 }

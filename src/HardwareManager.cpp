@@ -1,6 +1,7 @@
 #include "HardwareManager.h"
 #include "Config.h"
 #include "XiaoZhiClient.h"
+#include "SystemLogger.h"
 #include <LittleFS.h>
 #include <WiFi.h>
 
@@ -135,6 +136,8 @@ static uint32_t s_allocFailures = 0;
 
 void HardwareManager::recordAllocFailure() {
   s_allocFailures++;
+  LOG_E("MEM", "Cap phat bo nho THAT BAI! FreeHeap=%u KB, FreePSRAM=%.2f MB (Tong loi: %u)",
+        getFreeHeapKb(), getFreePsramMb(), s_allocFailures);
 }
 
 uint32_t HardwareManager::getAllocFailures() {

@@ -17,6 +17,7 @@
 #include "SatelliteSprite.h"
 #include "WeatherManager.h"
 #include "TelemetryManager.h"
+#include "SystemLogger.h"
 #include <SPI.h>
 #include <WiFi.h>
 #include <LittleFS.h>
@@ -8262,6 +8263,7 @@ namespace TestDisplay {
     onExitMode(oldMode);
     currentMode = targetMode;
     onEnterMode(currentMode);
+    LOG_I("UI", "Chuyen che do man hinh: %u -> %u (%s)", oldMode, targetMode, getScreenModeName().c_str());
     refreshActiveScreen();
   }
 

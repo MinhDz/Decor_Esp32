@@ -1,6 +1,6 @@
 # SPACE OS — TRẠM DECOR VŨ TRỤ (ESP32-S3 FREEFORM COPPER SCULPTURE)
 ## Tài liệu Kiến trúc Hệ thống & Hiện trạng Dự án Chính thức
-*Phiên bản Firmware: Space OS v3.1.8 | Cập nhật: 20/10/2026*
+*Phiên bản Firmware: Space OS v3.2.0 | Cập nhật: 21/10/2026*
 
 ---
 
@@ -16,7 +16,8 @@ Thiết bị không chỉ là một chiếc đồng hồ để bàn trang trí �
 - **Hệ thống Cảm biến Môi trường SHT31 & Cảm ứng Điện dung TTP223** đo nhiệt độ, độ ẩm phòng chính xác và nhận diện thao tác chạm vỏ đồng.
 - **Hệ thống Truyền động & Ánh sáng Nghệ thuật**: Cối xay gió N20 (cầu H L298N), 2 đèn ống năng lượng Edison filament dẻo (nhịp theo nhạc VU meter, phản hồi giọng AI), 2 thanh LED nước chảy sao băng COB.
 - **Kiến trúc Bảo vệ FlashGuard & Bộ đệm Telemetry 1MB PSRAM**: Lưu trữ 87,381 mẫu dữ liệu chuỗi thời gian liên tục 48.5h không ghi mòn bộ nhớ Flash.
-- **Giao diện Web Dashboard Quản trị Toàn diện**: Điều khiển thời gian thực, bàn phím ảo, tải nhạc/hình nền, vẽ biểu đồ canvas và nâng cấp phần mềm OTA trực tiếp từ GitHub.
+- **Nhật Ký Hoạt Động Hệ Thống Toàn Diện (Smartphone-Style Syslog & Thẻ Nhớ SD)**: Bộ đệm kép Octal PSRAM 128KB non-blocking kết hợp ghi tuần tự xuống thẻ MicroSD (`/logs/sys_YYYYMMDD.log`), tự động xoay vòng 512KB, định kỳ 10 phút chụp ảnh kiểm tra sức khỏe thiết bị (`[SNAPSHOT]`).
+- **Giao diện Web Dashboard Quản trị Toàn diện**: Điều khiển thời gian thực, bàn phím ảo, tải nhạc/hình nền, vẽ biểu đồ canvas, Web Terminal xem log thời gian thực và nâng cấp phần mềm OTA trực tiếp từ GitHub.
 
 ---
 
@@ -121,28 +122,26 @@ flowchart TD
 
 ---
 
-## 5. Đánh Giá Hiện Trạng Xử Lý UI & Kế Hoạch Tối Ưu Hệ Thống
+## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.0)
 
-Dựa trên quá trình vận hành thực tế, 4 hạng mục kiến trúc then chốt được đánh giá và đặt ra mục tiêu cải tiến:
+Dựa trên quá trình vận hành thực tế, 5 hạng mục kiến trúc then chốt đã được nâng cấp toàn diện:
 
-| Hạng Mục | Hiện Trạng Quan Sát Được | Vấn Đề Tiềm Ẩn | Giải Pháp Kỹ Thuật Đang Triển Khai |
-| :--- | :--- | :--- | :--- |
-| **1. Vòng lặp chính (`loop()`)** | Nhiều tác vụ (`ModuleTestRunner`, `CobLeds`, `Telemetry`, `Weather`, `Wifi`, `WebRoutes`, `XiaoZhi`, `Hardware`) gọi tuần tự trong `loop()` trên Core 1. | Một tác vụ mạng hoặc xử lý file SD kéo dài có thể chặn đứng (block) `loop()`, gây lag bàn phím và giảm tốc độ làm tươi màn hình. | **Task Profiler**: Đo lường thời gian thực thi của từng tác vụ trong `loop()`; chuyển các tác vụ mạng/I-O nặng sang Task FreeRTOS độc lập trên Core 0; giữ Core 1 ưu tiên tuyệt đối cho UI và phím bấm. |
-| **2. Đồng hồ Màn hình chờ** | Có cơ chế vẽ riêng dải đồng hồ 240x44 pixel qua `clockCanvas` và `clockBgBuf`. | Cần đảm bảo khi chỉ thay đổi giây hoặc nhấp nháy dấu `:` không bao giờ kích hoạt giải mã ảnh nền lớn 240x320. | **Micro-Region Update**: Duy trì và tối ưu hóa vùng cập nhật nhỏ, giữ nguyên 100% nền xung quanh, đưa thời gian cập nhật dải đồng hồ về < 1.2 ms. |
-| **3. Luồng Chuyển Màn hình** | 19 chế độ hiển thị chuyển đổi qua lại qua phím bấm hoặc giao diện Web. | Khi chuyển trang trong lúc đang phát nhạc I2S, đọc file thẻ nhớ hoặc có HTTP request nền có thể gây xung đột tài nguyên hoặc thiếu hụt đệm âm thanh. | **State Decoupling**: Tách biệt máy trạng thái giao diện (UI State Machine) khỏi tác vụ mạng và âm thanh; trang bị hàm cleanup dọn dẹp tài nguyên an toàn trước khi nạp trang mới. |
-| **4. Quản lý Bộ nhớ (Heap & PSRAM)** | Hệ thống dùng 8MB PSRAM cho Telemetry và Canvas, nhưng rò rỉ bộ nhớ (leak) vẫn có thể xảy ra từ đối tượng `String` hoặc parse JSON phân mảnh. | Hoạt động nhiều ngày liên tục có thể dẫn đến phân mảnh Heap (Heap Fragmentation) hoặc tràn RAM dẫn đến khởi động lại ngoài ý muốn. | **Memory Watermark Monitor**: Theo dõi liên tục `MinFreeHeap` và `MinFreePsram`, đếm số lần cấp phát thất bại; hiển thị cảnh báo bộ nhớ trên Web Dashboard và trang About để phát hiện sớm rò rỉ. |
+| Hạng Mục | Hiện Trạng & Vấn Đề Tiềm Ẩn | Giải Pháp Kỹ Thuật Đã Triển Khai |
+| :--- | :--- | :--- |
+| **1. Vòng lặp chính (`loop()`)** | Nhiều tác vụ gọi tuần tự trong `loop()`, nguy cơ tác vụ I/O gây lag UI. | **Task Profiler**: Đo lường độ trễ chi tiết theo $\mu\text{s}$ cho 10 tác vụ trong `loop()` bằng `esp_timer_get_time()`, tính toán Loop FPS và cảnh báo tác vụ vượt 10ms (`slowCount`). |
+| **2. Đồng hồ & Thời tiết Màn hình chờ** | Thay đổi nhiệt độ phòng hay giây đồng hồ có thể gây giải mã lại ảnh nền. | **Micro-Region Update**: Duy trì `clockCanvas` 240x44; bổ sung `drawStandbyWeatherPillOnly()` vẽ riêng viên thuốc 196x30 ($y=256..286$), giữ nguyên 100% hình nền JPEG không bị chớp nháy. |
+| **3. Luồng Chuyển Màn hình** | Chuyển app đột ngột trong lúc phát nhạc hay stream có thể gây nghẽn tài nguyên. | **State Decoupling**: Bộ ba vòng đời `onExitMode`, `onEnterMode`, `switchModeSafe`; tự động dừng phát nhạc MP3, đóng UDP stream, giải phóng buffer trước khi nạp giao diện mới. |
+| **4. Quản lý Bộ nhớ (Heap & PSRAM)** | Nguy cơ phân mảnh bộ nhớ khi chạy nhiều ngày liên tục. | **Memory Watermark Monitor**: Giám sát liên tục `MinFreeHeap`, `MinFreePsram`, `MaxAllocHeap` và bộ đếm lỗi cấp phát `allocFailures` trong `HardwareManager`, đồng bộ lên Web `/api/system_info`. |
+| **5. Nhật Ký Hoạt Động (System Logs)** | Thiếu nhật ký tập trung để theo dõi lịch sử lỗi, kết nối mạng và hành vi module. | **Smartphone-Style System Logger**: Bộ đệm kép Octal PSRAM 128KB non-blocking, ghi tuần tự vào thẻ nhớ MicroSD (`/logs/sys_YYYYMMDD.log`), xoay vòng khi đạt 512KB, tự động chụp Snapshot toàn hệ thống định kỳ 10 phút. |
 
 ---
 
 ## 6. Lộ Trình Phát Triển Tiếp Theo (Next Milestones)
 
-1. **Tích hợp Task Profiler & Memory Health Monitor**:
-   - Ghi nhận thời gian micro-giây của từng tác vụ trong `loop()`.
-   - Giám sát đáy Heap/PSRAM và phát hiện sớm các hiện tượng nghẽn luồng.
-2. **Sci-Fi Command Center / Fallout Pip-Boy HUD (Bản Sao Số 3D - Digital Twin)**:
+1. **Sci-Fi Command Center / Fallout Pip-Boy HUD (Bản Sao Số 3D - Digital Twin)**:
    - Dựng model 3D tương tác của trạm từ ảnh chụp thực tế bằng Blender.
    - Bổ sung Tab 3D WebGL (Three.js) trên Web Dashboard với cơ chế Tải lười (Lazy-loading từ GitHub/CDN).
    - Mô phỏng 3D xoay 360° trạm bên trái (click vào module để camera zoom tới và hiện popup trạng thái), kết hợp màn hình Terminal DOS CRT quét dòng bên phải.
-3. **Mở rộng Hệ sinh thái Trợ lý AI XiaoZhi**:
+2. **Mở rộng Hệ sinh thái Trợ lý AI XiaoZhi**:
    - Nâng cấp độ nhạy thu âm mic INMP441 và thuật toán lọc nhiễu nền khi loa phát công suất lớn.
    - Thêm các kịch bản phản hồi nhà thông minh (Smart Home IoT Control) từ câu lệnh giọng nói.

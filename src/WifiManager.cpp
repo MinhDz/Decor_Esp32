@@ -1,6 +1,7 @@
 #include "WifiManager.h"
 #include "Config.h"
 #include "HardwareManager.h"
+#include "SystemLogger.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestAudio.h"
 #include "OtaManager.h"
@@ -245,6 +246,8 @@ bool WifiManager::smartConnect() {
       WiFi.setSleep(false);
       esp_wifi_set_ps(WIFI_PS_NONE);
       Serial.printf("✅ [Smart-WiFi] Kết nối THÀNH CÔNG tới '%s'! IP: %s (Ping 1-4ms)\n", target.ssid.c_str(), WiFi.localIP().toString().c_str());
+      LOG_I("WIFI", "Ket noi THÀNH CONG toi '%s'! IP: %s, RSSI: %d dBm",
+            target.ssid.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI());
       HardwareManager::setLedColor(0, 255, 120); // Xanh lá
       lastWifiNotification = "Đã kết nối: " + target.ssid + " (" + WiFi.localIP().toString() + ")";
       TestAudio::playOkChime();
@@ -252,6 +255,7 @@ bool WifiManager::smartConnect() {
       return true;
     } else {
       Serial.printf("❌ [Smart-WiFi] Không thể kết nối tới '%s'. Thử mạng tiếp theo...\n", target.ssid.c_str());
+      LOG_W("WIFI", "Khong the ket noi toi '%s'. Thu mang tiep theo...", target.ssid.c_str());
     }
   }
 
