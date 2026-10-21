@@ -1,6 +1,6 @@
 # SPACE OS — TRẠM DECOR VŨ TRỤ (ESP32-S3 FREEFORM COPPER SCULPTURE)
 ## Tài liệu Kiến trúc Hệ thống & Hiện trạng Dự án Chính thức
-*Phiên bản Firmware: Space OS v3.2.2 | Cập nhật: 21/10/2026*
+*Phiên bản Firmware: Space OS v3.2.3 | Cập nhật: 21/10/2026*
 
 ---
 
@@ -44,7 +44,7 @@ Hệ thống được thi công bằng kỹ thuật uốn thanh đồng nguyên 
 
 ---
 
-## 3. Hệ Điều Hành Space OS v3.2.2 & 19 Chế Độ Màn Hình
+## 3. Hệ Điều Hành Space OS v3.2.3 & 19 Chế Độ Màn Hình
 
 Giao diện đồ họa được tối ưu hóa toàn diện trên màn hình dọc 240x320 pixel, kế thừa phong cách điện thoại Nokia Symbian S40 kết hợp giao diện Cyberpunk HUD với 6 bộ Theme màu sắc (Vũ trụ, Chill Thảo Mộc, Mecha, Lofi Hoàng Hôn, S40 Cổ Điển, Mèo Gome Chibi):
 
@@ -124,7 +124,7 @@ flowchart TD
 
 ---
 
-## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.2)
+## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.3)
 
 Dựa trên quá trình vận hành thực tế, các hạng mục kiến trúc then chốt đã được nâng cấp toàn diện:
 
@@ -136,7 +136,7 @@ Dựa trên quá trình vận hành thực tế, các hạng mục kiến trúc 
 | **4. Quản lý Bộ nhớ (Heap & PSRAM)** | Nguy cơ phân mảnh bộ nhớ khi chạy nhiều ngày liên tục. | **Memory Watermark Monitor**: Giám sát liên tục `MinFreeHeap`, `MinFreePsram`, `MaxAllocHeap` và bộ đếm lỗi cấp phát `allocFailures` trong `HardwareManager`, đồng bộ lên Web `/api/system_info`. |
 | **5. Nhật Ký Hoạt Động Real-time** | Con trỏ xả thẻ nhớ trùng với con trỏ đọc web gây trắng bảng log; chưa có visual terminal cho bản sao số. | **Decoupled PSRAM History & Sci-Fi Terminal Engine (v3.2.1)**: Tách rời `s_historyCount` khỏi `s_sdFlushTail`; Fallback 8KB SD khi khởi động; Web Terminal chuẩn Sci-Fi (3 theme Matrix/Cyberpunk/Pip-Boy, CRT Scanlines, Client-side filter, hàm tái sử dụng `createSciFiLogTerminal` cho tab 3D). |
 | **6. Gộp Chẩn Đoán & Menu S40 (v3.2.2)** | Quá nhiều icon dàn trải (test thẻ nhớ riêng, test ngoại vi riêng); "Xu hướng" thiếu trực quan trên Web. | **Unified Hardware Diagnostics & 15-App Grid**: Gộp test thẻ nhớ và test ngoại vi vào 1 icon "Sóng âm" (Mode 3) chuyển trang bằng phím ◄/►; đổi tên "Xu hướng" thành "Hệ thống" với icon Biểu đồ cột Neon (Bar Chart); bổ sung giao diện Web Demo cho Mode 19. |
-| **7. Đồng Bộ Giờ Real-Time Khởi Động (v3.2.2)** | Lấy giờ NTP sau khởi động bị trễ lâu, hiển thị đồng hồ giả lập `00:35` nhiều phút. | **Instant SNTP Anycast Sync (TimeManager)**: Sử dụng các máy chủ Google & Cloudflare Anycast tại VN; thiết lập chế độ `SNTP_SYNC_MODE_IMMED`; kích hoạt và bắt gói tin ngay trong lúc kết nối Wi-Fi (~200ms), triệt tiêu hoàn toàn độ trễ khi khởi động. |
+| **7. Ổn Định Đồng Bộ Giờ Real-Time & Khắc Phục Lỗi Reset (v3.2.3)** | Gọi `SystemLogger` trong lwIP TCP callback gây tràn stack Core 0 (<3KB) dẫn đến Guru Meditation reset; `configTime()` lặp lại làm reset socket SNTP. | **Decoupled Core 1 TimeManager**: Loại bỏ hoàn toàn lwIP SNTP callback; chuyển cơ chế phát hiện đồng bộ về Core 1 thông qua atomic RTC check `time(nullptr) >= 1700000000` trong `TimeManager::loop()`; chỉ gọi `configTime()` duy nhất 1 lần khi Wi-Fi kết nối; tự động kích hoạt cờ vẽ lại Standby an toàn tuyệt đối. |
 
 ---
 

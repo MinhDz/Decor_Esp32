@@ -253,7 +253,7 @@ bool WifiManager::smartConnect() {
       lastWifiNotification = "Đã kết nối: " + target.ssid + " (" + WiFi.localIP().toString() + ")";
       TestAudio::playOkChime();
       TestDisplay::onWifiConnectedSuccess(target.ssid, WiFi.localIP().toString());
-      TimeManager::syncNow(true);
+      TimeManager::onWifiConnected();
       return true;
     } else {
       Serial.printf("❌ [Smart-WiFi] Không thể kết nối tới '%s'. Thử mạng tiếp theo...\n", target.ssid.c_str());
@@ -314,7 +314,7 @@ bool WifiManager::connectDirect(const String& ssid, const String& password, bool
     Serial.printf("✅ Đã kết nối thành công tới %s! IP: %s (Ping 1-4ms)\n", ssid.c_str(), WiFi.localIP().toString().c_str());
     TestAudio::playOkChime();
     TestDisplay::onWifiConnectedSuccess(ssid, WiFi.localIP().toString());
-    TimeManager::syncNow(true);
+    TimeManager::onWifiConnected();
     s_isManualConnecting = false;
     return true;
   } else {

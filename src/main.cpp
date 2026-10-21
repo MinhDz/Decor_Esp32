@@ -69,7 +69,7 @@ void setup() {
 
   // 5. Nếu đã kết nối Wi-Fi, tự động kiểm tra OTA và thông tin kích hoạt XiaoZhi Cloud
   if (WifiManager::isConnected()) {
-    TimeManager::syncNow(true);
+    TimeManager::onWifiConnected();
     Serial.println("🌐 Đang kiểm tra OTA và lấy thông tin xác thực từ XiaoZhi Cloud...");
     XiaoZhiClient::queryOTA(true);
     WeatherManager::refreshNow();
@@ -78,6 +78,9 @@ void setup() {
 
 void loop() {
   TaskProfiler::beginLoop();
+
+  // Vòng lặp phát hiện đồng bộ giờ thực tế trên Core 1
+  TimeManager::loop();
 
   // 1. Vòng lặp cập nhật 4 Màn hình ST7789, Mic INMP441, Cảm biến SHT31 & 7 Phím DIO
   TaskProfiler::start(PROF_MODULES);

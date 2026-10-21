@@ -1162,17 +1162,6 @@ namespace TestDisplay {
     if (TimeManager::getDateTime(hour, minute, second, wday, day, month, year)) {
       return;
     }
-    struct tm timeinfo;
-    if (getLocalTime(&timeinfo, 5)) {
-      hour   = timeinfo.tm_hour;
-      minute = timeinfo.tm_min;
-      second = timeinfo.tm_sec;
-      wday   = timeinfo.tm_wday; // 0 = CN, 1 = T2 ... 6 = T7
-      day    = timeinfo.tm_mday;
-      month  = timeinfo.tm_mon + 1;
-      year   = timeinfo.tm_year + 1900;
-      return;
-    }
     unsigned long totalSec = (millis() / 1000) + (0 * 3600 + 35 * 60);
     second = totalSec % 60;
     minute = (totalSec / 60) % 60;
@@ -10942,11 +10931,7 @@ namespace TestDisplay {
 
     bool wifiNow = (WiFi.status() == WL_CONNECTED);
     if (wifiNow && !TimeManager::isSynced()) {
-      static unsigned long lastNtpRetry = 0;
-      if (now - lastNtpRetry >= 10000) {
-        lastNtpRetry = now;
-        TimeManager::syncNow(false);
-      }
+      TimeManager::onWifiConnected();
     }
 
     String currentSsid = wifiNow ? WiFi.SSID() : "";
