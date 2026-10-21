@@ -4752,7 +4752,7 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     }
   `;
 
-  // 14 TIÊU ĐỀ & MÔ TẢ ĐỒNG BỘ CHÍNH XÁC 100% VỚI S40_MENU_TITLES DƯỚI FIRMWARE ESP32
+  // 15 TIÊU ĐỀ & MÔ TẢ ĐỒNG BỘ CHÍNH XÁC 100% VỚI S40_MENU_TITLES DƯỚI FIRMWARE ESP32
   const S40_APP_LIST = [
     { id: 0,  title: "Hình nền",  icon: "🖼️", desc: "1. Tùy chỉnh Hình nền & Đồng hồ chờ", tab: "screen" },
     { id: 1,  title: "Cài đặt",   icon: "⚙️", desc: "2. Giao diện (6 Chủ đề), Độ sáng & Loa", tab: "screen" },
@@ -4764,11 +4764,11 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     { id: 7,  title: "Đồng hồ",   icon: "⏰", desc: "8. Đồng hồ: Báo thức, Bấm giờ & Hẹn giờ", mode: "clock" },
     { id: 8,  title: "Lịch",      icon: "📅", desc: "9. Lịch Vạn Niên & Tra cứu Ngày tháng", mode: "calendar" },
     { id: 9,  title: "Thiết bị",  icon: "ℹ️", desc: "10. Thông tin Thiết bị & Kết nối Mạng", tab: "system" },
-    { id: 10, title: "Sóng âm",   icon: "🧪", desc: "11. Biểu đồ Sóng âm & Cảm biến phòng", mode: "diag" },
-    { id: 11, title: "Thẻ nhớ",   icon: "💾", desc: "12. Thông tin Chi tiết Thẻ nhớ MicroSD", tab: "images" },
-    { id: 12, title: "Trò chơi",  icon: "🎮", desc: "13. Trò chơi: Rắn săn mồi, Flappy & Xếp gạch", mode: "game" },
-    { id: 13, title: "Mã QR",     icon: "📱", desc: "14. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý", tab: "wifi" },
-    { id: 14, title: "Kết nối",   icon: "📶", desc: "15. Quản Lý Mạng Wi-Fi Đã Lưu & Chuyển Sóng", tab: "wifi", mode: "connect" }
+    { id: 10, title: "Sóng âm",   icon: "🧪", desc: "11. Biểu đồ Sóng âm, Cảm biến & Thẻ SD", mode: "diag" },
+    { id: 11, title: "Trò chơi",  icon: "🎮", desc: "12. Trò chơi: Rắn săn mồi, Flappy & Xếp gạch", mode: "game" },
+    { id: 12, title: "Mã QR",     icon: "📱", desc: "13. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý", tab: "wifi" },
+    { id: 13, title: "Kết nối",   icon: "📶", desc: "14. Quản Lý Mạng Wi-Fi Đã Lưu & Chuyển Sóng", tab: "wifi", mode: "connect" },
+    { id: 14, title: "Hệ thống",  icon: "📊", desc: "15. Giám Sát Hệ Thống Telemetry (1MB PSRAM)", tab: "system", mode: "telemetry" }
   ];
 
   let currentS40Cursor = 0;
@@ -4943,6 +4943,42 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
                 </div>
                 <div style="border-top:1px solid #1e293b;padding-top:4px;font-size:0.55rem;color:#64748b;text-align:center;">
                   Phím OK: Đổi Wi-Fi | Thoát: Về Menu
+                </div>
+              </div>
+
+              <!-- Mode 19: Giám sát Hệ Thống Telemetry 1MB PSRAM -->
+              <div class="sim-view" id="sim-view-trend" style="display:none;background:#050b14;color:#fff;flex-direction:column;padding:8px;box-sizing:border-box;">
+                <div class="s40-header-bar" style="border-bottom:1px solid #ffb000;padding-bottom:4px;margin-bottom:6px;display:flex;justify-content:space-between;align-items:center;">
+                  <span style="color:#ffb000;font-weight:700;font-size:0.72rem;">📊 HỆ THỐNG [24h]</span>
+                  <span style="color:#38bdf8;font-size:0.6rem;background:#075985;padding:1px 5px;border-radius:4px;">1MB PSRAM</span>
+                </div>
+                <div style="background:#0a192f;border:1px solid #1e293b;border-radius:6px;padding:6px;margin-bottom:6px;">
+                  <div style="display:flex;justify-content:space-between;font-size:0.62rem;color:#94a3b8;">
+                    <span>CHỈ SỐ: <strong style="color:#4ade80;">Nhiệt độ phòng</strong></span>
+                    <span style="color:#fbbf24;">87,381 MẪU</span>
+                  </div>
+                  <div style="height:90px;width:100%;margin-top:6px;position:relative;background:#020617;border:1px solid #1e293b;border-radius:4px;overflow:hidden;">
+                    <svg viewBox="0 0 200 80" style="width:100%;height:100%;">
+                      <defs>
+                        <linearGradient id="trendSimGrad" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="0%" stop-color="#00f0ff" stop-opacity="0.45"/>
+                          <stop offset="100%" stop-color="#00f0ff" stop-opacity="0.0"/>
+                        </linearGradient>
+                      </defs>
+                      <path d="M 0 55 Q 35 25 70 42 T 130 20 T 170 38 T 200 15 L 200 80 L 0 80 Z" fill="url(#trendSimGrad)" />
+                      <path d="M 0 55 Q 35 25 70 42 T 130 20 T 170 38 T 200 15" fill="none" stroke="#00f0ff" stroke-width="2" />
+                      <line x1="0" y1="40" x2="200" y2="40" stroke="#334155" stroke-dasharray="3,3" />
+                      <circle cx="200" cy="15" r="3" fill="#ffb000" />
+                    </svg>
+                  </div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:0.58rem;color:#38bdf8;padding:3px 6px;background:#0f172a;border-radius:4px;">
+                  <span>Min: 26.5°C</span>
+                  <span style="color:#4ade80;font-weight:700;">Hiện tại: 28.2°C</span>
+                  <span>Max: 31.0°C</span>
+                </div>
+                <div style="border-top:1px solid #1e293b;margin-top:auto;padding-top:4px;font-size:0.55rem;color:#64748b;text-align:center;">
+                  Phím ▲/▼: Đổi chỉ số | ◄/►: Khung giờ | Thoát: Menu
                 </div>
               </div>
             </div>
@@ -5367,7 +5403,7 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     if (titleTag) titleTag.innerText = d.screen_title || 'Màn hình ESP32';
 
     // 2. Chuyển đổi View theo mode_id
-    const views = ['standby', 's40', 'pchud', 'xiaozhi', 'media', 'diag', 'wifi'];
+    const views = ['standby', 's40', 'pchud', 'xiaozhi', 'media', 'diag', 'wifi', 'trend'];
     views.forEach(v => {
       const el = document.getElementById('sim-view-' + v);
       if (el) el.style.display = 'none';
@@ -5379,6 +5415,10 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       const el = document.getElementById('sim-view-s40');
       if (el) el.style.display = 'flex';
       renderS40Grid(d.menu_cursor || 0);
+    } else if (mId === 19) {
+      // Hệ Thống Telemetry 1MB PSRAM
+      const el = document.getElementById('sim-view-trend');
+      if (el) el.style.display = 'flex';
     } else if (mId === 18) {
       // Kết nối Wi-Fi
       const el = document.getElementById('sim-view-wifi');

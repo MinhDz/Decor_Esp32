@@ -1,6 +1,6 @@
 # SPACE OS — TRẠM DECOR VŨ TRỤ (ESP32-S3 FREEFORM COPPER SCULPTURE)
 ## Tài liệu Kiến trúc Hệ thống & Hiện trạng Dự án Chính thức
-*Phiên bản Firmware: Space OS v3.2.1 | Cập nhật: 21/10/2026*
+*Phiên bản Firmware: Space OS v3.2.2 | Cập nhật: 21/10/2026*
 
 ---
 
@@ -44,14 +44,14 @@ Hệ thống được thi công bằng kỹ thuật uốn thanh đồng nguyên 
 
 ---
 
-## 3. Hệ Điều Hành Space OS v3.1.8 & 19 Chế Độ Màn Hình
+## 3. Hệ Điều Hành Space OS v3.2.2 & 19 Chế Độ Màn Hình
 
 Giao diện đồ họa được tối ưu hóa toàn diện trên màn hình dọc 240x320 pixel, kế thừa phong cách điện thoại Nokia Symbian S40 kết hợp giao diện Cyberpunk HUD với 6 bộ Theme màu sắc (Vũ trụ, Chill Thảo Mộc, Mecha, Lofi Hoàng Hôn, S40 Cổ Điển, Mèo Gome Chibi):
 
 ```mermaid
 flowchart TD
     Standby["Mode 0: Màn Hình Chờ (Standby Clock & Wallpaper)"]
-    Menu["Mode 4: Menu Chính Symbian S40 (Lưới 16 Biểu Tượng 4x3)"]
+    Menu["Mode 4: Menu Chính Symbian S40 (Lưới 15 Biểu Tượng 4x3)"]
     AOD["Chế độ Khóa Màn Hình (Always On Display / Sleep)"]
     
     Standby -- "Bấm MENU" --> Menu
@@ -69,25 +69,27 @@ flowchart TD
     Menu --> App8["Mode 13: Cụm Tiện Ích Đồng Hồ"]
     Menu --> App9["Mode 14: Lịch Vạn Niên"]
     Menu --> App10["Mode 8: Thông Tin Thiết Bị & OTA"]
-    Menu --> App11["Mode 3: Chẩn Đoán & Sóng Âm"]
-    Menu --> App12["Mode 9: Test Tốc Độ Thẻ Nhớ"]
-    Menu --> App13["Mode 15: Trung Tâm Trò Chơi"]
-    Menu --> App14["Mode 16: Mã QR Cài Đặt Wi-Fi"]
-    Menu --> App15["Mode 18: Quản Lý Mạng Wi-Fi"]
-    Menu --> App16["Mode 19: Biểu Đồ Telemetry 48h"]
+    Menu --> App11["Mode 3: Sóng Âm & Thẻ SD (Chuyển trang Trái/Phải)"]
+    Menu --> App12["Mode 15: Trung Tâm Trò Chơi"]
+    Menu --> App13["Mode 16: Mã QR Cài Đặt Wi-Fi"]
+    Menu --> App14["Mode 18: Quản Lý Mạng Wi-Fi"]
+    Menu --> App15["Mode 19: Giám Sát Hệ Thống (Cột Biểu Đồ Neon)"]
 ```
 
 ### Danh sách chi tiết 19 Chế độ Hiển thị:
 1. **Mode 0: Màn Hình Chờ (Standby Screen)**: Đồng hồ trung tâm (hỗ trợ 4 kiểu: Digital, Retro Flip, Analog, Compact), cập nhật vùng nhỏ 240x44 không quét lại nền; 2 viên thuốc kính mờ trên đỉnh (Wi-Fi SSID & Tên thiết bị); Widget thời tiết kính mờ đáy màn hình (thời tiết Open-Meteo, icon vector, địa điểm và nhiệt độ phòng SHT31).
 2. **Mode 1: Biểu Cảm XiaoZhi AI**: Đôi mắt biểu cảm Neon sống động với 12 trạng thái cảm xúc (Blink, Happy, Looking 4 hướng, Angry, Confused, Wink, Sleepy).
 3. **Mode 2: PC Status HUD**: Màn hình giám sát máy tính thời gian thực (CPU, GPU, RAM, Nhiệt độ, Network) với 4 phong cách giao diện (Gauges, Bars, Graphs, Cyberpunk Matrix).
-4. **Mode 3: Bảng Chẩn Đoán Phần Cứng & Máy Hiện Sóng (Oscilloscope)**: Vẽ sóng âm thời gian thực từ Micro I2S INMP441, đọc nhiệt ẩm SHT31 và trực quan hóa điện áp 7 phím bấm ADC.
-5. **Mode 4: Giao Diện Điều Khiển Symbian S40**: Lưới 16 biểu tượng ứng dụng bố cục 4x3 có cuộn dọc mượt mà, khung viền chọn phát sáng theo theme.
+4. **Mode 3: Chẩn Đoán Ngoại Vi & Thẻ Nhớ SD (2 Trang Tương Tác)**:
+   - **Trang 1 (Ngoại vi & Sóng âm)**: Đo phổ sóng âm thời gian thực 65ms từ Micro MEMS INMP441, đọc nhiệt ẩm phòng SHT31 và trực quan hóa điện áp 7 phím bấm ADC.
+   - **Trang 2 (Kiểm tra Thẻ nhớ SD)**: Đo điện áp thực tế 4 chân SPI (CS, MOSI, MISO, SCK), mã phản hồi lệnh CMD0 hex, dung lượng Total/Used/Free và tình trạng tiếp xúc khay thẻ.
+   - Chuyển đổi giữa 2 trang bằng phím Trái / Phải (`KEY_LEFT` / `KEY_RIGHT`), phím OK quét lại thẻ nhớ, phím EXIT quay về Menu S40.
+5. **Mode 4: Giao Diện Điều Khiển Symbian S40**: Lưới 15 biểu tượng ứng dụng bố cục 4x3 có cuộn dọc mượt mà, khung viền chọn phát sáng theo theme.
 6. **Mode 5: Trình Quản Lý Hình Nền**: Đổi hình nền động từ thẻ nhớ SD hoặc Flash LittleFS, hỗ trợ nạp nhanh ảnh định dạng `.rgb565` (153.6KB) không tốn CPU giải mã.
 7. **Mode 6: Cài Đặt Hệ Thống**: 14 mục cài đặt (6 theme màu, độ sáng màn hình, thời gian chờ tắt màn hình, kiểu AOD, âm lượng, âm phím, nhạc chuông báo thức, độ nhạy mic, motor cối xay, các cụm LED).
 8. **Mode 7: Thư Viện Hình Ảnh**: Xem duyệt slide ảnh chất lượng cao trên thẻ nhớ SD.
 9. **Mode 8: Thông Tin Thiết Bị & Cập Nhật OTA**: 3 trang chi tiết (Hệ thống & Mạng, Bộ nhớ & Phân vùng OTA, Mã QR kết nối Wi-Fi) và hộp thoại kiểm tra nâng cấp firmware trực tiếp từ GitHub với so sánh SemVer an toàn.
-10. **Mode 9: Đo Kiểm Tốc Độ Thẻ Nhớ**: Benchmark tốc độ đọc/ghi khối tuần tự trên MicroSD FAT32.
+10. **Mode 9: Đo Kiểm Tốc Độ Thẻ Nhớ**: Benchmark tốc độ đọc/ghi khối tuần tự trên MicroSD FAT32 (được tích hợp song song trong Mode 3).
 11. **Mode 10: Quản Lý Thẻ Nhớ & Tệp Tin (File Explorer)**: Đệm biểu tượng nhận diện từng định dạng tệp (📁 Thư mục, 🎵 Âm thanh, 🖼️ Hình ảnh, ⚙️ Cấu hình, 📦 Firmware), tự động rút gọn tên tệp dài `...`.
 12. **Mode 11: Trợ Lý Giọng Nói XiaoZhi AI**: Màn hình chia 2/3 (Mắt AI) + 1/3 (Khung hội thoại tròn dòng tự động cuộn chữ tiếng Việt), tích hợp quy trình hiển thị mã OTP liên kết với XiaoZhi Cloud Hub.
 13. **Mode 12: Trình Phát Nhạc Đa Phương Tiện**: Phát nhạc MP3/WAV từ thẻ nhớ SD, đọc và hiển thị Album Cover Art (`[tên_bài].jpg`, `cover.jpg`) trong khung neon 68x68, tự động chuyển về đĩa than cổ điển Vinyl Turntable xoay 360° nếu không có ảnh bìa; cột sóng âm 8 băng tần nhịp theo nhạc.
@@ -97,7 +99,7 @@ flowchart TD
 17. **Mode 16: Mã QR Cài Đặt Nhanh**: Tự động sinh mã QR chuẩn xác trên màn hình để điện thoại quét kết nối Wi-Fi SoftAP hoặc mở trang cấu hình Web.
 18. **Mode 17: Trình Phát Stream Video/Audio Trực Tuyến**: Nhận luồng video JPEG và audio PCM UDP từ máy tính / server qua cổng mạng.
 19. **Mode 18: Quản Lý Kết Nối Wi-Fi**: Quét danh sách sóng Wi-Fi xung quanh, xem trạng thái kết nối, độ mạnh sóng RSSI và chuyển đổi AP tiện lợi.
-20. **Mode 19: Biểu Đồ Xu Hướng Telemetry 48 Giờ**: Vẽ đồ thị đường neon tương tác trực tiếp trên màn hình ST7789 từ 1MB circular buffer trong PSRAM với 4 chỉ số (Nhiệt độ, Độ ẩm, CPU, Pin) và 4 khung thời gian (1h, 6h, 24h, 48h).
+20. **Mode 19: Giám Sát Hệ Thống Telemetry 48 Giờ**: Biểu tượng cột biểu đồ Neon (Bar Chart), vẽ đồ thị tương tác trực tiếp trên màn hình ST7789 từ 1MB circular buffer trong PSRAM với 4 chỉ số (Nhiệt độ, Độ ẩm, CPU, Pin) và 4 khung thời gian (1h, 6h, 24h, 48h). Đã đồng bộ trực quan lên Web Demo Screen.
 
 ---
 
@@ -122,9 +124,9 @@ flowchart TD
 
 ---
 
-## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.1)
+## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.2)
 
-Dựa trên quá trình vận hành thực tế, 5 hạng mục kiến trúc then chốt đã được nâng cấp toàn diện:
+Dựa trên quá trình vận hành thực tế, các hạng mục kiến trúc then chốt đã được nâng cấp toàn diện:
 
 | Hạng Mục | Hiện Trạng & Vấn Đề Tiềm Ẩn | Giải Pháp Kỹ Thuật Đã Triển Khai |
 | :--- | :--- | :--- |
@@ -133,6 +135,8 @@ Dựa trên quá trình vận hành thực tế, 5 hạng mục kiến trúc the
 | **3. Luồng Chuyển Màn hình** | Chuyển app đột ngột trong lúc phát nhạc hay stream có thể gây nghẽn tài nguyên. | **State Decoupling**: Bộ ba vòng đời `onExitMode`, `onEnterMode`, `switchModeSafe`; tự động dừng phát nhạc MP3, đóng UDP stream, giải phóng buffer trước khi nạp giao diện mới. |
 | **4. Quản lý Bộ nhớ (Heap & PSRAM)** | Nguy cơ phân mảnh bộ nhớ khi chạy nhiều ngày liên tục. | **Memory Watermark Monitor**: Giám sát liên tục `MinFreeHeap`, `MinFreePsram`, `MaxAllocHeap` và bộ đếm lỗi cấp phát `allocFailures` trong `HardwareManager`, đồng bộ lên Web `/api/system_info`. |
 | **5. Nhật Ký Hoạt Động Real-time** | Con trỏ xả thẻ nhớ trùng với con trỏ đọc web gây trắng bảng log; chưa có visual terminal cho bản sao số. | **Decoupled PSRAM History & Sci-Fi Terminal Engine (v3.2.1)**: Tách rời `s_historyCount` khỏi `s_sdFlushTail`; Fallback 8KB SD khi khởi động; Web Terminal chuẩn Sci-Fi (3 theme Matrix/Cyberpunk/Pip-Boy, CRT Scanlines, Client-side filter, hàm tái sử dụng `createSciFiLogTerminal` cho tab 3D). |
+| **6. Gộp Chẩn Đoán & Menu S40 (v3.2.2)** | Quá nhiều icon dàn trải (test thẻ nhớ riêng, test ngoại vi riêng); "Xu hướng" thiếu trực quan trên Web. | **Unified Hardware Diagnostics & 15-App Grid**: Gộp test thẻ nhớ và test ngoại vi vào 1 icon "Sóng âm" (Mode 3) chuyển trang bằng phím ◄/►; đổi tên "Xu hướng" thành "Hệ thống" với icon Biểu đồ cột Neon (Bar Chart); bổ sung giao diện Web Demo cho Mode 19. |
+| **7. Đồng Bộ Giờ Real-Time Khởi Động (v3.2.2)** | Lấy giờ NTP sau khởi động bị trễ lâu, hiển thị đồng hồ giả lập `00:35` nhiều phút. | **Instant SNTP Anycast Sync (TimeManager)**: Sử dụng các máy chủ Google & Cloudflare Anycast tại VN; thiết lập chế độ `SNTP_SYNC_MODE_IMMED`; kích hoạt và bắt gói tin ngay trong lúc kết nối Wi-Fi (~200ms), triệt tiêu hoàn toàn độ trễ khi khởi động. |
 
 ---
 

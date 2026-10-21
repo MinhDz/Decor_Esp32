@@ -14,6 +14,7 @@
 #include "TelemetryManager.h"
 #include "TaskProfiler.h"
 #include "SystemLogger.h"
+#include "TimeManager.h"
 
 void setup() {
   Serial.begin(115200);
@@ -51,6 +52,9 @@ void setup() {
   // 1F. Khởi tạo bộ đo đạc hiệu năng vòng lặp chính (Task Profiler)
   TaskProfiler::init();
 
+  // 1G. Khởi tạo Trình quản lý Thời gian Thực (SNTP tức thì GMT+7)
+  TimeManager::init();
+
   // 2. Khởi chạy Hệ thống 4 Màn hình ST7789 + Mic INMP441 + Cảm biến SHT31 + 7 Phím Bấm DIO
   ModuleTestRunner::init();
 
@@ -65,6 +69,7 @@ void setup() {
 
   // 5. Nếu đã kết nối Wi-Fi, tự động kiểm tra OTA và thông tin kích hoạt XiaoZhi Cloud
   if (WifiManager::isConnected()) {
+    TimeManager::syncNow(true);
     Serial.println("🌐 Đang kiểm tra OTA và lấy thông tin xác thực từ XiaoZhi Cloud...");
     XiaoZhiClient::queryOTA(true);
     WeatherManager::refreshNow();

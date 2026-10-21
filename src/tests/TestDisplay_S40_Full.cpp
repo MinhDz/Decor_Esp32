@@ -18,6 +18,7 @@
 #include "WeatherManager.h"
 #include "TelemetryManager.h"
 #include "SystemLogger.h"
+#include "TimeManager.h"
 #include <SPI.h>
 #include <WiFi.h>
 #include <LittleFS.h>
@@ -1158,8 +1159,11 @@ namespace TestDisplay {
 
   // Lấy thời gian hiện tại (từ NTP nếu đã đồng bộ, hoặc đếm từ mốc mặc định)
   static void getCurrentDateTime(int& hour, int& minute, int& second, int& wday, int& day, int& month, int& year) {
+    if (TimeManager::getDateTime(hour, minute, second, wday, day, month, year)) {
+      return;
+    }
     struct tm timeinfo;
-    if (ntpConfigured && getLocalTime(&timeinfo, 5)) {
+    if (getLocalTime(&timeinfo, 5)) {
       hour   = timeinfo.tm_hour;
       minute = timeinfo.tm_min;
       second = timeinfo.tm_sec;
@@ -2136,6 +2140,8 @@ namespace TestDisplay {
     }
   }
 
+  static int s40DiagSubPage = 0; // 0: Ngoại vi & Sóng âm, 1: Thông số Thẻ nhớ SD
+
   // Vẽ Chế độ 3: Biểu Đồ Sóng Âm & Cảm Biến Môi Trường (Chính thức)
   static void drawHardwareDiagScreen(bool fullRedraw = true) {
     if (!tft) return;
@@ -2157,9 +2163,12 @@ namespace TestDisplay {
       tft->setTextSize(1);
       tft->setCursor(10, 8);
       tft->print("BIỂU ĐỒ SÓNG ÂM & CẢM BIẾN");
+      tft->setTextColor(C_NEON_CYAN);
+      tft->setCursor(w - 74, 8);
+      tft->print("[◄ 1/2 ►]");
       tft->setTextColor(C_YELLOW);
       tft->setCursor(10, 18);
-      tft->print("Nhiệt ẩm phòng + Sóng âm + Phím bấm");
+      tft->print("Nhiệt ẩm + Mic + Phím (Bấm ◄/► xem SD)");
 
       // Khung Card 1: Nhiệt độ & Độ ẩm (y=31..85)
       tft->fillRoundRect(6, 31, w - 12, 54, 5, C_CARD_BG);
@@ -2615,17 +2624,7 @@ namespace TestDisplay {
         tft->fillRect(cx + i - 1, cy - 1 - bh / 2, 2, bh, C_NEON_CYAN);
       }
     } else if (idx == 11) {
-      // 11: THẺ NHỚ SD (Biểu tượng thông tin Thẻ nhớ MicroSD)
-      tft->drawRoundRect(cx - 16, cy - 11, 32, 20, 3, C_NEON_GREEN);
-      tft->setTextSize(1);
-      tft->setTextColor(C_YELLOW);
-      tft->setCursor(cx - 11, cy - 8);
-      tft->print("SD");
-      tft->setTextColor(C_NEON_CYAN);
-      tft->setCursor(cx - 11, cy + 1);
-      tft->print("INFO");
-    } else if (idx == 12) {
-      // 12: TRÒ CHƠI GIẢI TRÍ (Tay cầm chơi Game cổ điển D-Pad + Nút A/B Neon)
+      // 11: TRÒ CHƠI GIẢI TRÍ (Tay cầm chơi Game cổ điển D-Pad + Nút A/B Neon)
       tft->fillRoundRect(cx - 16, cy - 10, 32, 18, 6, C_DARK_BG);
       tft->drawRoundRect(cx - 16, cy - 10, 32, 18, 6, C_NEON_PINK);
       // Hai báng tay cầm dưới
@@ -2639,8 +2638,8 @@ namespace TestDisplay {
       // 2 nút bấm A/B bên phải
       tft->fillCircle(cx + 6,  cy,     2, C_NEON_CYAN);
       tft->fillCircle(cx + 11, cy - 3, 2, C_NEON_GREEN);
-    } else if (idx == 13) {
-      // 13: MÃ QR CÀI ĐẶT WI-FI (Icon Mã QR với 3 mắt vuông định vị Neon Cyan)
+    } else if (idx == 12) {
+      // 12: MÃ QR CÀI ĐẶT WI-FI (Icon Mã QR với 3 mắt vuông định vị Neon Cyan)
       tft->fillRoundRect(cx - 15, cy - 13, 30, 26, 3, C_CARD_BG);
       tft->drawRoundRect(cx - 15, cy - 13, 30, 26, 3, C_NEON_CYAN);
       // 3 mắt vuông định vị
@@ -2655,29 +2654,35 @@ namespace TestDisplay {
       tft->fillRect(cx + 2, cy - 2, 2, 2, C_NEON_GREEN);
       tft->fillRect(cx - 2, cy + 4, 3, 3, C_WHITE);
       tft->fillRect(cx + 6, cy + 5, 3, 3, C_YELLOW);
-    } else if (idx == 14) {
-      // 14: KẾT NỐI WI-FI (Biểu tượng Quạt sóng Wi-Fi phát sóng tròn Neon)
+    } else if (idx == 13) {
+      // 13: KẾT NỐI WI-FI (Biểu tượng Quạt sóng Wi-Fi phát sóng tròn Neon)
       tft->fillRoundRect(cx - 15, cy - 13, 30, 26, 4, C_DARK_BG);
       tft->drawRoundRect(cx - 15, cy - 13, 30, 26, 4, C_NEON_GREEN);
       drawWifiArcIcon(cx, cy + 6, -55, true, C_NEON_GREEN, 0x31A6);
       tft->fillCircle(cx, cy + 6, 2, C_YELLOW);
-    } else if (idx == 15) {
-      // 15: XU HƯỚNG TELEMETRY (Biểu đồ đường / Trend chart Neon 1MB PSRAM)
+    } else if (idx == 14) {
+      // 14: HỆ THỐNG (Biểu đồ cột Neon / Bar Chart Telemetry 1MB PSRAM)
       tft->fillRoundRect(cx - 15, cy - 13, 30, 26, 4, C_DARK_BG);
       tft->drawRoundRect(cx - 15, cy - 13, 30, 26, 4, C_NEON_AMBER);
-      // Trục tọa độ
-      tft->drawLine(cx - 11, cy + 8, cx + 11, cy + 8, C_SLATE);
-      tft->drawLine(cx - 11, cy - 8, cx - 11, cy + 8, C_SLATE);
-      // Đường biểu đồ neon
-      tft->drawLine(cx - 10, cy + 5, cx - 5, cy + 2, C_NEON_CYAN);
-      tft->drawLine(cx - 5, cy + 2, cx, cy - 4, C_NEON_CYAN);
-      tft->drawLine(cx, cy - 4, cx + 5, cy + 1, C_NEON_CYAN);
-      tft->drawLine(cx + 5, cy + 1, cx + 10, cy - 6, C_NEON_CYAN);
-      tft->fillCircle(cx + 10, cy - 6, 2, C_NEON_AMBER);
+      // Đường trục hoành đáy
+      tft->drawFastHLine(cx - 12, cy + 9, 24, C_SLATE);
+      // 4 cột biểu đồ neon với độ cao khác nhau
+      // Cột 1: Vàng
+      tft->fillRect(cx - 10, cy + 1, 4, 8, C_NEON_AMBER);
+      tft->drawFastHLine(cx - 10, cy + 1, 4, C_YELLOW);
+      // Cột 2: Xanh Cyan
+      tft->fillRect(cx - 4, cy - 5, 4, 14, C_NEON_CYAN);
+      tft->drawFastHLine(cx - 4, cy - 5, 4, C_WHITE);
+      // Cột 3: Xanh Lá
+      tft->fillRect(cx + 2, cy - 8, 4, 17, C_NEON_GREEN);
+      tft->drawFastHLine(cx + 2, cy - 8, 4, 0x97F5);
+      // Cột 4: Hồng/Tím
+      tft->fillRect(cx + 8, cy - 2, 4, 11, C_NEON_PINK);
+      tft->drawFastHLine(cx + 8, cy - 2, 4, C_WHITE);
     }
   }
 
-  static const int S40_MENU_COUNT = 16;
+  static const int S40_MENU_COUNT = 15;
   static int s40MenuScrollRow     = 0; // Hàng bắt đầu hiển thị trên khung nhìn 4x3 (0 = hiện hàng 0..2, 1 = cuộn xuống hiện hàng 1..3)
   static int lastDrawnMenuCursor  = -1;
   static int lastDrawnMenuScroll  = -1;
@@ -2685,8 +2690,8 @@ namespace TestDisplay {
   static const char* S40_MENU_TITLES[S40_MENU_COUNT] = {
     "Hình nền", "Cài đặt",  "Máy tính", "Thư viện",
     "Bộ nhớ",   "Trợ lý AI","Âm nhạc",  "Đồng hồ",
-    "Lịch",     "Thiết bị", "Sóng âm",  "Thẻ nhớ",
-    "Trò chơi", "Mã QR",    "Kết nối",  "Xu hướng"
+    "Lịch",     "Thiết bị", "Sóng âm",  "Trò chơi",
+    "Mã QR",    "Kết nối",  "Hệ thống"
   };
   static const char* S40_MENU_DESCS[S40_MENU_COUNT] = {
     "1. Tùy chỉnh Hình nền & Đồng hồ chờ",
@@ -2699,12 +2704,11 @@ namespace TestDisplay {
     "8. Đồng hồ: Báo thức, Bấm giờ & Hẹn giờ",
     "9. Lịch Vạn Niên & Tra cứu Ngày tháng",
     "10. Thông tin Thiết bị & Kết nối Mạng",
-    "11. Biểu đồ Sóng âm & Cảm biến phòng",
-    "12. Thông tin Chi tiết Thẻ nhớ MicroSD",
-    "13. Trò chơi: Rắn săn mồi, Flappy & Xếp gạch",
-    "14. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý",
-    "15. Quản Lý Mạng Wi-Fi Đã Lưu & Chuyển Sóng",
-    "16. Biểu đồ Xu hướng Telemetry (1MB PSRAM)"
+    "11. Biểu đồ Sóng âm, Cảm biến & Thẻ SD",
+    "12. Trò chơi: Rắn săn mồi, Flappy & Xếp gạch",
+    "13. Quét Mã QR Cài Đặt Wi-Fi & Quản Lý",
+    "14. Quản Lý Mạng Wi-Fi Đã Lưu & Chuyển Sóng",
+    "15. Giám Sát Hệ Thống Telemetry (1MB PSRAM)"
   };
 
   static void drawSymbianMenuBanner() {
@@ -4540,6 +4544,10 @@ namespace TestDisplay {
     if (fullRedraw) {
       tft->fillRect(0, 0, W, 296, C_BLACK);
       drawSymbianHeader("TRẠNG THÁI THẺ NHỚ SD");
+      tft->setTextSize(1);
+      tft->setTextColor(C_NEON_GREEN);
+      tft->setCursor(W - 74, 8);
+      tft->print("[◄ 2/2 ►]");
     }
 
     // Khung 1: Sơ đồ đấu nối chân Thẻ nhớ SD & Mức điện áp thực tế (y = 26 .. 140)
@@ -8186,7 +8194,10 @@ namespace TestDisplay {
     if (currentMode == 0) drawStandbyScreenFull();
     else if (currentMode == 1 || currentMode == 11) drawXiaoZhiAssistantScreen(true);
     else if (currentMode == 2) drawPcHudScreen(true);
-    else if (currentMode == 3) drawHardwareDiagScreen(true);
+    else if (currentMode == 3) {
+      if (s40DiagSubPage == 1) drawSdCardTestScreen(true);
+      else drawHardwareDiagScreen(true);
+    }
     else if (currentMode == 4) drawSymbianMenuScreen(true);
     else if (currentMode == 5) drawWallpaperAppScreen();
     else if (currentMode == 6) drawSettingsAppScreen();
@@ -8655,40 +8666,47 @@ namespace TestDisplay {
     }
 
     // Điều hướng tùy theo màn hình hiện tại
-    if (currentMode == 0 || currentMode == 3) {
+    if (currentMode == 0) {
       if (keyIndex == 0) {
         currentMode = 4;
         refreshActiveScreen();
-      } else if (keyIndex == 3) { // LEFT
-        if (currentMode == 0) currentMode = 3;
-        else if (currentMode == 3) currentMode = 2;
+      } else if (keyIndex == 3) { // LEFT từ Standby -> vào Sóng âm (Mode 3)
+        s40DiagSubPage = 0;
+        currentMode = 3;
         refreshActiveScreen();
-      } else if (keyIndex == 4) { // RIGHT
-        if (currentMode == 0) {
-          enterXiaoZhiAssistantMode(false);
-        } else if (currentMode == 3) {
-          currentMode = 0;
-          refreshActiveScreen();
-        }
+      } else if (keyIndex == 4) { // RIGHT từ Standby -> XiaoZhi AI
+        enterXiaoZhiAssistantMode(false);
       } else if (keyIndex == 6) {
-        if (currentMode != 0) {
-          currentMode = 0;
+        // Đang ở Màn hình chờ (Mode 0) bấm EXIT -> Khóa màn hình nhanh vào Always On Display (AOD) hoặc Sleep!
+        isScreenSleeping = true;
+        if (alwaysOnDisplayEnabled) {
+          ledcWrite(0, 4);
+          tft->fillScreen(C_BLACK);
+          drawAlwaysOnDisplayScreen(true);
+          Serial.println("🌙 [AOD] Khóa màn hình nhanh vào Always On Display (AOD) bằng phím EXIT!");
+        } else {
+          tft->fillScreen(C_BLACK);
+          ledcWrite(0, 0);
+          Serial.println("🌙 [SLEEP] Tắt màn hình nhanh bằng phím EXIT!");
+        }
+        return;
+      }
+    } else if (currentMode == 3) {
+      if (keyIndex == 3 || keyIndex == 4) { // LEFT / RIGHT: Chuyển đổi giữa Test Ngoại Vi & Test Thẻ Nhớ SD
+        s40DiagSubPage = (s40DiagSubPage == 0) ? 1 : 0;
+        TestAudio::playKeyBeep();
+        refreshActiveScreen();
+      } else if (keyIndex == 0) { // OK
+        if (s40DiagSubPage == 1) {
+          showSymbianToast("DANG QUET LAI THE SD...");
+          TestSDCard::runFullElectricalAndSpiProbe();
           refreshActiveScreen();
         } else {
-          // Đang ở Màn hình chờ (Mode 0) bấm EXIT -> Khóa màn hình nhanh vào Always On Display (AOD) hoặc Sleep!
-          isScreenSleeping = true;
-          if (alwaysOnDisplayEnabled) {
-            ledcWrite(0, 4);
-            tft->fillScreen(C_BLACK);
-            drawAlwaysOnDisplayScreen(true);
-            Serial.println("🌙 [AOD] Khóa màn hình nhanh vào Always On Display (AOD) bằng phím EXIT!");
-          } else {
-            tft->fillScreen(C_BLACK);
-            ledcWrite(0, 0);
-            Serial.println("🌙 [SLEEP] Tắt màn hình nhanh bằng phím EXIT!");
-          }
-          return;
+          TestAudio::playOkChime();
         }
+      } else if (keyIndex == 6) { // EXIT: Về Menu S40
+        currentMode = 4;
+        refreshActiveScreen();
       }
     } else if (currentMode == 2) {
       if (keyIndex == 3) { // LEFT: từ PC HUD sang XiaoZhi AI (Mode 1)
@@ -8739,11 +8757,10 @@ namespace TestDisplay {
         else if (s40MenuCursor == 7) { currentMode = 13; } // 8. Đồng hồ
         else if (s40MenuCursor == 8) { currentMode = 14; } // 9. Lịch vạn niên
         else if (s40MenuCursor == 9) currentMode = 8;  // 10. Thiết bị
-        else if (s40MenuCursor == 10) currentMode = 3; // 11. Sóng âm
-        else if (s40MenuCursor == 11) currentMode = 9; // 12. Thẻ nhớ
-        else if (s40MenuCursor == 12) { s40GameActiveId = 0; currentMode = 15; } // 13. Trung tâm Trò chơi (3 Game)
-        else if (s40MenuCursor == 13) { currentMode = 16; } // 14. Mã QR Cài Đặt Wi-Fi
-        else if (s40MenuCursor == 14) {
+        else if (s40MenuCursor == 10) { s40DiagSubPage = 0; currentMode = 3; } // 11. Sóng âm & Thẻ nhớ
+        else if (s40MenuCursor == 11) { s40GameActiveId = 0; currentMode = 15; } // 12. Trò chơi (3 Game)
+        else if (s40MenuCursor == 12) { currentMode = 16; } // 13. Mã QR Cài Đặt Wi-Fi
+        else if (s40MenuCursor == 13) {
           s40WifiConnCursor = 0;
           s40WifiConnScroll = 0;
           s_savedWifiListCache = WifiManager::getSavedWifiWithStatus();
@@ -8754,10 +8771,10 @@ namespace TestDisplay {
             }
           }
           currentMode = 18;
-        } // 15. Quản Lý Kết Nối Wi-Fi
-        else if (s40MenuCursor == 15) {
+        } // 14. Quản Lý Kết Nối Wi-Fi
+        else if (s40MenuCursor == 14) {
           currentMode = 19;
-        } // 16. Biểu đồ Xu hướng Telemetry 1MB PSRAM
+        } // 15. Biểu đồ Hệ Thống Telemetry 1MB PSRAM
         refreshActiveScreen();
       } else if (keyIndex == 5) { // MENU -> Nếu đang ở icon Trợ lý AI: Buộc lấy mã OTP mới!
         if (s40MenuCursor == 5) {
@@ -10660,7 +10677,7 @@ namespace TestDisplay {
   String getScreenModeName() {
     if (currentMode == 1 || currentMode == 11) return "xiaozhi";
     if (currentMode == 2) return "pchud";
-    if (currentMode == 3) return "diag";
+    if (currentMode == 3) return (s40DiagSubPage == 1) ? "sd_test" : "diag";
     if (currentMode == 15) return "games";
     if (currentMode == 16) return "qr_wifi";
     if (currentMode == 17) return "stream";
@@ -10682,7 +10699,7 @@ namespace TestDisplay {
     if (currentMode == 0) return "Màn Hình Chờ";
     if (currentMode == 1 || currentMode == 11) return "XiaoZhi AI";
     if (currentMode == 2) return "PC Status HUD";
-    if (currentMode == 3) return "Chẩn Đoán DIO & ADC";
+    if (currentMode == 3) return (s40DiagSubPage == 1) ? "Kiểm Tra Thẻ SD" : "Chẩn Đoán Ngoại Vi";
     if (currentMode == 4) return "Menu Symbian S40";
     if (currentMode == 5) return "Đồng Hồ & Báo Thức";
     if (currentMode == 6) return "Cài Đặt Hệ Thống";
@@ -10697,7 +10714,7 @@ namespace TestDisplay {
     if (currentMode == 16) return "Mã QR Wi-Fi";
     if (currentMode == 17) return "Stream Video";
     if (currentMode == 18) return "Kết Nối Wi-Fi";
-    if (currentMode == 19) return "Xu Hướng Telemetry";
+    if (currentMode == 19) return "Hệ Thống Telemetry";
     return "Symbian OS";
   }
 
@@ -10924,10 +10941,12 @@ namespace TestDisplay {
     }
 
     bool wifiNow = (WiFi.status() == WL_CONNECTED);
-    if (wifiNow && !ntpConfigured) {
-      configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov", "time.google.com");
-      ntpConfigured = true;
-      Serial.println("🕒 [NTP] Đã kích hoạt đồng bộ thời gian thực GMT+7 (pool.ntp.org)");
+    if (wifiNow && !TimeManager::isSynced()) {
+      static unsigned long lastNtpRetry = 0;
+      if (now - lastNtpRetry >= 10000) {
+        lastNtpRetry = now;
+        TimeManager::syncNow(false);
+      }
     }
 
     String currentSsid = wifiNow ? WiFi.SSID() : "";
@@ -10987,7 +11006,13 @@ namespace TestDisplay {
 
     if (currentMode == 3 && (now - lastAnimTick >= 65)) {
       lastAnimTick = now;
-      drawHardwareDiagScreen(false);
+      if (s40DiagSubPage == 1) {
+        if (now - lastSecondTick >= 1000) {
+          drawSdCardTestScreen(false);
+        }
+      } else {
+        drawHardwareDiagScreen(false);
+      }
     } else if (currentMode == 12 && s40MediaSubState == 0 && (now - lastAnimTick >= 65)) {
       lastAnimTick = now;
       if (s40MediaPlaying) {
