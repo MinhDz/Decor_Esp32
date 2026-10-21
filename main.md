@@ -1,6 +1,6 @@
 # SPACE OS — TRẠM DECOR VŨ TRỤ (ESP32-S3 FREEFORM COPPER SCULPTURE)
 ## Tài liệu Kiến trúc Hệ thống & Hiện trạng Dự án Chính thức
-*Phiên bản Firmware: Space OS v3.2.0 | Cập nhật: 21/10/2026*
+*Phiên bản Firmware: Space OS v3.2.1 | Cập nhật: 21/10/2026*
 
 ---
 
@@ -122,7 +122,7 @@ flowchart TD
 
 ---
 
-## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.0)
+## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.1)
 
 Dựa trên quá trình vận hành thực tế, 5 hạng mục kiến trúc then chốt đã được nâng cấp toàn diện:
 
@@ -132,7 +132,7 @@ Dựa trên quá trình vận hành thực tế, 5 hạng mục kiến trúc the
 | **2. Đồng hồ & Thời tiết Màn hình chờ** | Thay đổi nhiệt độ phòng hay giây đồng hồ có thể gây giải mã lại ảnh nền. | **Micro-Region Update**: Duy trì `clockCanvas` 240x44; bổ sung `drawStandbyWeatherPillOnly()` vẽ riêng viên thuốc 196x30 ($y=256..286$), giữ nguyên 100% hình nền JPEG không bị chớp nháy. |
 | **3. Luồng Chuyển Màn hình** | Chuyển app đột ngột trong lúc phát nhạc hay stream có thể gây nghẽn tài nguyên. | **State Decoupling**: Bộ ba vòng đời `onExitMode`, `onEnterMode`, `switchModeSafe`; tự động dừng phát nhạc MP3, đóng UDP stream, giải phóng buffer trước khi nạp giao diện mới. |
 | **4. Quản lý Bộ nhớ (Heap & PSRAM)** | Nguy cơ phân mảnh bộ nhớ khi chạy nhiều ngày liên tục. | **Memory Watermark Monitor**: Giám sát liên tục `MinFreeHeap`, `MinFreePsram`, `MaxAllocHeap` và bộ đếm lỗi cấp phát `allocFailures` trong `HardwareManager`, đồng bộ lên Web `/api/system_info`. |
-| **5. Nhật Ký Hoạt Động (System Logs)** | Thiếu nhật ký tập trung để theo dõi lịch sử lỗi, kết nối mạng và hành vi module. | **Smartphone-Style System Logger**: Bộ đệm kép Octal PSRAM 128KB non-blocking, ghi tuần tự vào thẻ nhớ MicroSD (`/logs/sys_YYYYMMDD.log`), xoay vòng khi đạt 512KB, tự động chụp Snapshot toàn hệ thống định kỳ 10 phút. |
+| **5. Nhật Ký Hoạt Động Real-time** | Con trỏ xả thẻ nhớ trùng với con trỏ đọc web gây trắng bảng log; chưa có visual terminal cho bản sao số. | **Decoupled PSRAM History & Sci-Fi Terminal Engine (v3.2.1)**: Tách rời `s_historyCount` khỏi `s_sdFlushTail`; Fallback 8KB SD khi khởi động; Web Terminal chuẩn Sci-Fi (3 theme Matrix/Cyberpunk/Pip-Boy, CRT Scanlines, Client-side filter, hàm tái sử dụng `createSciFiLogTerminal` cho tab 3D). |
 
 ---
 

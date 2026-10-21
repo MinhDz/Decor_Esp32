@@ -838,6 +838,10 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     }
   }
 
+  window.rawLogLines = [];
+  window.currentLogTheme = 'cyberpunk';
+  let logPollTimer = null;
+
   function injectLogsTabAndPage() {
     const navTabs = document.getElementById('nav-tabs');
     if (!navTabs || document.getElementById('tab-btn-logs')) return;
@@ -855,21 +859,100 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     sec.id = 'tab-logs';
     sec.className = 'section';
     sec.innerHTML = `
+      <style>
+        .terminal-theme-matrix {
+          --term-bg: #020d06;
+          --term-text: #22c55e;
+          --term-accent: #4ade80;
+          --term-border: #15803d;
+          --term-glow: 0 0 12px rgba(34,197,94,0.3);
+          --term-subtle: #166534;
+        }
+        .terminal-theme-cyberpunk {
+          --term-bg: #050b14;
+          --term-text: #38bdf8;
+          --term-accent: #00f0ff;
+          --term-border: #0369a1;
+          --term-glow: 0 0 12px rgba(0,240,255,0.3);
+          --term-subtle: #075985;
+        }
+        .terminal-theme-pipboy {
+          --term-bg: #0e0700;
+          --term-text: #fbbf24;
+          --term-accent: #ffb000;
+          --term-border: #b45309;
+          --term-glow: 0 0 12px rgba(251,191,36,0.35);
+          --term-subtle: #78350f;
+        }
+        .crt-scanlines {
+          position: relative;
+        }
+        .crt-scanlines::after {
+          content: " ";
+          display: block;
+          position: absolute;
+          top: 0; left: 0; bottom: 0; right: 0;
+          background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.22) 50%), linear-gradient(90deg, rgba(255, 0, 0, 0.03), rgba(0, 255, 0, 0.01), rgba(0, 0, 255, 0.03));
+          z-index: 2;
+          background-size: 100% 3px, 4px 100%;
+          pointer-events: none;
+          border-radius: 8px;
+        }
+        @keyframes pulse-dot {
+          0%, 100% { transform: scale(1); opacity: 1; }
+          50% { transform: scale(1.3); opacity: 0.6; }
+        }
+        @keyframes blink-cursor {
+          0%, 49% { opacity: 1; }
+          50%, 100% { opacity: 0; }
+        }
+        .term-cursor {
+          display: inline-block;
+          animation: blink-cursor 0.9s infinite;
+          font-weight: 700;
+        }
+        .live-dot {
+          display: inline-block;
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: #10b981;
+          animation: pulse-dot 1.5s infinite;
+          box-shadow: 0 0 8px #10b981;
+        }
+      </style>
+
       <div class="designer-panel" style="width:100%;max-width:100%;">
+        <!-- THANH TIÊU ĐỀ & TRẠNG THÁI REAL-TIME -->
         <div class="designer-title" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-          <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
-            <span>📜 Nhật Ký Hoạt Động Toàn Hệ Thống (System Logs)</span>
-            <span id="log-sd-badge" style="padding:3px 9px;border-radius:12px;font-size:0.72rem;background:#064e3b;color:#34d399;font-weight:600;">💾 Thẻ nhớ: Đang tải...</span>
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+            <span style="display:flex;align-items:center;gap:6px;font-weight:700;">
+              <span class="live-dot" id="log-live-indicator"></span>
+              <span>TERMINAL REAL-TIME LOGS</span>
+            </span>
+            <span id="log-sd-badge" style="padding:3px 9px;border-radius:12px;font-size:0.72rem;background:#064e3b;color:#34d399;font-weight:600;">💾 Thẻ nhớ: Đang kết nối...</span>
             <span id="log-stat-badge" style="padding:3px 9px;border-radius:12px;font-size:0.72rem;background:#1e293b;color:#94a3b8;font-weight:600;">0 dòng</span>
             <span id="log-err-badge" style="padding:3px 9px;border-radius:12px;font-size:0.72rem;background:#7f1d1d;color:#fca5a5;font-weight:600;display:none;">0 lỗi</span>
+            <span id="log-fps-badge" style="padding:3px 9px;border-radius:12px;font-size:0.72rem;background:#1e1b4b;color:#a5b4fc;font-weight:600;">Độ trễ: --</span>
           </div>
+
+          <!-- THANH ĐIỀU KHIỂN & CÔNG CỤ -->
           <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;">
-            <select id="log-level-filter" onchange="window.fetchSystemLogs()" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:5px 8px;font-size:0.75rem;">
+            <!-- Bộ chọn Theme Sci-Fi -->
+            <select id="log-theme-select" onchange="window.setLogTerminalTheme(this.value)" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:0.75rem;">
+              <option value="cyberpunk">🔵 Cyberpunk Cyan</option>
+              <option value="matrix">🟢 Matrix Green</option>
+              <option value="pipboy">🟡 Fallout Pip-Boy</option>
+            </select>
+
+            <!-- Lọc Cấp Độ -->
+            <select id="log-level-filter" onchange="window.fetchSystemLogs()" style="background:#0f172a;color:#e2e8f0;border:1px solid #334155;border-radius:6px;padding:4px 8px;font-size:0.75rem;">
               <option value="all">Tất cả cấp độ</option>
               <option value="info">INFO trở lên</option>
               <option value="warn">WARN trở lên</option>
               <option value="error">Chỉ ERROR</option>
             </select>
+
             <button class="btn-secondary" style="width:auto;padding:5px 10px;font-size:0.74rem;" onclick="window.takeLogSnapshot()">📸 Snapshot</button>
             <button class="btn-secondary" style="width:auto;padding:5px 10px;font-size:0.74rem;" onclick="window.downloadSysLogs()">📥 Tải File (.txt)</button>
             <button class="btn-secondary" style="width:auto;padding:5px 10px;font-size:0.74rem;" onclick="window.clearSysLogs()">🧹 Xóa</button>
@@ -877,20 +960,33 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           </div>
         </div>
 
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;margin-bottom:6px;font-size:0.75rem;color:#94a3b8;flex-wrap:wrap;gap:8px;">
-          <div id="log-file-desc" style="color:#64748b;">Lưu trữ: /logs/sys_YYYYMMDD.log (Tự động xoay vòng khi đạt 512KB)</div>
+        <!-- THANH TÌM KIẾM TỪ KHÓA & TÙY CHỌN HIỂN THỊ -->
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-top:8px;margin-bottom:8px;font-size:0.75rem;color:#94a3b8;flex-wrap:wrap;gap:8px;">
+          <!-- Hộp tìm kiếm tức thì -->
+          <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:240px;max-width:420px;">
+            <input type="text" id="log-search-input" placeholder="🔍 Lọc nhanh (VD: WIFI, SHT31, SNAPSHOT, SD, ERROR)..." oninput="window.applyLogSearchFilter()" style="width:100%;background:#0f172a;border:1px solid #334155;color:#f8fafc;padding:5px 10px;border-radius:6px;font-size:0.76rem;" />
+          </div>
+
+          <div id="log-file-desc" style="color:#64748b;font-size:0.72rem;">Đang kết nối...</div>
+
           <div style="display:flex;gap:12px;align-items:center;">
+            <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
+              <input type="checkbox" id="log-scanlines" onchange="window.toggleCrtScanlines(this.checked)" checked style="accent-color:#38bdf8;"> CRT Scanlines
+            </label>
             <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
               <input type="checkbox" id="log-auto-scroll" checked style="accent-color:#38bdf8;"> Tự động cuộn
             </label>
             <label style="cursor:pointer;display:flex;align-items:center;gap:4px;">
-              <input type="checkbox" id="log-auto-refresh" checked style="accent-color:#38bdf8;"> Tự động cập nhật (3s)
+              <input type="checkbox" id="log-auto-refresh" checked style="accent-color:#38bdf8;"> Real-time (1.5s)
             </label>
           </div>
         </div>
 
-        <div id="log-terminal" style="width:100%;height:460px;background:#050811;border:1px solid #1e293b;border-radius:8px;padding:12px;box-sizing:border-box;overflow-y:auto;overflow-x:auto;font-family:Consolas, 'Cascadia Code', 'Fira Code', Menlo, Monaco, monospace;font-size:0.76rem;line-height:1.45;color:#e2e8f0;white-space:pre-wrap;box-shadow:inset 0 0 15px rgba(0,0,0,0.6);">
-          <div style="color:#64748b;">Đang kết nối tới trạm Decor ESP32 và nạp nhật ký hoạt động...</div>
+        <!-- MÀN HÌNH TERMINAL DOS / SCI-FI CONSOLE CHÍNH -->
+        <div id="log-terminal-wrap" class="terminal-theme-cyberpunk crt-scanlines" style="position:relative;width:100%;border-radius:8px;box-shadow:var(--term-glow);">
+          <div id="log-terminal" style="width:100%;height:480px;background:var(--term-bg);border:1px solid var(--term-border);border-radius:8px;padding:14px;box-sizing:border-box;overflow-y:auto;overflow-x:auto;font-family:Consolas, 'Cascadia Code', 'Fira Code', Menlo, Monaco, monospace;font-size:0.76rem;line-height:1.45;color:var(--term-text);white-space:pre-wrap;box-shadow:inset 0 0 25px rgba(0,0,0,0.85);transition:background 0.3s, color 0.3s, border-color 0.3s;">
+            <div style="color:#64748b;">Đang kết nối tới trạm Decor ESP32 và nạp nhật ký hoạt động...</div>
+          </div>
         </div>
       </div>
     `;
@@ -903,7 +999,142 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     }
   }
 
-  let logPollTimer = null;
+  function escapeHtml(text) {
+    if (!text) return '';
+    return text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  }
+
+  window.setLogTerminalTheme = function(themeName) {
+    window.currentLogTheme = themeName;
+    const wrap = document.getElementById('log-terminal-wrap');
+    if (wrap) {
+      wrap.classList.remove('terminal-theme-matrix', 'terminal-theme-cyberpunk', 'terminal-theme-pipboy');
+      wrap.classList.add('terminal-theme-' + themeName);
+    }
+    const wrap3d = document.getElementById('hud-3d-terminal-wrap');
+    if (wrap3d) {
+      wrap3d.classList.remove('terminal-theme-matrix', 'terminal-theme-cyberpunk', 'terminal-theme-pipboy');
+      wrap3d.classList.add('terminal-theme-' + themeName);
+    }
+    window.renderLogLines();
+  };
+
+  window.toggleCrtScanlines = function(enable) {
+    const wrap = document.getElementById('log-terminal-wrap');
+    if (wrap) {
+      if (enable) wrap.classList.add('crt-scanlines');
+      else wrap.classList.remove('crt-scanlines');
+    }
+  };
+
+  window.formatSingleLogLine = function(lineStr) {
+    if (!lineStr) return '';
+
+    if (lineStr.includes('====')) {
+      return '<div style="color:var(--term-accent);font-weight:700;margin:6px 0;opacity:0.95;text-shadow:0 0 8px var(--term-accent);">' +
+             escapeHtml(lineStr) + '</div>';
+    }
+
+    let m = lineStr.match(/^(\S+(?:\s+\S+)?)\s+\[(D|I|W|E|F)\]\s+\[([A-Za-z0-9_]+)\]\s*(.*)$/);
+    if (!m) {
+      return '<div style="color:var(--term-text);opacity:0.9;">' + escapeHtml(lineStr) + '</div>';
+    }
+
+    let timePart = m[1];
+    let lvlChar  = m[2];
+    let tagPart  = m[3];
+    let msgPart  = m[4];
+
+    let lvlStyle = 'background:#1e293b;color:#94a3b8;';
+    let lvlText = 'INFO';
+    if (lvlChar === 'I') {
+      lvlStyle = 'background:#034d65;color:#38bdf8;font-weight:600;';
+      lvlText = 'INFO';
+    } else if (lvlChar === 'W') {
+      lvlStyle = 'background:#78350f;color:#fbbf24;font-weight:700;';
+      lvlText = 'WARN';
+    } else if (lvlChar === 'E' || lvlChar === 'F') {
+      lvlStyle = 'background:#7f1d1d;color:#fca5a5;font-weight:700;box-shadow:0 0 6px #ef4444;';
+      lvlText = (lvlChar === 'F') ? 'FATAL' : 'ERROR';
+    } else if (lvlChar === 'D') {
+      lvlStyle = 'background:#0f172a;color:#64748b;';
+      lvlText = 'DEBUG';
+    }
+
+    let tagColor = '#94a3b8';
+    if (tagPart === 'WIFI') tagColor = '#38bdf8';
+    else if (tagPart === 'SD') tagColor = '#34d399';
+    else if (tagPart === 'WEATHER') tagColor = '#facc15';
+    else if (tagPart === 'SNAPSHOT') tagColor = '#c084fc';
+    else if (tagPart === 'UI') tagColor = '#fb7185';
+    else if (tagPart === 'MEM') tagColor = '#f87171';
+    else if (tagPart === 'SYS') tagColor = '#60a5fa';
+
+    let safeMsg = escapeHtml(msgPart);
+    safeMsg = safeMsg.replace(/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/g, '<span style="color:#60a5fa;text-decoration:underline;">$1</span>');
+    safeMsg = safeMsg.replace(/\b(THANH CONG|OK)\b/g, '<span style="color:#34d399;font-weight:bold;">$1</span>');
+    safeMsg = safeMsg.replace(/\b(THAT BAI|FAIL|FAILED|LOI)\b/g, '<span style="color:#f87171;font-weight:bold;">$1</span>');
+    safeMsg = safeMsg.replace(/(\d+(?:\.\d+)?\s*(?:KB|MB|%|\*C|°C|V|FPS|km\/h))/gi, '<span style="color:var(--term-accent);font-weight:600;">$1</span>');
+
+    return '<div style="display:flex;align-items:baseline;gap:8px;padding:2px 0;line-height:1.4;">' +
+             '<span style="color:#64748b;font-size:0.70rem;flex-shrink:0;">' + escapeHtml(timePart) + '</span>' +
+             '<span style="padding:1px 5px;border-radius:4px;font-size:0.65rem;flex-shrink:0;' + lvlStyle + '">' + lvlText + '</span>' +
+             '<span style="color:' + tagColor + ';font-weight:700;font-size:0.72rem;flex-shrink:0;">[' + escapeHtml(tagPart) + ']</span>' +
+             '<span style="color:var(--term-text);word-break:break-word;flex:1;">' + safeMsg + '</span>' +
+           '</div>';
+  };
+
+  window.applyLogSearchFilter = function() {
+    window.renderLogLines();
+  };
+
+  window.renderLogLines = function() {
+    const term = document.getElementById('log-terminal');
+    if (!term) return;
+
+    const filterInput = document.getElementById('log-search-input');
+    const keyword = filterInput ? filterInput.value.trim().toLowerCase() : '';
+
+    let html = '';
+    let displayedCount = 0;
+
+    for (let i = 0; i < window.rawLogLines.length; i++) {
+      let l = window.rawLogLines[i];
+      if (keyword.length > 0 && !l.toLowerCase().includes(keyword)) {
+        continue;
+      }
+      html += window.formatSingleLogLine(l);
+      displayedCount++;
+    }
+
+    if (displayedCount === 0) {
+      if (keyword.length > 0) {
+        html = '<div style="color:#64748b;padding:8px;">(Không tìm thấy dòng nhật ký nào chứa từ khóa "' + escapeHtml(keyword) + '")</div>';
+      } else {
+        html = '<div style="color:#64748b;padding:8px;">(Chưa có bản ghi nhật ký phù hợp)</div>';
+      }
+    } else {
+      html += '<div style="margin-top:6px;color:var(--term-accent);"><span style="color:#64748b;">decor_station:~$ </span><span class="term-cursor">█</span></div>';
+    }
+
+    term.innerHTML = html;
+
+    const autoScroll = document.getElementById('log-auto-scroll');
+    if (autoScroll && autoScroll.checked) {
+      term.scrollTop = term.scrollHeight;
+    }
+
+    // Nếu có 3D terminal, đồng bộ luôn
+    const term3d = document.getElementById('hud-3d-terminal-term');
+    if (term3d) {
+      let last3d = window.rawLogLines.slice(-60);
+      let h3d = '';
+      last3d.forEach(l => { h3d += window.formatSingleLogLine(l); });
+      h3d += '<div style="color:var(--term-accent);"><span class="term-cursor">█</span></div>';
+      term3d.innerHTML = h3d;
+      term3d.scrollTop = term3d.scrollHeight;
+    }
+  };
 
   window.downloadSysLogs = function() {
     window.open('/api/logs/download', '_blank');
@@ -912,7 +1143,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   window.takeLogSnapshot = async function() {
     try {
       await fetch('/api/logs/snapshot', { method: 'POST' });
-      window.fetchSystemLogs();
+      setTimeout(window.fetchSystemLogs, 300);
     } catch(e) { console.error(e); }
   };
 
@@ -920,17 +1151,21 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     if (!confirm("Bạn có chắc chắn muốn xóa bộ đệm nhật ký hệ thống không?")) return;
     try {
       await fetch('/api/logs/clear', { method: 'POST' });
-      window.fetchSystemLogs();
+      window.rawLogLines = [];
+      window.renderLogLines();
+      setTimeout(window.fetchSystemLogs, 400);
     } catch(e) { console.error(e); }
   };
 
   window.fetchSystemLogs = async function() {
     try {
       let lvl = document.getElementById('log-level-filter') ? document.getElementById('log-level-filter').value : 'all';
+      let t0 = performance.now();
       let [resLogs, resStats] = await Promise.all([
         fetch('/api/logs?format=json&limit=150&level=' + lvl),
         fetch('/api/logs/stats')
       ]);
+      let t1 = performance.now();
 
       let logData = await resLogs.json();
       let statData = await resStats.json();
@@ -940,15 +1175,15 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
         if (statData.sd_active) {
           sdB.style.background = '#064e3b';
           sdB.style.color = '#34d399';
-          sdB.textContent = '💾 Thẻ nhớ: Đang ghi (' + (statData.written_kb || 0) + ' KB)';
+          sdB.textContent = '💾 Thẻ SD: Đang ghi (' + (statData.written_kb || 0) + ' KB)';
         } else if (statData.sd_ready) {
           sdB.style.background = '#1e3a8a';
           sdB.style.color = '#60a5fa';
-          sdB.textContent = '💾 Thẻ nhớ: Sẵn sàng';
+          sdB.textContent = '💾 Thẻ SD: Sẵn sàng';
         } else {
           sdB.style.background = '#78350f';
           sdB.style.color = '#fbbf24';
-          sdB.textContent = '⚠️ Thẻ nhớ: Chưa cắm (Đệm PSRAM)';
+          sdB.textContent = '⚠️ Thẻ SD: Chưa cắm (Đệm PSRAM)';
         }
       }
 
@@ -966,35 +1201,50 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
         }
       }
 
+      const fpsB = document.getElementById('log-fps-badge');
+      if (fpsB) {
+        fpsB.textContent = 'Trễ: ' + Math.round(t1 - t0) + 'ms';
+      }
+
       const desc = document.getElementById('log-file-desc');
       if (desc && statData.current_file) {
         desc.textContent = 'Tệp: ' + statData.current_file + ' | Chờ ghi: ' + (statData.pending_bytes || 0) + ' B';
       }
 
-      const term = document.getElementById('log-terminal');
-      if (term && logData.logs) {
-        let html = '';
-        logData.logs.forEach(item => {
-          let line = item.line || '';
-          let color = '#94a3b8';
-          if (line.includes(' [I] ')) color = '#38bdf8';
-          else if (line.includes(' [W] ')) color = '#f59e0b';
-          else if (line.includes(' [E] ') || line.includes(' [F] ')) color = '#ef4444;font-weight:bold;background:#450a0a;';
-          else if (line.includes('====')) color = '#a855f7;font-weight:bold;';
-
-          let esc = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-          html += '<div style="color:' + color + ';">' + esc + '</div>';
-        });
-
-        term.innerHTML = html.length > 0 ? html : '<div style="color:#64748b;">(Chưa có bản ghi nhật ký phù hợp)</div>';
-
-        const autoScroll = document.getElementById('log-auto-scroll');
-        if (autoScroll && autoScroll.checked) {
-          term.scrollTop = term.scrollHeight;
-        }
+      if (logData.logs && Array.isArray(logData.logs)) {
+        window.rawLogLines = logData.logs.map(item => item.line || '');
+        window.renderLogLines();
       }
     } catch(e) {
       console.error("fetchSystemLogs error:", e);
+    }
+  };
+
+  // HÀM TÁI SỬ DỤNG CHO 3D COMMAND CENTER HUD (Dựng màn hình Terminal bên cạnh Model 3D)
+  window.createSciFiLogTerminal = function(targetContainerId, options = {}) {
+    const container = document.getElementById(targetContainerId);
+    if (!container) return;
+
+    let theme = options.theme || window.currentLogTheme || 'matrix';
+    let height = options.height || '400px';
+
+    container.innerHTML = `
+      <div id="${targetContainerId}-wrap" class="terminal-theme-${theme} crt-scanlines" style="position:relative;width:100%;height:${height};border-radius:6px;box-shadow:var(--term-glow);">
+        <div id="${targetContainerId}-term" style="width:100%;height:100%;background:var(--term-bg);border:1px solid var(--term-border);border-radius:6px;padding:10px;box-sizing:border-box;overflow-y:auto;overflow-x:auto;font-family:Consolas, monospace;font-size:0.74rem;line-height:1.4;color:var(--term-text);white-space:pre-wrap;">
+        </div>
+      </div>
+    `;
+
+    if (window.rawLogLines && window.rawLogLines.length > 0) {
+      const term3d = document.getElementById(targetContainerId + '-term');
+      if (term3d) {
+        let last3d = window.rawLogLines.slice(-60);
+        let h3d = '';
+        last3d.forEach(l => { h3d += window.formatSingleLogLine(l); });
+        h3d += '<div style="color:var(--term-accent);"><span class="term-cursor">█</span></div>';
+        term3d.innerHTML = h3d;
+        term3d.scrollTop = term3d.scrollHeight;
+      }
     }
   };
 
@@ -1041,7 +1291,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           if (autoRef && autoRef.checked && document.getElementById('tab-logs') && document.getElementById('tab-logs').classList.contains('active')) {
             window.fetchSystemLogs();
           }
-        }, 3000);
+        }, 1500);
       }
       return;
     }
@@ -1054,6 +1304,10 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     const sBtn = document.getElementById('tab-btn-system');
     if (sSec) sSec.classList.remove('active');
     if (sBtn) sBtn.classList.remove('active');
+    const lSec = document.getElementById('tab-logs');
+    const lBtn = document.getElementById('tab-btn-logs');
+    if (lSec) lSec.classList.remove('active');
+    if (lBtn) lBtn.classList.remove('active');
     if (typeof origSwitchTab === 'function') origSwitchTab(tabId);
   };
 

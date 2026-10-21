@@ -22,14 +22,16 @@
 #define LOG_RING_BUFFER_FALLBACK    (16384)  // 16 KB trong SRAM nếu không có PSRAM
 #define LOG_MAX_FILE_SIZE           (524288) // 512 KB mỗi tệp log
 #define LOG_MAX_TOTAL_DIR_SIZE      (20971520) // 20 MB giới hạn toàn thư mục /logs
-#define LOG_FLUSH_INTERVAL_MS       (3000)   // Xả bộ đệm định kỳ mỗi 3 giây
+#define LOG_FLUSH_INTERVAL_MS       (2500)   // Xả bộ đệm định kỳ mỗi 2.5 giây
 #define LOG_SNAPSHOT_INTERVAL_MS    (600000) // Tự động ghi ảnh chụp trạng thái toàn hệ thống mỗi 10 phút
 
 static char*    s_ringBuffer = nullptr;
 static size_t   s_bufferCapacity = 0;
 static size_t   s_head = 0;
-static size_t   s_tail = 0;
-static size_t   s_unreadBytes = 0;
+static size_t   s_historyCount = 0;    // Số byte lịch sử đang lưu trong buffer (0 .. s_bufferCapacity)
+static size_t   s_sdFlushTail = 0;     // Vị trí con trỏ đọc phục vụ việc xả dữ liệu xuống thẻ SD
+static size_t   s_pendingSdBytes = 0;  // Số byte đang chờ ghi xuống thẻ SD
+static uint32_t s_logSeqId = 0;
 static portMUX_TYPE s_logMux = portMUX_INITIALIZER_UNLOCKED;
 
 static LogLevel s_minLevel = LOG_LVL_DEBUG;
@@ -64,8 +66,10 @@ void SystemLogger::init() {
   }
 
   s_head = 0;
-  s_tail = 0;
-  s_unreadBytes = 0;
+  s_historyCount = 0;
+  s_sdFlushTail = 0;
+  s_pendingSdBytes = 0;
+  s_logSeqId = 0;
   s_lastFlushMs = millis();
   s_lastSnapshotMs = millis();
 
@@ -115,7 +119,6 @@ void SystemLogger::logRaw(LogLevel level, const char* tag, const char* message) 
 
   String timeTag = getFormattedTime();
   char lvlChar = (level <= LOG_LVL_FATAL) ? LEVEL_CHARS[level] : 'I';
-  const char* lvlName = (level <= LOG_LVL_FATAL) ? LEVEL_NAMES[level] : "INFO";
 
   // Định dạng dòng log: TIME [LVL] [TAG] Message\r\n
   char lineBuf[512];
@@ -145,15 +148,20 @@ void SystemLogger::logRaw(LogLevel level, const char* tag, const char* message) 
       s_ringBuffer[s_head] = lineBuf[i];
       s_head = (s_head + 1) % s_bufferCapacity;
 
-      if (s_unreadBytes < s_bufferCapacity) {
-        s_unreadBytes++;
+      if (s_historyCount < s_bufferCapacity) {
+        s_historyCount++;
+      }
+
+      if (s_pendingSdBytes < s_bufferCapacity) {
+        s_pendingSdBytes++;
       } else {
-        // Tràn bộ đệm: đẩy đuôi tiến lên (bỏ bớt byte cũ nhất)
-        s_tail = (s_tail + 1) % s_bufferCapacity;
+        // SD chưa kịp ghi mà buffer đã xoay vòng đủ 128KB: đẩy con trỏ SD tiến lên
+        s_sdFlushTail = (s_sdFlushTail + 1) % s_bufferCapacity;
         s_stats.bufferDrops++;
       }
     }
 
+    s_logSeqId++;
     s_stats.totalLogged++;
     if (level == LOG_LVL_DEBUG) s_stats.debugCount++;
     else if (level == LOG_LVL_INFO) s_stats.infoCount++;
@@ -180,7 +188,7 @@ void SystemLogger::loop() {
   }
 
   // 2. Xả bộ đệm xuống thẻ SD nếu có dữ liệu chờ
-  if (s_unreadBytes >= 1024 || (now - s_lastFlushMs >= LOG_FLUSH_INTERVAL_MS) || s_needsImmediateFlush) {
+  if (s_pendingSdBytes >= 1024 || (now - s_lastFlushMs >= LOG_FLUSH_INTERVAL_MS) || s_needsImmediateFlush) {
     s_lastFlushMs = now;
     s_needsImmediateFlush = false;
     flushBufferToSd();
@@ -239,7 +247,7 @@ void SystemLogger::checkLogRotation() {
 }
 
 void SystemLogger::flushBufferToSd() {
-  if (!TestSDCard::isMounted() || !s_ringBuffer || s_unreadBytes == 0) return;
+  if (!TestSDCard::isMounted() || !s_ringBuffer || s_pendingSdBytes == 0) return;
 
   ensureLogDirExists();
   checkLogRotation();
@@ -251,17 +259,16 @@ void SystemLogger::flushBufferToSd() {
     return;
   }
 
-  // Đọc từ s_tail và ghi theo từng khối tối đa 2048 bytes để tránh giữ bus SPI quá lâu
   char chunk[2048];
   size_t bytesToFlush = 0;
 
   portENTER_CRITICAL(&s_logMux);
-  bytesToFlush = (s_unreadBytes < sizeof(chunk)) ? s_unreadBytes : sizeof(chunk);
+  bytesToFlush = (s_pendingSdBytes < sizeof(chunk)) ? s_pendingSdBytes : sizeof(chunk);
   for (size_t i = 0; i < bytesToFlush; i++) {
-    chunk[i] = s_ringBuffer[s_tail];
-    s_tail = (s_tail + 1) % s_bufferCapacity;
+    chunk[i] = s_ringBuffer[s_sdFlushTail];
+    s_sdFlushTail = (s_sdFlushTail + 1) % s_bufferCapacity;
   }
-  s_unreadBytes -= bytesToFlush;
+  s_pendingSdBytes -= bytesToFlush;
   portEXIT_CRITICAL(&s_logMux);
 
   if (bytesToFlush > 0) {
@@ -326,31 +333,45 @@ bool SystemLogger::isSdReady() {
 }
 
 size_t SystemLogger::getBufferedBytes() {
-  return s_unreadBytes;
+  return s_pendingSdBytes;
 }
 
 LogStats SystemLogger::getStats() {
-  s_stats.pendingBytes = s_unreadBytes;
+  s_stats.pendingBytes = s_pendingSdBytes;
   return s_stats;
 }
 
 String SystemLogger::getRecentLogsText(size_t maxLines, LogLevel minLevel) {
-  if (!s_ringBuffer || s_bufferCapacity == 0) return "Chua co log.";
+  if (!s_ringBuffer || s_bufferCapacity == 0 || s_historyCount == 0) {
+    if (TestSDCard::isMounted()) {
+      String p = resolveActiveLogFilePath();
+      if (SD.exists(p)) {
+        File f = SD.open(p, FILE_READ);
+        if (f) {
+          size_t sz = f.size();
+          size_t rd = (sz > 8192) ? 8192 : sz;
+          if (sz > rd) f.seek(sz - rd);
+          String content = f.readString();
+          f.close();
+          return content;
+        }
+      }
+    }
+    return "Chua co log.";
+  }
 
   String result = "";
   result.reserve(8192);
 
   portENTER_CRITICAL(&s_logMux);
 
-  // Đọc toàn bộ bộ đệm theo đúng thứ tự thời gian từ tail đến head
-  size_t idx = s_tail;
-  size_t totalBytes = (s_head >= s_tail) ? (s_head - s_tail) : (s_bufferCapacity - s_tail + s_head);
+  size_t historyStart = (s_head >= s_historyCount) ? (s_head - s_historyCount) : (s_bufferCapacity - (s_historyCount - s_head));
+  size_t idx = historyStart;
 
   char line[512];
   size_t linePos = 0;
-  size_t lineCount = 0;
 
-  for (size_t i = 0; i < totalBytes; i++) {
+  for (size_t i = 0; i < s_historyCount; i++) {
     char c = s_ringBuffer[idx];
     idx = (idx + 1) % s_bufferCapacity;
 
@@ -362,7 +383,6 @@ String SystemLogger::getRecentLogsText(size_t maxLines, LogLevel minLevel) {
       line[linePos] = '\0';
       result += line;
       linePos = 0;
-      lineCount++;
     }
   }
 
@@ -372,47 +392,96 @@ String SystemLogger::getRecentLogsText(size_t maxLines, LogLevel minLevel) {
 
 void SystemLogger::getLogsJson(JsonDocument& doc, size_t maxLines, LogLevel minLevel) {
   JsonArray arr = doc["logs"].to<JsonArray>();
-  if (!s_ringBuffer || s_bufferCapacity == 0) return;
 
-  portENTER_CRITICAL(&s_logMux);
+  // 1. Kiểm tra nếu có dữ liệu trong bộ đệm PSRAM
+  if (s_ringBuffer && s_bufferCapacity > 0 && s_historyCount > 0) {
+    portENTER_CRITICAL(&s_logMux);
 
-  size_t idx = s_tail;
-  size_t totalBytes = (s_head >= s_tail) ? (s_head - s_tail) : (s_bufferCapacity - s_tail + s_head);
+    size_t historyStart = (s_head >= s_historyCount) ? (s_head - s_historyCount) : (s_bufferCapacity - (s_historyCount - s_head));
+    size_t idx = historyStart;
 
-  char line[512];
-  size_t linePos = 0;
-  size_t added = 0;
+    char line[512];
+    size_t linePos = 0;
+    size_t totalLines = 0;
 
-  for (size_t i = 0; i < totalBytes && added < maxLines; i++) {
-    char c = s_ringBuffer[idx];
-    idx = (idx + 1) % s_bufferCapacity;
-
-    if (linePos < sizeof(line) - 1) {
-      line[linePos++] = c;
+    // Đếm tổng số dòng
+    for (size_t i = 0; i < s_historyCount; i++) {
+      if (s_ringBuffer[idx] == '\n') totalLines++;
+      idx = (idx + 1) % s_bufferCapacity;
     }
 
-    if (c == '\n') {
-      line[linePos] = '\0';
-      // Cắt bỏ ký tự \r\n ở đuôi
-      while (linePos > 0 && (line[linePos - 1] == '\r' || line[linePos - 1] == '\n')) {
-        line[--linePos] = '\0';
+    size_t skipLines = (totalLines > maxLines) ? (totalLines - maxLines) : 0;
+    size_t currentLineIdx = 0;
+
+    idx = historyStart;
+    for (size_t i = 0; i < s_historyCount; i++) {
+      char c = s_ringBuffer[idx];
+      idx = (idx + 1) % s_bufferCapacity;
+
+      if (linePos < sizeof(line) - 1) {
+        line[linePos++] = c;
       }
 
-      if (linePos > 0) {
-        JsonObject item = arr.add<JsonObject>();
-        item["line"] = String(line);
-        added++;
+      if (c == '\n') {
+        while (linePos > 0 && (line[linePos - 1] == '\r' || line[linePos - 1] == '\n')) {
+          line[--linePos] = '\0';
+        }
+
+        if (currentLineIdx >= skipLines && linePos > 0) {
+          bool keep = true;
+          if (minLevel > LOG_LVL_DEBUG) {
+            if (minLevel == LOG_LVL_INFO && strstr(line, " [D] ")) keep = false;
+            else if (minLevel == LOG_LVL_WARN && (strstr(line, " [D] ") || strstr(line, " [I] "))) keep = false;
+            else if (minLevel >= LOG_LVL_ERROR && !strstr(line, " [E] ") && !strstr(line, " [F] ")) keep = false;
+          }
+
+          if (keep) {
+            JsonObject item = arr.add<JsonObject>();
+            item["line"] = String(line);
+          }
+        }
+        currentLineIdx++;
+        linePos = 0;
       }
-      linePos = 0;
+    }
+
+    portEXIT_CRITICAL(&s_logMux);
+  } else if (TestSDCard::isMounted()) {
+    // 2. Dự phòng: nếu bộ đệm PSRAM chưa có log, đọc phần đuôi từ thẻ SD
+    String logPath = resolveActiveLogFilePath();
+    if (SD.exists(logPath)) {
+      File f = SD.open(logPath, FILE_READ);
+      if (f) {
+        size_t sz = f.size();
+        size_t readSz = (sz > 8192) ? 8192 : sz;
+        if (sz > readSz) f.seek(sz - readSz);
+
+        while (f.available() && arr.size() < maxLines) {
+          String l = f.readStringUntil('\n');
+          l.trim();
+          if (l.length() > 0) {
+            bool keep = true;
+            if (minLevel > LOG_LVL_DEBUG) {
+              if (minLevel == LOG_LVL_INFO && l.indexOf(" [D] ") >= 0) keep = false;
+              else if (minLevel == LOG_LVL_WARN && (l.indexOf(" [D] ") >= 0 || l.indexOf(" [I] ") >= 0)) keep = false;
+              else if (minLevel >= LOG_LVL_ERROR && l.indexOf(" [E] ") < 0 && l.indexOf(" [F] ") < 0) keep = false;
+            }
+            if (keep) {
+              JsonObject item = arr.add<JsonObject>();
+              item["line"] = l;
+            }
+          }
+        }
+        f.close();
+      }
     }
   }
 
-  portEXIT_CRITICAL(&s_logMux);
-
   doc["total"] = s_stats.totalLogged;
-  doc["pending_bytes"] = s_unreadBytes;
+  doc["pending_bytes"] = s_pendingSdBytes;
   doc["sd_active"] = s_stats.sdLoggingActive;
-  doc["file"] = s_stats.currentLogFile;
+  doc["file"] = s_stats.currentLogFile.length() > 0 ? s_stats.currentLogFile : resolveActiveLogFilePath();
+  doc["last_id"] = s_logSeqId;
 }
 
 void SystemLogger::getLogFileList(JsonDocument& doc) {
@@ -449,8 +518,9 @@ File SystemLogger::openCurrentLogFileForReading() {
 bool SystemLogger::clearLogs(bool deleteSdFiles) {
   portENTER_CRITICAL(&s_logMux);
   s_head = 0;
-  s_tail = 0;
-  s_unreadBytes = 0;
+  s_historyCount = 0;
+  s_sdFlushTail = 0;
+  s_pendingSdBytes = 0;
   s_stats.bufferDrops = 0;
   portEXIT_CRITICAL(&s_logMux);
 
@@ -488,4 +558,3 @@ void SystemLogger::setEchoToSerial(bool enable) {
 bool SystemLogger::isEchoToSerial() {
   return s_echoToSerial;
 }
-
