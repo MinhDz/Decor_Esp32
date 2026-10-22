@@ -86,7 +86,7 @@ namespace TestButtons {
     snprintf(buf, sizeof(buf), "%s (%.2fV|%d)", spec.shortCode, mv / 1000.0f, raw);
     lastButtonStr = String(buf);
 
-    Serial.printf("🔘 [ADC KEYPAD TASK] NHẤN: %-13s | Trở: %-11s | Đo: %.2fV (%4d mV) | ADC: %4d / 4095\n",
+    Serial.printf("🔘 [ADC KEYPAD GPIO %d] NHẤN: %-13s | Trở: %-11s | Đo: %.2fV (%4d mV) | ADC: %4d / 4095\n",
                   activeAdcPin, spec.name, spec.resistorLabel, mv / 1000.0f, mv, raw);
 
     // 1. Nếu màn hình đang ngủ (AOD hoặc Sleep), đánh thức màn hình NGAY LẬP TỨC từ task nền!
@@ -137,7 +137,7 @@ namespace TestButtons {
             onButtonConfirmed(activeBtnIndex, mv, raw);
           } else if (activeBtnIndex < 0 && prevBtn >= 0) {
             buttonActionTriggered = false;
-            Serial.printf("⚪ [ADC KEYPAD TASK] NHẢ NÚT -> Về mức nghỉ: %.2fV (%4d mV | ADC: %4d)\n",
+            Serial.printf("⚪ [ADC KEYPAD GPIO %d] NHẢ NÚT -> Về mức nghỉ: %.2fV (%4d mV | ADC: %4d)\n",
                           activeAdcPin, mv / 1000.0f, mv, raw);
           }
         }
@@ -199,12 +199,12 @@ namespace TestButtons {
         NULL,
         3,
         &s_keypadTaskHandle,
-        0 // Ghim cố định vào Core 0 (PRO_CPU) để hoàn toàn miễn nhiễm với loop trên Core 1
+        1 // Ghim vào Core 1 (APP_CPU) với Priority 3 (cao hơn loopTask), hoàn toàn đồng bộ với ADC
       );
       if (res == pdPASS) {
-        Serial.println("🎮 [KEYPAD TASK] Đã khởi tạo KeypadTask độc lập trên Core 0 (Priority 3, Chu kỳ 10ms)!");
+        Serial.println("🎮 [KEYPAD TASK] Đã khởi tạo KeypadTask độc lập trên Core 1 (Priority 3, Chu kỳ 10ms)!");
       } else {
-        Serial.println("❌ [KEYPAD TASK] Không thể tạo KeypadTask trên Core 0! Fallback về loop().");
+        Serial.println("❌ [KEYPAD TASK] Không thể tạo KeypadTask trên Core 1! Fallback về loop().");
       }
     }
   }
