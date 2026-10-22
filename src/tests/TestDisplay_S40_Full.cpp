@@ -731,7 +731,8 @@ namespace TestDisplay {
   static const uint16_t TIMEOUT_SECONDS_LIST[6] = { 0, 15, 30, 60, 300, 600 };
   static const char* TIMEOUT_LABELS[6] = { "Luôn sáng", "15 giây", "30 giây", "1 phút", "5 phút", "10 phút" };
   static unsigned long lastUserActivityMs = 0;
-  static bool isScreenSleeping = false;
+  static volatile bool isScreenSleeping = false;
+  static volatile bool s_wakeUpRequested = false;
   static bool alwaysOnDisplayEnabled = true; // true = Hiện đồng hồ mờ nền đen (AOD), false = Tắt hẳn màn hình (Sleep)
   static int aodClockStyle = 1;              // 0: Tắt màn hình, 1: Thường (Digital), 2: Lật số (Retro Flip), 3: Đồng hồ kim (Analog)
   static int lastAodDrawnMinute = -1;
@@ -1155,6 +1156,20 @@ namespace TestDisplay {
 
   int getBacklightBrightness() {
     return screenBrightnessPct;
+  }
+
+  bool isSleeping() {
+    return isScreenSleeping;
+  }
+
+  void wakeUpScreenFromTask() {
+    if (!isScreenSleeping) return;
+    isScreenSleeping = false;
+    lastUserActivityMs = millis();
+    uint32_t duty = (uint32_t)((screenBrightnessPct * 255) / 100);
+    ledcWrite(0, duty);
+    s_wakeUpRequested = true;
+    Serial.println("💡 [TASK WAKEUP] Đã đánh thức màn hình tức thì từ FreeRTOS KeypadTask!");
   }
 
   // Lấy thời gian hiện tại (từ NTP nếu đã đồng bộ, hoặc đếm từ mốc mặc định)
@@ -10759,6 +10774,12 @@ namespace TestDisplay {
       isScreenSleeping = false;
       lastUserActivityMs = now;
       return;
+    }
+
+    // Nếu có yêu cầu thức màn hình từ task nền FreeRTOS: Vẽ lại màn hình ngay
+    if (s_wakeUpRequested) {
+      s_wakeUpRequested = false;
+      refreshActiveScreen();
     }
 
     TestSDCard::loop();

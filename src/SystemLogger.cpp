@@ -325,6 +325,29 @@ void SystemLogger::logSystemSnapshot() {
   log(LOG_LVL_INFO, "SNAPSHOT", "Nhat ky (Stats)  : Tong=%u | Da ghi SD=%u KB | Loi=%u | Canh bao=%u",
       s_stats.totalLogged, (unsigned)(s_stats.totalWrittenBytes / 1024),
       s_stats.errorCount, s_stats.warnCount);
+  char profBuf[160];
+  snprintf(profBuf, sizeof(profBuf),
+           "Mod:%uus | Cob:%uus | Tele:%uus | Wthr:%uus | WiFi:%uus | Web:%uus | Strm:%uus | XZ:%uus | Hw:%uus | Log:%uus",
+           TaskProfiler::getStats(PROF_MODULES).avgUs,
+           TaskProfiler::getStats(PROF_COB_LEDS).avgUs,
+           TaskProfiler::getStats(PROF_TELEMETRY).avgUs,
+           TaskProfiler::getStats(PROF_WEATHER).avgUs,
+           TaskProfiler::getStats(PROF_WIFI).avgUs,
+           TaskProfiler::getStats(PROF_WEB_ROUTES).avgUs,
+           TaskProfiler::getStats(PROF_WEB_STREAM).avgUs,
+           TaskProfiler::getStats(PROF_XIAOZHI).avgUs,
+           TaskProfiler::getStats(PROF_HARDWARE).avgUs,
+           TaskProfiler::getStats(PROF_LOGGER).avgUs);
+  log(LOG_LVL_INFO, "SNAPSHOT", "Hieu nang Tasks  : %s", profBuf);
+
+  for (int p = 0; p < PROF_TASK_COUNT; p++) {
+    const TaskStats& ts = TaskProfiler::getStats((ProfiledTask)p);
+    if (ts.slowCount > 0) {
+      log(LOG_LVL_WARN, "PROFILER", "Task '%s' cham >10ms (%u lan, max: %u us)",
+          ts.name, ts.slowCount, ts.maxUs);
+    }
+  }
+  TaskProfiler::resetMax();
   log(LOG_LVL_INFO, "SNAPSHOT", "================================================================");
 }
 

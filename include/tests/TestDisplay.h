@@ -49,6 +49,11 @@ namespace TestDisplay {
   // Điều hướng Hệ Điều Hành Symbian S40 từ cụm 7 phím bấm ADC (0=OK, 1=UP, 2=DOWN, 3=LEFT, 4=RIGHT, 5=MENU, 6=EXIT)
   void onKeypadEvent(int keyIndex);
 
+  // Kiểm tra trạng thái màn hình đang Sleep / Always On Display (Thread-safe)
+  bool isSleeping();
+  // Đánh thức màn hình tức thì từ task nền FreeRTOS (bật đèn nền LEDC ngay lập tức < 10ms)
+  void wakeUpScreenFromTask();
+
   // Điều chỉnh độ sáng đèn nền màn hình ST7789 (PWM GPIO 7: 0..100%)
   void setBacklightBrightness(int pct);
   int  getBacklightBrightness();

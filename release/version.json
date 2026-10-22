@@ -1,9 +1,9 @@
 {
-  "version": "v3.2.4",
+  "version": "v3.2.5",
   "name": "Space OS",
-  "build_date": "2026-10-21",
+  "build_date": "2026-10-22",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
-  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.2.4/firmware.bin",
-  "size": 1966000,
-  "changelog": "🚀 Space OS v3.2.4 - Sửa Lỗi Lệch Icon Menu Theme Mèo Gome Chibi (15 Apps Đồng Bộ):\n- Khắc phục triệt để hiện tượng lệch Icon trong Menu S40: Trong Theme Mèo Gome Chibi, sau khi gộp mục Chẩn đoán và Test Thẻ nhớ vào slot 10 'Sóng âm', mảng icon Gome cũ vẫn giữ lại icon thẻ nhớ (gome_33.png) ở slot 11 và mảng chỉ có 13 phần tử. Điều này khiến mục 'Trò chơi' (slot 11) hiển thị nhầm icon Thẻ nhớ, mục 'Mã QR' (slot 12) hiển thị icon Trò chơi và các mục sau bị tụt lùi 1 vị trí hoặc xoay vòng sai lệch.\n- Mở rộng đầy đủ 15 biểu tượng Gome Chibi 36x36 RGB565: Cập nhật GOME_ICON_COUNT = 15; đưa biểu tượng Trò chơi (gome_39.png - Gậy phép sao lấp lánh) chuẩn xác vào slot 11; tạo biểu tượng Mã QR Chibi (gome_qr.png) độc quyền cho slot 12; bổ sung biểu tượng Quạt sóng Wi-Fi Chibi (gome_27.png) cho slot 13 và biểu tượng Bánh răng Hệ thống (gome_40.png) cho slot 14.\n- Đồng bộ hoàn hảo giữa cả 6 bộ Theme (Vũ trụ, Chill, Mecha, Lofi, S40 Cổ điển, Mèo Gome Chibi) và giao diện Web Dashboard."
+  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.2.5/firmware.bin",
+  "size": 1968528,
+  "changelog": "🚀 Space OS v3.2.5 - Tách KeypadTask FreeRTOS Độc Lập Sang Core 0, Instant Screen Wake-up & Khắc Phục Treo Loop WebSocket:\n- Khởi tạo KeypadTask FreeRTOS độc lập trên Core 0: Chuyển toàn bộ chu trình lấy mẫu lọc nhiễu ADC 16 mẫu cho cụm 7 phím bấm thang điện trở và cảm ứng chạm TTP223 sang Core 0 (PRO_CPU) với độ ưu tiên cao (Priority 3, chu kỳ 10ms = 100Hz). Tách rời hoàn toàn khỏi luồng loop() trên Core 1, đảm bảo phím bấm và cảm ứng chạm không bao giờ bị trễ hay nghẽn bởi bất kỳ tác vụ mạng/hệ thống nào.\n- Cơ chế Đánh thức Màn hình Tức thì (Instant Screen Wake-up < 10ms): Khi màn hình đang ở chế độ Sleep hoặc Always On Display (AOD), thao tác chạm phím hoặc cảm biến TTP223 sẽ khôi phục xung đèn nền phần cứng LEDC PWM ngay lập tức trên Core 0 trong < 10ms mà không cần đợi Core 1 duyệt qua vòng lặp.\n- Khắc phục triệt để lỗi nghẽn loop() 5000ms (0.2 FPS) khi WebSocket mất kết nối: Chuyển toàn bộ cơ chế phục hồi WebSocket XiaoZhi sang chế độ Non-blocking với Exponential Backoff (15s -> 30s -> 60s -> 120s) và chạy trên background task WsRestartTask, tận dụng cơ chế auto-reconnect 10s có sẵn của ESP-IDF mà không gây block Core 1.\n- Giám sát hiệu năng vi giây (TaskProfiler Snapshot): Tự động ghi chép chi tiết thời gian thực thi trung bình từng task (Modules, Leds, Telemetry, Weather, WiFi, WebRoutes, WebStream, XiaoZhi, Hardware, Logger) theo đơn vị vi giây (us) vào bản tin Snapshot định kỳ 10 phút trên thẻ nhớ SD để cảnh báo sớm bất kỳ task nào vượt ngưỡng 10ms."
 }

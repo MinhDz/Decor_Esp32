@@ -1,6 +1,6 @@
 # SPACE OS — TRẠM DECOR VŨ TRỤ (ESP32-S3 FREEFORM COPPER SCULPTURE)
 ## Tài liệu Kiến trúc Hệ thống & Hiện trạng Dự án Chính thức
-*Phiên bản Firmware: Space OS v3.2.4 | Cập nhật: 21/10/2026*
+*Phiên bản Firmware: Space OS v3.2.5 | Cập nhật: 22/10/2026*
 
 ---
 
@@ -44,7 +44,7 @@ Hệ thống được thi công bằng kỹ thuật uốn thanh đồng nguyên 
 
 ---
 
-## 3. Hệ Điều Hành Space OS v3.2.4 & 19 Chế Độ Màn Hình
+## 3. Hệ Điều Hành Space OS v3.2.5 & 19 Chế Độ Màn Hình
 
 Giao diện đồ họa được tối ưu hóa toàn diện trên màn hình dọc 240x320 pixel, kế thừa phong cách điện thoại Nokia Symbian S40 kết hợp giao diện Cyberpunk HUD với 6 bộ Theme màu sắc (Vũ trụ, Chill Thảo Mộc, Mecha, Lofi Hoàng Hôn, S40 Cổ Điển, Mèo Gome Chibi):
 
@@ -124,7 +124,7 @@ flowchart TD
 
 ---
 
-## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.4)
+## 5. Đánh Giá Hiện Trạng Xử Lý UI & Hệ Thống Nhật Ký (Space OS v3.2.5)
 
 Dựa trên quá trình vận hành thực tế, các hạng mục kiến trúc then chốt đã được nâng cấp toàn diện:
 
@@ -138,6 +138,7 @@ Dựa trên quá trình vận hành thực tế, các hạng mục kiến trúc 
 | **6. Gộp Chẩn Đoán & Menu S40 (v3.2.2)** | Quá nhiều icon dàn trải (test thẻ nhớ riêng, test ngoại vi riêng); "Xu hướng" thiếu trực quan trên Web. | **Unified Hardware Diagnostics & 15-App Grid**: Gộp test thẻ nhớ và test ngoại vi vào 1 icon "Sóng âm" (Mode 3) chuyển trang bằng phím ◄/►; đổi tên "Xu hướng" thành "Hệ thống" với icon Biểu đồ cột Neon (Bar Chart); bổ sung giao diện Web Demo cho Mode 19. |
 | **7. Ổn Định Đồng Bộ Giờ Real-Time & Khắc Phục Lỗi Reset (v3.2.3)** | Gọi `SystemLogger` trong lwIP TCP callback gây tràn stack Core 0 (<3KB) dẫn đến Guru Meditation reset; `configTime()` lặp lại làm reset socket SNTP. | **Decoupled Core 1 TimeManager**: Loại bỏ hoàn toàn lwIP SNTP callback; chuyển cơ chế phát hiện đồng bộ về Core 1 thông qua atomic RTC check `time(nullptr) >= 1700000000` trong `TimeManager::loop()`; chỉ gọi `configTime()` duy nhất 1 lần khi Wi-Fi kết nối; tự động kích hoạt cờ vẽ lại Standby an toàn tuyệt đối. |
 | **8. Khắc Phục Lệch Icon Menu Theme Mèo Gome Chibi (v3.2.4)** | Mảng icon Gome cũ vẫn còn icon thẻ nhớ ở slot 11 và chỉ có 13 phần tử khiến "Trò chơi" hiển thị icon thẻ nhớ và các icon sau bị lùi 1 vị trí. | **15-Icon Full Alignment**: Cập nhật `GOME_ICON_COUNT = 15`; loại bỏ icon thẻ nhớ riêng; chuyển icon Trò chơi (`gome_39.png`) về đúng slot 11; bổ sung icon Mã QR Chibi (`gome_qr.png`) ở slot 12, Wi-Fi (`gome_27.png`) ở slot 13 và Bánh răng Hệ thống (`gome_40.png`) ở slot 14. |
+| **9. Tách KeypadTask FreeRTOS Sang Core 0, Instant Wake-up & Khắc Phục Treo Loop WebSocket (v3.2.5)** | Vòng lặp `loop()` trên Core 1 bị nghẽn 5000ms (0.2 FPS) do `XiaoZhiClient` huỷ và tạo lại WebSocket liên tục khi mất mạng; bàn phím và chạm TTP223 quét trong `loop()` bị bỏ qua, màn hình AOD bị đơ không thức dậy được sau 36.5h chạy liên tục. | **Decoupled Core 0 KeypadTask & Non-blocking WebSocket Backoff**: Chuyển toàn bộ quét phím ADC 7 nút và cảm ứng TTP223 sang task FreeRTOS riêng trên Core 0 (Priority 3, 10ms = 100Hz); đánh thức màn hình tức thì (<10ms) qua LEDC PWM phần cứng; chuyển WebSocket XiaoZhi sang cơ chế phục hồi bất đồng bộ (Async WsRestartTask) với Exponential Backoff (15s..120s), giải phóng hoàn toàn Core 1 duy trì 800+ FPS; bổ sung log vi giây ($\\mu\\text{s}$) từng task vào bản tin Snapshot định kỳ 10 phút trên thẻ nhớ SD. |
 
 ---
 

@@ -30,13 +30,16 @@ namespace TestButtons {
   static int lastAdcMv  = 3300;
   static int activeBtnIndex = -1;     // -1 = Không bấm (Hở mạch > 2.88V)
   static int candidateBtnIndex = -1;
-  static int prevSettledMv = 3300;
   static unsigned long candidateStartMs = 0;
   static bool buttonActionTriggered = false;
 
   static String lastButtonStr = "NONE (3.30V)";
   static bool liveAdcSerialStream = true; // Mặc định in log khi ở màn hình 4 (DIO/ADC) hoặc khi bấm phím
   static unsigned long lastSerialPrintMs = 0;
+
+  // FreeRTOS Dedicated Task & Event Queue
+  static TaskHandle_t  s_keypadTaskHandle = nullptr;
+  static QueueHandle_t s_keypadQueue      = nullptr;
 
   // Đọc trung bình 16 mẫu ADC (loại bỏ cực trị nhiễu xung)
   static void readFilteredAdc(int& outRaw, int& outMv) {
@@ -58,7 +61,6 @@ namespace TestButtons {
     outMv  = (int)((sumMv - minMv - maxMv) / 14);
 
     // Quy đổi nội suy chuẩn từ mV sang thang ADC 12-bit (0..4095 tại 3300mV)
-    // giúp giá trị ADC hiển thị khớp tuyệt đối với cột D trong bảng Excel (VD: 1.65V -> 2048)
     int calibratedRaw = (outMv * 4095) / 3300;
     if (calibratedRaw > 4095) calibratedRaw = 4095;
     outRaw = calibratedRaw;
@@ -84,12 +86,73 @@ namespace TestButtons {
     snprintf(buf, sizeof(buf), "%s (%.2fV|%d)", spec.shortCode, mv / 1000.0f, raw);
     lastButtonStr = String(buf);
 
-    Serial.printf("🔘 [ADC KEYPAD GPIO %d] NHẤN: %-13s | Trở: %-11s | Đo: %.2fV (%4d mV) | ADC: %4d / 4095\n",
+    Serial.printf("🔘 [ADC KEYPAD TASK] NHẤN: %-13s | Trở: %-11s | Đo: %.2fV (%4d mV) | ADC: %4d / 4095\n",
                   activeAdcPin, spec.name, spec.resistorLabel, mv / 1000.0f, mv, raw);
 
-    // Gửi trực tiếp sự kiện phím bấm (0:OK, 1:UP, 2:DOWN, 3:LEFT, 4:RIGHT, 5:MENU, 6:EXIT)
-    // sang bộ điều hướng Hệ Điều Hành Symbian S40 trên màn hình ST7789
-    TestDisplay::onKeypadEvent(idx);
+    // 1. Nếu màn hình đang ngủ (AOD hoặc Sleep), đánh thức màn hình NGAY LẬP TỨC từ task nền!
+    if (TestDisplay::isSleeping()) {
+      TestDisplay::wakeUpScreenFromTask();
+      // Nhấn nút đầu tiên để bật sáng màn hình -> tiêu thụ phím tránh bấm nhầm menu
+      return;
+    }
+
+    // 2. Màn hình đang thức -> Đưa phím vào Queue an toàn để Core 1 xử lý giao diện S40
+    if (s_keypadQueue != nullptr) {
+      xQueueSend(s_keypadQueue, &idx, 0);
+    } else {
+      TestDisplay::onKeypadEvent(idx);
+    }
+  }
+
+  // Tác vụ FreeRTOS chuyên biệt quét phím ADC 7 nút độc lập trên Core 0 (Chu kỳ 10ms = 100Hz)
+  static void keypadTask(void* pvParameters) {
+    TickType_t xLastWakeTime = xTaskGetTickCount();
+    const TickType_t xFrequency = pdMS_TO_TICKS(10); // 10ms = 100Hz
+
+    static unsigned long s_lastTtpCheckMs = 0;
+    static bool s_lastTtpTaskState = false;
+
+    while (true) {
+      vTaskDelayUntil(&xLastWakeTime, xFrequency);
+      unsigned long now = millis();
+
+      // 1. Quét cụm 7 phím bấm thang điện trở ADC (GPIO 3)
+      int raw = 0, mv = 0;
+      readFilteredAdc(raw, mv);
+      lastAdcRaw = raw;
+      lastAdcMv  = mv;
+
+      int detected = classifyButtonFromMv(mv);
+
+      if (detected != candidateBtnIndex) {
+        candidateBtnIndex = detected;
+        candidateStartMs  = now;
+      } else if (now - candidateStartMs >= 25) { // 25ms debounce (3 chu kỳ)
+        if (activeBtnIndex != candidateBtnIndex) {
+          int prevBtn = activeBtnIndex;
+          activeBtnIndex = candidateBtnIndex;
+
+          if (activeBtnIndex >= 0 && !buttonActionTriggered) {
+            buttonActionTriggered = true;
+            onButtonConfirmed(activeBtnIndex, mv, raw);
+          } else if (activeBtnIndex < 0 && prevBtn >= 0) {
+            buttonActionTriggered = false;
+            Serial.printf("⚪ [ADC KEYPAD TASK] NHẢ NÚT -> Về mức nghỉ: %.2fV (%4d mV | ADC: %4d)\n",
+                          activeAdcPin, mv / 1000.0f, mv, raw);
+          }
+        }
+      }
+
+      // 2. Quét nhanh cảm biến chạm TTP223 (GPIO 20) để đánh thức màn hình lập tức nếu đang ngủ
+      bool ttpNow = (digitalRead(PIN_TOUCH_TTP223) == HIGH);
+      if (ttpNow != s_lastTtpTaskState && (now - s_lastTtpCheckMs >= 100)) {
+        s_lastTtpCheckMs = now;
+        s_lastTtpTaskState = ttpNow;
+        if (ttpNow && TestDisplay::isSleeping()) {
+          TestDisplay::wakeUpScreenFromTask();
+        }
+      }
+    }
   }
 
   void printAdcTableGuide() {
@@ -118,55 +181,82 @@ namespace TestButtons {
 
     analogReadResolution(12);
     analogSetPinAttenuation(activeAdcPin, ADC_11db); // Đọc toàn dải 0.00V .. 3.30V
-    pinMode(activeAdcPin, INPUT); // Sử dụng trở kéo lên 10kOhm phần cứng chuẩn xác
+    pinMode(activeAdcPin, INPUT); // Trở kéo lên 10kOhm phần cứng chuẩn xác
+    pinMode(PIN_TOUCH_TTP223, INPUT_PULLDOWN);
 
     readFilteredAdc(lastAdcRaw, lastAdcMv);
     printAdcTableGuide();
+
+    if (s_keypadQueue == nullptr) {
+      s_keypadQueue = xQueueCreate(8, sizeof(int));
+    }
+
+    if (s_keypadTaskHandle == nullptr) {
+      BaseType_t res = xTaskCreatePinnedToCore(
+        keypadTask,
+        "KeypadTask",
+        4096,
+        NULL,
+        3,
+        &s_keypadTaskHandle,
+        0 // Ghim cố định vào Core 0 (PRO_CPU) để hoàn toàn miễn nhiễm với loop trên Core 1
+      );
+      if (res == pdPASS) {
+        Serial.println("🎮 [KEYPAD TASK] Đã khởi tạo KeypadTask độc lập trên Core 0 (Priority 3, Chu kỳ 10ms)!");
+      } else {
+        Serial.println("❌ [KEYPAD TASK] Không thể tạo KeypadTask trên Core 0! Fallback về loop().");
+      }
+    }
   }
 
   void loop() {
-    static unsigned long s_lastAdcReadMs = 0;
-    unsigned long now = millis();
-    if (now - s_lastAdcReadMs < 15) {
-      return; // Đọc ADC mỗi 15ms (~66Hz): Cực nhạy nhưng giải phóng 95% CPU cho Core 1 và WebServer
+    // 1. Rút các sự kiện phím bấm từ Queue và thực thi giao diện S40 an toàn trên Core 1
+    if (s_keypadQueue != nullptr) {
+      int keyIdx;
+      while (xQueueReceive(s_keypadQueue, &keyIdx, 0) == pdTRUE) {
+        TestDisplay::onKeypadEvent(keyIdx);
+      }
     }
-    s_lastAdcReadMs = now;
 
-    int raw = 0, mv = 0;
-    readFilteredAdc(raw, mv);
-    lastAdcRaw = raw;
-    lastAdcMv  = mv;
+    unsigned long now = millis();
 
-    int detected = classifyButtonFromMv(mv);
+    // 2. Fallback dự phòng: Nếu task Core 0 không được khởi tạo, loop() quét trực tiếp
+    if (s_keypadTaskHandle == nullptr) {
+      static unsigned long s_lastAdcReadMs = 0;
+      if (now - s_lastAdcReadMs >= 15) {
+        s_lastAdcReadMs = now;
+        int raw = 0, mv = 0;
+        readFilteredAdc(raw, mv);
+        lastAdcRaw = raw;
+        lastAdcMv  = mv;
 
-    if (detected != candidateBtnIndex) {
-      candidateBtnIndex = detected;
-      candidateStartMs  = now;
-    } else if (now - candidateStartMs >= 30) {
-      // Trạng thái nút bấm đã ổn định sau 30ms (2 chu kỳ lấy mẫu liên tiếp)!
-      if (activeBtnIndex != candidateBtnIndex) {
-        int prevBtn = activeBtnIndex;
-        activeBtnIndex = candidateBtnIndex;
-
-        if (activeBtnIndex >= 0 && !buttonActionTriggered) {
-          buttonActionTriggered = true;
-          onButtonConfirmed(activeBtnIndex, mv, raw);
-        } else if (activeBtnIndex < 0 && prevBtn >= 0) {
-          buttonActionTriggered = false;
-          Serial.printf("⚪ [ADC KEYPAD GPIO %d] NHẢ NÚT -> Về mức nghỉ: %.2fV (%4d mV | ADC: %4d)\n",
-                        activeAdcPin, mv / 1000.0f, mv, raw);
+        int detected = classifyButtonFromMv(mv);
+        if (detected != candidateBtnIndex) {
+          candidateBtnIndex = detected;
+          candidateStartMs  = now;
+        } else if (now - candidateStartMs >= 30) {
+          if (activeBtnIndex != candidateBtnIndex) {
+            int prevBtn = activeBtnIndex;
+            activeBtnIndex = candidateBtnIndex;
+            if (activeBtnIndex >= 0 && !buttonActionTriggered) {
+              buttonActionTriggered = true;
+              onButtonConfirmed(activeBtnIndex, mv, raw);
+            } else if (activeBtnIndex < 0 && prevBtn >= 0) {
+              buttonActionTriggered = false;
+            }
+          }
         }
       }
     }
 
-    // Khi đang ở màn hình 4 (Kiểm tra DIO & ADC) hoặc khi đang nhấn giữ nút, in thông số ADC mỗi 300ms
+    // 3. Khi đang ở màn hình 4 (Kiểm tra DIO & ADC) hoặc khi đang nhấn giữ nút, in thông số ADC mỗi 300ms
     if (liveAdcSerialStream && (now - lastSerialPrintMs >= 300) &&
         (TestDisplay::getScreenModeName() == "diag" || activeBtnIndex >= 0)) {
       lastSerialPrintMs = now;
       const char* btnName = (activeBtnIndex >= 0) ? BUTTON_SPECS[activeBtnIndex].name : "KHÔNG BẤM (Hở mạch)";
       const char* resName = (activeBtnIndex >= 0) ? BUTTON_SPECS[activeBtnIndex].resistorLabel : "∞ (Pull-up 10k)";
       Serial.printf("[ADC IO%d] Áp: %4.2fV (%4d mV) | ADC(12-bit): %4d | Trở: %-15s | Nút: %s\n",
-                    activeAdcPin, mv / 1000.0f, mv, raw, resName, btnName);
+                    activeAdcPin, lastAdcMv / 1000.0f, lastAdcMv, lastAdcRaw, resName, btnName);
     }
   }
 
@@ -223,8 +313,16 @@ namespace TestButtons {
     Serial.printf("🌐 [WEB VIRTUAL KEYPAD] Nhận lệnh bấm phím từ Web: %-13s | Trở: %-11s | Mô phỏng: %.2fV (%4dmV)\n",
                   spec.name, spec.resistorLabel, lastAdcMv / 1000.0f, lastAdcMv);
 
-    // Gửi trực tiếp sự kiện sang màn hình ST7789
-    TestDisplay::onKeypadEvent(idx);
+    if (TestDisplay::isSleeping()) {
+      TestDisplay::wakeUpScreenFromTask();
+      return;
+    }
+
+    if (s_keypadQueue != nullptr) {
+      xQueueSend(s_keypadQueue, &idx, 0);
+    } else {
+      TestDisplay::onKeypadEvent(idx);
+    }
   }
 
   void injectButtonRelease() {
