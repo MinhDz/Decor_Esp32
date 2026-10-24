@@ -79,3 +79,26 @@ static const S40ThemeSpec S40_THEMES[S40_THEME_COUNT] = {
   }
 };
 
+
+
+// Biến chỉ số chủ đề giao diện hiện tại (0..5)
+extern int s40UiThemeIdx;
+
+inline const S40ThemeSpec& curTheme() {
+  return S40_THEMES[((s40UiThemeIdx % S40_THEME_COUNT) + S40_THEME_COUNT) % S40_THEME_COUNT];
+}
+
+// Ánh xạ tự động bảng màu hệ thống theo Chủ đề (Theme) đang chọn
+#ifndef C_DARK_BG
+#define C_DARK_BG     (curTheme().darkBg)
+#define C_CARD_BG     (curTheme().cardBg)
+#define C_CARD_SEL    (curTheme().cardSelBg)
+#define C_CARD_BORDER (curTheme().cardBorder)
+#define C_HEADER_BG   (curTheme().headerBg)
+#define C_NEON_BLUE   (curTheme().neonCyan)
+#define C_NEON_CYAN   (curTheme().neonCyan)
+#define C_NEON_GREEN  (curTheme().neonGreen)
+#define C_NEON_PINK   (curTheme().neonPink)
+#define C_NEON_AMBER  (curTheme().neonAmber)
+#define C_NEON_PURPLE (curTheme().neonPurple)
+#endif
