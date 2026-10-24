@@ -1296,6 +1296,322 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     }
   };
 
+  // ================================================================
+  //          SPACE OS WEB CLI TERMINAL & INTELLISENSE ENGINE
+  // ================================================================
+  window.cliSessionOutputs = [];
+  try {
+    window.cliHistory = JSON.parse(localStorage.getItem('spaceos_cli_history') || '[]');
+  } catch(e) {
+    window.cliHistory = [];
+  }
+  window.cliHistoryIdx = -1;
+  window.cliSuggestActiveIdx = -1;
+  window.currentSuggestions = [];
+
+  const CLI_COMMANDS = [
+    { cmd: "modules", display: "modules", type: "CMD", badge: "badge-cmd", desc: "Liệt kê toàn bộ module ngoại vi và trạng thái hoạt động", syntax: "modules" },
+    { cmd: "list", display: "list", type: "CMD", badge: "badge-cmd", desc: "Bí danh của 'modules' - Xem danh sách ngoại vi", syntax: "list" },
+    { cmd: "status", display: "status <module>", type: "CMD", badge: "badge-cmd", desc: "Xem báo cáo chẩn đoán chi tiết một module cụ thể", syntax: "status [module]" },
+    { cmd: "status sht31", display: "status sht31", type: "MOD", badge: "badge-mod", desc: "Cảm biến SHT31: Nhiệt độ (°C), độ ẩm (%), bus I2C & chân", syntax: "status sht31" },
+    { cmd: "status sd", display: "status sd", type: "MOD", badge: "badge-mod", desc: "Thẻ nhớ SD: Dung lượng MB, tình trạng mount, cấu hình SPI", syntax: "status sd" },
+    { cmd: "status audio", display: "status audio", type: "MOD", badge: "badge-mod", desc: "Âm thanh MAX98357A: Âm lượng loa, trình phát nhạc, bus I2S", syntax: "status audio" },
+    { cmd: "status mic", display: "status mic", type: "MOD", badge: "badge-mod", desc: "Microphone INMP441: Tần số lấy mẫu 16kHz, mức âm thanh VU", syntax: "status mic" },
+    { cmd: "status wifi", display: "status wifi", type: "MOD", badge: "badge-mod", desc: "Mạng WiFi: SSID, IP, Gateway, MAC, sóng RSSI dBm", syntax: "status wifi" },
+    { cmd: "status mem", display: "status mem", type: "MOD", badge: "badge-mod", desc: "Bộ nhớ RAM: Heap tự do, PSRAM 8MB, chế độ dọn rác nghiêm ngặt", syntax: "status mem" },
+    { cmd: "status motor", display: "status motor", type: "MOD", badge: "badge-mod", desc: "Động cơ cối xay gió: Tốc độ %, chế độ quay, chân cầu H L298N", syntax: "status motor" },
+    { cmd: "status led", display: "status led", type: "MOD", badge: "badge-mod", desc: "Hệ thống đèn: Bóng Edison trái/phải, dải LED COB nước chảy", syntax: "status led" },
+    { cmd: "status xiaozhi", display: "status xiaozhi", type: "MOD", badge: "badge-mod", desc: "Trợ lý ảo XiaoZhi AI: Kết nối WebSocket, hội thoại giọng nói", syntax: "status xiaozhi" },
+    { cmd: "status display", display: "status display", type: "MOD", badge: "badge-mod", desc: "Màn hình ST7789: Chế độ hiển thị 0-19, độ sáng đèn nền", syntax: "status display" },
+    { cmd: "status sys", display: "status sys", type: "MOD", badge: "badge-mod", desc: "Thông số ESP32-S3: Core rev, CPU 240MHz, bản phân vùng, Uptime", syntax: "status sys" },
+    { cmd: "status profiler", display: "status profiler", type: "MOD", badge: "badge-mod", desc: "Giám sát hiệu năng: FPS, thời gian chu kỳ (µs), tác vụ CPU", syntax: "status profiler" },
+    { cmd: "clean", display: "clean", type: "ACT", badge: "badge-act", desc: "Thu hồi & dọn rác bộ nhớ RAM ngay lập tức (MemoryScavenger)", syntax: "clean" },
+    { cmd: "scavenge", display: "scavenge", type: "ACT", badge: "badge-act", desc: "Bí danh của 'clean' - Dọn dẹp bộ đệm giải phóng Heap/PSRAM", syntax: "scavenge" },
+    { cmd: "strict", display: "strict <0|1|2>", type: "SET", badge: "badge-set", desc: "Cấu hình dọn RAM (0: Tắt, 1: Tiêu chuẩn, 2: Nghiêm ngặt)", syntax: "strict [0|1|2]" },
+    { cmd: "strict 0", display: "strict 0", type: "SET", badge: "badge-set", desc: "Tắt chế độ dọn dẹp nghiêm ngặt", syntax: "strict 0" },
+    { cmd: "strict 1", display: "strict 1", type: "SET", badge: "badge-set", desc: "Bật chế độ dọn RAM TIÊU CHUẨN (Dọn sau 120-180s nhàn rỗi)", syntax: "strict 1" },
+    { cmd: "strict 2", display: "strict 2", type: "SET", badge: "badge-set", desc: "Bật chế độ dọn RAM NGHIÊM NGẶT (Dọn sau 30-45s / Sleep)", syntax: "strict 2" },
+    { cmd: "vol", display: "vol <0-100>", type: "SET", badge: "badge-set", desc: "Cài đặt âm lượng loa chính MAX98357A (0 - 100%)", syntax: "vol [0-100]" },
+    { cmd: "vol 70", display: "vol 70", type: "SET", badge: "badge-set", desc: "Đặt âm lượng loa ở mức 70%", syntax: "vol 70" },
+    { cmd: "beep", display: "beep [freq] [ms]", type: "ACT", badge: "badge-act", desc: "Phát âm thanh kiểm tra loa (Ví dụ: beep 1000 200)", syntax: "beep [f] [ms]" },
+    { cmd: "tune nokia", display: "tune nokia", type: "ACT", badge: "badge-act", desc: "Phát nhạc chuông huyền thoại Nokia Tune (Grande Valse)", syntax: "tune nokia" },
+    { cmd: "tune ok", display: "tune ok", type: "ACT", badge: "badge-act", desc: "Phát âm thanh báo thành công / OK Chime", syntax: "tune ok" },
+    { cmd: "tune del", display: "tune del", type: "ACT", badge: "badge-act", desc: "Phát âm thanh cảnh báo / Delete Chime", syntax: "tune del" },
+    { cmd: "tune sms", display: "tune sms", type: "ACT", badge: "badge-act", desc: "Phát âm báo tin nhắn Morse SMS kinh điển (... -- ...)", syntax: "tune sms" },
+    { cmd: "toast", display: "toast <nội_dung>", type: "ACT", badge: "badge-act", desc: "Hiện thông báo Toast nổi lên màn hình LCD", syntax: "toast [text]" },
+    { cmd: "mode", display: "mode <0-19>", type: "SET", badge: "badge-set", desc: "Chuyển giao diện màn hình (0: Chờ, 1: Đồng hồ tròn, 11: AI...)", syntax: "mode [0-19]" },
+    { cmd: "motor", display: "motor <0-100|off>", type: "SET", badge: "badge-set", desc: "Điều khiển tốc độ động cơ cối xay gió", syntax: "motor [0-100|off]" },
+    { cmd: "motor off", display: "motor off", type: "SET", badge: "badge-set", desc: "Dừng quay động cơ cối xay gió", syntax: "motor off" },
+    { cmd: "motor 50", display: "motor 50", type: "SET", badge: "badge-set", desc: "Quay cối xay gió tốc độ 50%", syntax: "motor 50" },
+    { cmd: "led left 80", display: "led left 80", type: "SET", badge: "badge-set", desc: "Đặt độ sáng bóng Edison Trái 80%", syntax: "led left [0-100]" },
+    { cmd: "led right 80", display: "led right 80", type: "SET", badge: "badge-set", desc: "Đặt độ sáng bóng Edison Phải 80%", syntax: "led right [0-100]" },
+    { cmd: "led cob next", display: "led cob next", type: "ACT", badge: "badge-act", desc: "Chuyển chế độ LED COB nước chảy kế tiếp", syntax: "led cob next" },
+    { cmd: "snapshot", display: "snapshot", type: "ACT", badge: "badge-act", desc: "Ghi bản chụp nhật ký & phần cứng ra thẻ nhớ SD", syntax: "snapshot" },
+    { cmd: "clear", display: "clear", type: "CMD", badge: "badge-cmd", desc: "Xóa sạch nội dung hiển thị trên màn hình Terminal Web", syntax: "clear" },
+    { cmd: "reboot", display: "reboot", type: "CMD", badge: "badge-cmd", desc: "Khởi động lại vi điều khiển ESP32-S3 từ xa", syntax: "reboot" },
+    { cmd: "help", display: "help", type: "CMD", badge: "badge-cmd", desc: "Xem hướng dẫn chi tiết và danh mục toàn bộ lệnh CLI", syntax: "help" }
+  ];
+
+  window.extractCliPrefix = function(val) {
+    if (!val) return "";
+    let m = val.match(/^(?:sudo|spaceos|space|decor)\s+/i);
+    return m ? m[0] : "";
+  };
+
+  window.handleCliInput = function() {
+    const input = document.getElementById('cli-input');
+    if (!input) return;
+    const val = input.value;
+    const prefix = window.extractCliPrefix(val);
+    const query = val.substring(prefix.length).trimStart();
+
+    if (query.length === 0) {
+      window.currentSuggestions = CLI_COMMANDS.slice(0, 8);
+    } else {
+      const q = query.toLowerCase();
+      window.currentSuggestions = CLI_COMMANDS.filter(function(item) {
+        return item.cmd.toLowerCase().startsWith(q) || item.cmd.toLowerCase().includes(q) || item.display.toLowerCase().includes(q);
+      });
+    }
+    window.cliSuggestActiveIdx = window.currentSuggestions.length > 0 ? 0 : -1;
+    window.renderCliSuggestions(window.currentSuggestions, prefix, query);
+  };
+
+  window.handleCliFocus = function() {
+    window.handleCliInput();
+  };
+
+  window.renderCliSuggestions = function(list, prefix, query) {
+    const popup = document.getElementById('cli-suggest-popup');
+    if (!popup) return;
+
+    if (!list || list.length === 0) {
+      popup.style.display = 'none';
+      popup.innerHTML = '';
+      return;
+    }
+
+    let html = '';
+    for (let idx = 0; idx < list.length; idx++) {
+      let item = list[idx];
+      let isSel = (idx === window.cliSuggestActiveIdx);
+      let selClass = isSel ? 'selected' : '';
+      let disp = escapeHtml(item.display);
+      if (query && query.length > 0) {
+        let regex = new RegExp('(' + query.replace(/[-\/\\^$*+?.()|[\]{}]/g, '\\$&') + ')', 'gi');
+        disp = disp.replace(regex, '<span style="color:var(--term-accent, #38bdf8);font-weight:700;text-decoration:underline;">$1</span>');
+      }
+      html += '<div class="cli-item ' + selClass + '" onmousedown="window.selectCliSuggestion(' + idx + ', event)">' +
+        '<span class="cli-badge ' + item.badge + '">' + item.type + '</span>' +
+        '<span style="font-weight:600;color:#f8fafc;">' + disp + '</span>' +
+        '<span style="color:#94a3b8;font-size:0.7rem;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:320px;">' + escapeHtml(item.desc) + '</span>' +
+        '<span class="cli-syntax">' + escapeHtml(item.syntax) + '</span>' +
+      '</div>';
+    }
+
+    popup.innerHTML = html;
+    popup.style.display = 'block';
+
+    const selEl = popup.querySelector('.cli-item.selected');
+    if (selEl) {
+      selEl.scrollIntoView({ block: 'nearest' });
+    }
+  };
+
+  window.selectCliSuggestion = function(idx, evt) {
+    if (evt) evt.preventDefault();
+    if (idx < 0 || idx >= window.currentSuggestions.length) return;
+    const item = window.currentSuggestions[idx];
+    const input = document.getElementById('cli-input');
+    if (!input) return;
+
+    const prefix = window.extractCliPrefix(input.value);
+    input.value = prefix + item.cmd;
+
+    const popup = document.getElementById('cli-suggest-popup');
+    if (popup) popup.style.display = 'none';
+    window.cliSuggestActiveIdx = -1;
+
+    // Nếu lệnh là lệnh có đối số cần nhập thêm thì thêm khoảng trắng và mở lại gợi ý
+    if (item.cmd === 'status' || item.cmd === 'strict' || item.cmd === 'vol' || item.cmd === 'mode' || item.cmd === 'toast' || item.cmd === 'beep') {
+      input.value = input.value + ' ';
+      input.focus();
+      window.handleCliInput();
+    } else {
+      input.focus();
+      // Nếu là thao tác nhấp chuột (click) vào 1 lệnh hoàn chỉnh (không phải gõ phím), thực thi luôn!
+      if (evt && evt.type === 'mousedown') {
+        window.execCliInput();
+      }
+    }
+  };
+
+  window.handleCliKeyDown = function(e) {
+    const popup = document.getElementById('cli-suggest-popup');
+    const isPopupOpen = popup && popup.style.display === 'block';
+
+    if (isPopupOpen) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (window.currentSuggestions.length > 0) {
+          window.cliSuggestActiveIdx = (window.cliSuggestActiveIdx + 1) % window.currentSuggestions.length;
+          const prefix = window.extractCliPrefix(e.target.value);
+          const query = e.target.value.substring(prefix.length).trimStart();
+          window.renderCliSuggestions(window.currentSuggestions, prefix, query);
+        }
+        return;
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (window.currentSuggestions.length > 0) {
+          window.cliSuggestActiveIdx = (window.cliSuggestActiveIdx - 1 + window.currentSuggestions.length) % window.currentSuggestions.length;
+          const prefix = window.extractCliPrefix(e.target.value);
+          const query = e.target.value.substring(prefix.length).trimStart();
+          window.renderCliSuggestions(window.currentSuggestions, prefix, query);
+        }
+        return;
+      }
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (window.cliSuggestActiveIdx >= 0 && window.cliSuggestActiveIdx < window.currentSuggestions.length) {
+          window.selectCliSuggestion(window.cliSuggestActiveIdx);
+        }
+        return;
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        popup.style.display = 'none';
+        window.cliSuggestActiveIdx = -1;
+        return;
+      }
+      if (e.key === 'Enter') {
+        if (window.cliSuggestActiveIdx >= 0 && window.cliSuggestActiveIdx < window.currentSuggestions.length) {
+          const item = window.currentSuggestions[window.cliSuggestActiveIdx];
+          const inputVal = e.target.value.trim();
+          const prefix = window.extractCliPrefix(inputVal);
+          const rawQ = inputVal.substring(prefix.length).trim();
+          if (rawQ !== item.cmd) {
+            e.preventDefault();
+            window.selectCliSuggestion(window.cliSuggestActiveIdx);
+            return;
+          }
+        }
+      }
+    } else {
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        if (window.cliHistory && window.cliHistory.length > 0) {
+          if (window.cliHistoryIdx === -1) window.cliHistoryIdx = window.cliHistory.length - 1;
+          else if (window.cliHistoryIdx > 0) window.cliHistoryIdx--;
+          e.target.value = window.cliHistory[window.cliHistoryIdx];
+        }
+        return;
+      }
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        if (window.cliHistory && window.cliHistory.length > 0 && window.cliHistoryIdx >= 0) {
+          if (window.cliHistoryIdx < window.cliHistory.length - 1) {
+            window.cliHistoryIdx++;
+            e.target.value = window.cliHistory[window.cliHistoryIdx];
+          } else {
+            window.cliHistoryIdx = -1;
+            e.target.value = '';
+          }
+        }
+        return;
+      }
+    }
+
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      window.execCliInput();
+    }
+  };
+
+  document.addEventListener('click', function(e) {
+    const popup = document.getElementById('cli-suggest-popup');
+    const input = document.getElementById('cli-input');
+    if (popup && popup.style.display === 'block') {
+      if (!popup.contains(e.target) && e.target !== input) {
+        popup.style.display = 'none';
+        window.cliSuggestActiveIdx = -1;
+      }
+    }
+  });
+
+  window.execCliInput = async function() {
+    const input = document.getElementById('cli-input');
+    if (!input) return;
+    const cmd = input.value.trim();
+    if (cmd.length === 0) return;
+
+    if (!window.cliHistory) window.cliHistory = [];
+    if (!window.cliHistory.includes(cmd)) {
+      window.cliHistory.push(cmd);
+      if (window.cliHistory.length > 50) window.cliHistory.shift();
+      try { localStorage.setItem('spaceos_cli_history', JSON.stringify(window.cliHistory)); } catch(e){}
+    }
+    window.cliHistoryIdx = -1;
+
+    const popup = document.getElementById('cli-suggest-popup');
+    if (popup) popup.style.display = 'none';
+    window.cliSuggestActiveIdx = -1;
+
+    await window.runQuickCli(cmd);
+  };
+
+  window.runQuickCli = async function(cmdStr) {
+    if (!cmdStr || cmdStr.trim().length === 0) return;
+    const cmd = cmdStr.trim();
+
+    // Cập nhật lên ô nhập lệnh để người dùng quan sát trực quan
+    const input = document.getElementById('cli-input');
+    if (input) input.value = cmd;
+
+    const popup = document.getElementById('cli-suggest-popup');
+    if (popup) popup.style.display = 'none';
+    window.cliSuggestActiveIdx = -1;
+
+    // Thêm bản ghi pending vào terminal
+    const timeStr = new Date().toLocaleTimeString();
+    const entry = { cmd: cmd, output: "Đang truyền tải lệnh tới trạm ESP32-S3...", pending: true, time: timeStr, success: true };
+    if (!window.cliSessionOutputs) window.cliSessionOutputs = [];
+    window.cliSessionOutputs.push(entry);
+    window.renderLogLines();
+
+    try {
+      let res = await fetch('/api/terminal/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd: cmd })
+      });
+      let data = await res.json();
+
+      if (data.clear) {
+        window.cliSessionOutputs = [];
+        window.rawLogLines = [];
+        window.renderLogLines();
+        return;
+      }
+
+      entry.output = data.output || '(Không có kết xuất)';
+      entry.pending = false;
+      entry.success = (data.success !== false);
+      window.renderLogLines();
+    } catch (err) {
+      entry.output = 'Lỗi kết nối Web Server: ' + err.message;
+      entry.pending = false;
+      entry.success = false;
+      window.renderLogLines();
+    }
+  };
+
+  window.clearCliTerminal = function() {
+    window.cliSessionOutputs = [];
+    window.rawLogLines = [];
+    window.renderLogLines();
+  };
+
   window.downloadSysLogs = function() {
     window.open('/api/logs/download', '_blank');
   };
