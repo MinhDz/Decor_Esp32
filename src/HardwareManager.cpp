@@ -83,6 +83,7 @@ void HardwareManager::heartbeat() {
 }
 
 #include "tests/ModuleTestRunner.h"
+#include "MemoryScavenger.h"
 
 void HardwareManager::handleSerialCommands() {
   if (Serial.available()) {
@@ -93,6 +94,9 @@ void HardwareManager::handleSerialCommands() {
     if (c == 'r' || c == 'R') {
       Serial.println("\n🔄 Nhận lệnh 'r': Đang gọi lại kiểm tra XiaoZhi OTA...");
       XiaoZhiClient::queryOTA(true);
+    } else if (c == 'c' || c == 'C') {
+      Serial.println("\n🧹 Nhận lệnh 'c': Kích hoạt dọn rác và thu hồi bộ nhớ (Memory Scavenger)...");
+      MemoryScavenger::scavenge(true, "SERIAL_COMMAND");
     } else if (c == 'h' || c == 'H') {
       Serial.println("\n=======================================================");
       Serial.println("📋 TRẠM DECOR ESP32-S3 (N16R8) - BẢNG ĐIỀU KHIỂN SERIAL");
@@ -102,6 +106,7 @@ void HardwareManager::handleSerialCommands() {
       Serial.printf("🧠 Free Heap RAM : %u KB\n", getFreeHeapKb());
       Serial.printf("💾 Free PSRAM    : %.1f MB\n", getFreePsramMb());
       Serial.println("👉 Bấm phím 'r' rồi Enter: Gọi kiểm tra XiaoZhi OTA ngay.");
+      Serial.println("👉 Bấm phím 'c' rồi Enter: Thu hồi bộ nhớ RAM & PSRAM khẩn cấp.");
       Serial.println("=======================================================");
       ModuleTestRunner::printAllHelp();
     }

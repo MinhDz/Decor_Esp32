@@ -18,6 +18,7 @@
 #include "TelemetryManager.h"
 #include "TaskProfiler.h"
 #include "SystemLogger.h"
+#include "MemoryScavenger.h"
 
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -785,6 +786,41 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           <div style="background:#0f172a;padding:12px;border-radius:8px;border:1px solid #1e293b;">
             <div style="font-size:0.75rem;color:#94a3b8;">Thời Gian Hoạt Động (Uptime)</div>
             <div id="sys-uptime" style="font-size:1.1rem;font-weight:700;color:#ec4899;margin-top:4px;">--</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 1b. DỌN RÁC BỘ NHỚ & CHẾ ĐỘ NGHIÊM NGẶT (MEMORY SCAVENGER & STRICT MODE) -->
+      <div class="designer-panel" style="margin-top:16px;width:100%;max-width:100%;">
+        <div class="designer-title">
+          <span>🧹 Dọn Rác Bộ Nhớ & Chế Độ Nghiêm Ngặt (Memory Scavenger)</span>
+          <button class="btn-primary" style="width:auto;padding:5px 14px;font-size:0.76rem;background:#10b981;" onclick="window.triggerMemoryScavenge()">🧹 Dọn RAM Ngay</button>
+        </div>
+        <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:12px;line-height:1.5;">
+          Tự động giám sát thời gian nhàn rỗi và giải phóng các bộ đệm lớn (Audio Rec 256KB, Stream Jitter Ring 384KB, MJPEG Video 64KB, XiaoZhi Opus Decoder 25KB) khi không sử dụng. Tự cấp phát lại ngay lập tức khi ứng dụng cần.
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:12px;margin-bottom:12px;">
+          <div style="background:#0f172a;padding:12px;border-radius:8px;border:1px solid #1e293b;">
+            <div style="font-size:0.75rem;color:#94a3b8;">Chế Độ Nghiêm Ngặt (Strict Mode)</div>
+            <select id="mem-strict-select" onchange="window.setMemoryStrictMode(this.value)" style="width:100%;background:#1e293b;color:#38bdf8;border:1px solid #334155;padding:6px;border-radius:6px;font-size:0.8rem;margin-top:6px;font-weight:600;">
+              <option value="0">0: Tắt (Chỉ dọn khi khẩn cấp/thủ công)</option>
+              <option value="1" selected>1: Cân bằng (Dọn sau 3 phút idle)</option>
+              <option value="2">2: Nghiêm ngặt (Dọn sau 60s / khi tắt màn)</option>
+            </select>
+          </div>
+          <div style="background:#0f172a;padding:12px;border-radius:8px;border:1px solid #1e293b;">
+            <div style="font-size:0.75rem;color:#94a3b8;">Lần Dọn Gần Nhất</div>
+            <div id="mem-last-freed" style="font-size:1.05rem;font-weight:700;color:#10b981;margin-top:4px;">-- KB</div>
+            <div id="mem-last-reason" style="font-size:0.7rem;color:#64748b;margin-top:2px;">Lý do: --</div>
+          </div>
+          <div style="background:#0f172a;padding:12px;border-radius:8px;border:1px solid #1e293b;">
+            <div style="font-size:0.75rem;color:#94a3b8;">Tổng Dung Lượng Đã Thu Hồi</div>
+            <div id="mem-total-freed" style="font-size:1.05rem;font-weight:700;color:#f59e0b;margin-top:4px;">0 KB</div>
+            <div id="mem-total-runs" style="font-size:0.7rem;color:#64748b;margin-top:2px;">Số lần dọn: 0 lần</div>
+          </div>
+          <div style="background:#0f172a;padding:12px;border-radius:8px;border:1px solid #1e293b;">
+            <div style="font-size:0.75rem;color:#94a3b8;">Trạng Thái Bộ Đệm Ứng Dụng</div>
+            <div id="mem-buffers-badge" style="font-size:0.78rem;font-weight:600;color:#e2e8f0;margin-top:6px;line-height:1.6;">Đang tải...</div>
           </div>
         </div>
       </div>
@@ -1813,8 +1849,77 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       const upM = Math.floor((up % 3600) / 60);
       const upS = up % 60;
       if (el('sys-uptime')) el('sys-uptime').innerText = `${upH}h ${upM}m ${upS}s`;
+      if (typeof window.fetchMemoryStatus === 'function') {
+        window.fetchMemoryStatus();
+      }
     } catch (e) {
       console.error(e);
+    }
+  };
+
+  // Lấy trạng thái Memory Scavenger & Bộ đệm
+  window.fetchMemoryStatus = async function() {
+    try {
+      const res = await fetch('/api/memory/status');
+      if (!res.ok) return;
+      const d = await res.json();
+      const el = id => document.getElementById(id);
+      if (el('mem-strict-select') && document.activeElement !== el('mem-strict-select')) {
+        el('mem-strict-select').value = String(d.strict_mode !== undefined ? d.strict_mode : 1);
+      }
+      if (el('mem-last-freed')) {
+        if (d.last_scavenge && d.last_scavenge.freed_kb > 0) {
+          el('mem-last-freed').innerText = `+${d.last_scavenge.freed_kb} KB`;
+        } else {
+          el('mem-last-freed').innerText = `0 KB (Tối ưu)`;
+        }
+      }
+      if (el('mem-last-reason')) {
+        el('mem-last-reason').innerText = `Lý do: ${d.last_scavenge ? d.last_scavenge.reason : 'Chưa chạy'}`;
+      }
+      if (el('mem-total-freed')) {
+        el('mem-total-freed').innerText = `${d.cumulative_freed_kb || 0} KB`;
+      }
+      if (el('mem-total-runs')) {
+        el('mem-total-runs').innerText = `Số lần dọn: ${d.total_scavenge_runs || 0} lần`;
+      }
+      if (el('mem-buffers-badge')) {
+        const audioBadge = d.audio_has_buf ? '<span style="color:#f59e0b;">● Rec 256K</span>' : '<span style="color:#10b981;">○ Rec Trống</span>';
+        const streamBadge = d.stream_has_buf ? '<span style="color:#f59e0b;">● Stream 448K</span>' : '<span style="color:#10b981;">○ Stream Trống</span>';
+        const uploadBadge = d.upload_has_buf ? '<span style="color:#f59e0b;">● Upload 64K</span>' : '<span style="color:#10b981;">○ Upload Trống</span>';
+        const xzBadge = d.xiaozhi_has_buf ? '<span style="color:#f59e0b;">● Opus 25K</span>' : '<span style="color:#10b981;">○ Opus Trống</span>';
+        el('mem-buffers-badge').innerHTML = `${audioBadge} • ${streamBadge}<br>${uploadBadge} • ${xzBadge}`;
+      }
+    } catch (e) {
+      console.warn("fetchMemoryStatus:", e);
+    }
+  };
+
+  // Kích hoạt Dọn RAM thủ công
+  window.triggerMemoryScavenge = async function() {
+    try {
+      const res = await fetch('/api/memory/scavenge', { method: 'POST' });
+      if (!res.ok) return;
+      const d = await res.json();
+      alert(`🧹 Dọn RAM thành công!\nĐã thu hồi: ${d.freed_kb} KB\nHeap hiện tại: ${(d.free_heap/1024).toFixed(0)} KB\nPSRAM trống: ${(d.free_psram/(1024*1024)).toFixed(1)} MB`);
+      window.fetchMemoryStatus();
+      window.loadSystemInfo();
+    } catch (e) {
+      alert("Lỗi gọi Dọn RAM: " + e.message);
+    }
+  };
+
+  // Cấu hình Chế độ Nghiêm ngặt
+  window.setMemoryStrictMode = async function(val) {
+    try {
+      await fetch('/api/memory/config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ strict_mode: parseInt(val) })
+      });
+      window.fetchMemoryStatus();
+    } catch (e) {
+      console.warn("setMemoryStrictMode error:", e);
     }
   };
 
@@ -7229,6 +7334,22 @@ static const size_t MAX_STREAM_JPEG_UPLOAD = 64 * 1024;
 static uint32_t s_logVideoFrameCount = 0;
 static uint32_t s_logAudioPcmChunks = 0;
 
+bool WebRoutes::hasAllocatedUploadBuffer() {
+  return (s_streamJpegUploadBuf != nullptr);
+}
+
+size_t WebRoutes::trimMemory() {
+  if (s_streamJpegUploadBuf == nullptr) return 0;
+  if (WebStreamManager::isVideoStreaming()) return 0;
+
+  size_t freed = MAX_STREAM_JPEG_UPLOAD;
+  free(s_streamJpegUploadBuf);
+  s_streamJpegUploadBuf = nullptr;
+  s_streamJpegUploadLen = 0;
+  Serial.printf("🧹 [TRIM WEB] Đã giải phóng bộ đệm upload video (%u KB)\n", (unsigned int)(freed / 1024));
+  return freed;
+}
+
 static void handleStreamVideoUpload() {
   HTTPUpload& upload = server.upload();
   if (upload.status == UPLOAD_FILE_START) {
@@ -7439,11 +7560,64 @@ static void handleGetTelemetryStats() {
 //                     KHỞI CHẠY WEB SERVER & ROUTES
 // ================================================================
 
+static void handleMemoryStatus() {
+  JsonDocument doc;
+  MemoryScavenger::getStatusJson(doc);
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleMemoryScavenge() {
+  ScavengeReport rep = MemoryScavenger::scavenge(true, "WEB_API");
+  JsonDocument doc;
+  doc["status"] = "ok";
+  doc["freed_bytes"] = rep.totalFreedBytes;
+  doc["freed_kb"] = rep.totalFreedBytes / 1024;
+  doc["heap_freed"] = rep.heapFreedBytes;
+  doc["psram_freed"] = rep.psramFreedBytes;
+  doc["reason"] = rep.triggerReason;
+  doc["free_heap"] = ESP.getFreeHeap();
+  doc["free_psram"] = ESP.getFreePsram();
+  String out;
+  serializeJson(doc, out);
+  server.send(200, "application/json", out);
+}
+
+static void handleMemoryConfig() {
+  if (!server.hasArg("plain")) {
+    server.send(400, "application/json", "{\"error\":\"Missing body\"}");
+    return;
+  }
+  JsonDocument doc;
+  DeserializationError err = deserializeJson(doc, server.arg("plain"));
+  if (err) {
+    server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+    return;
+  }
+  if (doc.containsKey("strict_mode")) {
+    uint8_t mode = doc["strict_mode"].as<uint8_t>();
+    if (mode > 2) mode = 1;
+    MemoryScavenger::setStrictMode((StrictModeLevel)mode);
+  }
+  JsonDocument resp;
+  resp["status"] = "ok";
+  resp["strict_mode"] = (uint8_t)MemoryScavenger::getStrictMode();
+  resp["mode_name"] = MemoryScavenger::getStrictModeName();
+  String out;
+  serializeJson(resp, out);
+  server.send(200, "application/json", out);
+}
+
 void WebRoutes::begin() {
   // 1. Phục vụ trang chủ "/"
   server.on("/", HTTP_GET, handleRoot);
 
   // 1b. Các REST API Thời tiết Real-time & Telemetry (1MB PSRAM Circular Buffer)
+  server.on("/api/memory/status", HTTP_GET, handleMemoryStatus);
+  server.on("/api/memory/scavenge", HTTP_POST, handleMemoryScavenge);
+  server.on("/api/memory/config", HTTP_POST, handleMemoryConfig);
+
   server.on("/api/weather", HTTP_GET, handleGetWeather);
   server.on("/api/weather/refresh", HTTP_POST, handleRefreshWeather);
   server.on("/api/telemetry/history", HTTP_GET, handleGetTelemetryHistory);

@@ -93,6 +93,10 @@ namespace TestAudio {
   bool isMusicPlaying();
   void getAudioSpectrumLevels(uint8_t& bass, uint8_t& treble);
 
+  // --- THU HỒI BỘ NHỚ AN TOÀN (MEMORY SCAVENGER / STRICT MODE) ---
+  size_t trimMemory();
+  bool hasAllocatedRecBuffer();
+
   // Xử lý phím tắt từ Serial Monitor ('m': Sóng Âm, 'p': Nghe Lại Loa, 't': Test Bíp, 'a': Chime, 'n': Nokia, '+','-': Vol)
   bool handleSerial(char cmd);
 }

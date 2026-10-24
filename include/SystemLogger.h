@@ -63,6 +63,9 @@ public:
   // Lấy chuỗi định dạng thời gian hiện tại
   static String getFormattedTime();
 
+  // Xả dữ liệu nhật ký đệm xuống thẻ SD ngay lập tức
+  static void flush();
+
 private:
   static void flushBufferToSd();
   static void checkLogRotation();

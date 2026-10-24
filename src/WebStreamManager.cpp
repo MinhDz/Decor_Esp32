@@ -393,6 +393,14 @@ bool WebStreamManager::queueVideoFrame(const uint8_t* jpegData, size_t len) {
     return false;
   }
 
+  if (!s_asyncVideoBuf) {
+    if (psramFound()) {
+      s_asyncVideoBuf = (uint8_t*)ps_malloc(MAX_STREAM_JPG_SIZE);
+    }
+    if (!s_asyncVideoBuf) {
+      s_asyncVideoBuf = (uint8_t*)malloc(MAX_STREAM_JPG_SIZE);
+    }
+  }
   if (!s_asyncVideoBuf) return false;
 
   taskENTER_CRITICAL(&s_streamMux);
@@ -743,4 +751,66 @@ void WebStreamManager::getStatusJson(JsonDocument& doc) {
   doc["url_type"]       = s_activeUrlType;
   doc["url"]            = s_activeUrl;
   doc["vol_music"]      = TestAudio::getMusicVolumePct();
+}
+
+bool WebStreamManager::hasAllocatedBuffers() {
+  return (s_asyncVideoBuf != nullptr || s_audioRingBuf != nullptr);
+}
+
+size_t WebStreamManager::trimMemory() {
+  // Không thu hồi nếu đang stream video hoặc audio
+  if (isVideoStreaming() || isAudioStreaming() || s_urlStreamRunning) {
+    return 0;
+  }
+
+  size_t totalFreed = 0;
+
+  // 1. Dừng task Audio Pump nếu đang chạy ngầm
+  if (s_audioPumpTaskHandle != nullptr) {
+    s_audioPumpRunning = false;
+    unsigned long startWait = millis();
+    while (s_audioPumpTaskHandle != nullptr && millis() - startWait < 150) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
+  }
+
+  // 2. Thu hồi s_audioRingBuf (384 KB)
+  int16_t* pAudio = nullptr;
+  taskENTER_CRITICAL(&s_audioRingMux);
+  if (s_audioRingBuf != nullptr) {
+    pAudio = s_audioRingBuf;
+    s_audioRingBuf = nullptr;
+    s_audioRingHead = 0;
+    s_audioRingTail = 0;
+    s_audioRingCount = 0;
+    s_isPrebuffering = true;
+    totalFreed += AUDIO_RING_CAPACITY * sizeof(int16_t);
+  }
+  taskEXIT_CRITICAL(&s_audioRingMux);
+
+  if (pAudio != nullptr) {
+    free(pAudio);
+  }
+
+  // 3. Thu hồi s_asyncVideoBuf (64 KB)
+  uint8_t* pVideo = nullptr;
+  taskENTER_CRITICAL(&s_streamMux);
+  if (s_asyncVideoBuf != nullptr) {
+    pVideo = s_asyncVideoBuf;
+    s_asyncVideoBuf = nullptr;
+    s_asyncVideoLen = 0;
+    s_asyncVideoReady = false;
+    totalFreed += MAX_STREAM_JPG_SIZE;
+  }
+  taskEXIT_CRITICAL(&s_streamMux);
+
+  if (pVideo != nullptr) {
+    free(pVideo);
+  }
+
+  if (totalFreed > 0) {
+    Serial.printf("🧹 [TRIM STREAM] Đã giải phóng bộ đệm đa phương tiện (%u bytes / %u KB)\n",
+                  (unsigned int)totalFreed, (unsigned int)(totalFreed / 1024));
+  }
+  return totalFreed;
 }

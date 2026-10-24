@@ -1,6 +1,6 @@
 # SPACE OS — TRẠM DECOR VŨ TRỤ (ESP32-S3 FREEFORM COPPER SCULPTURE)
 ## Tài liệu Kiến trúc Hệ thống & Hiện trạng Dự án Chính thức
-*Phiên bản Firmware: Space OS v3.2.5 | Cập nhật: 22/10/2026*
+*Phiên bản Firmware: Space OS v3.2.6 | Cập nhật: 24/10/2026*
 
 ---
 
@@ -139,6 +139,7 @@ Dựa trên quá trình vận hành thực tế, các hạng mục kiến trúc 
 | **7. Ổn Định Đồng Bộ Giờ Real-Time & Khắc Phục Lỗi Reset (v3.2.3)** | Gọi `SystemLogger` trong lwIP TCP callback gây tràn stack Core 0 (<3KB) dẫn đến Guru Meditation reset; `configTime()` lặp lại làm reset socket SNTP. | **Decoupled Core 1 TimeManager**: Loại bỏ hoàn toàn lwIP SNTP callback; chuyển cơ chế phát hiện đồng bộ về Core 1 thông qua atomic RTC check `time(nullptr) >= 1700000000` trong `TimeManager::loop()`; chỉ gọi `configTime()` duy nhất 1 lần khi Wi-Fi kết nối; tự động kích hoạt cờ vẽ lại Standby an toàn tuyệt đối. |
 | **8. Khắc Phục Lệch Icon Menu Theme Mèo Gome Chibi (v3.2.4)** | Mảng icon Gome cũ vẫn còn icon thẻ nhớ ở slot 11 và chỉ có 13 phần tử khiến "Trò chơi" hiển thị icon thẻ nhớ và các icon sau bị lùi 1 vị trí. | **15-Icon Full Alignment**: Cập nhật `GOME_ICON_COUNT = 15`; loại bỏ icon thẻ nhớ riêng; chuyển icon Trò chơi (`gome_39.png`) về đúng slot 11; bổ sung icon Mã QR Chibi (`gome_qr.png`) ở slot 12, Wi-Fi (`gome_27.png`) ở slot 13 và Bánh răng Hệ thống (`gome_40.png`) ở slot 14. |
 | **9. Tách KeypadTask FreeRTOS Sang Core 0, Instant Wake-up & Khắc Phục Treo Loop WebSocket (v3.2.5)** | Vòng lặp `loop()` trên Core 1 bị nghẽn 5000ms (0.2 FPS) do `XiaoZhiClient` huỷ và tạo lại WebSocket liên tục khi mất mạng; bàn phím và chạm TTP223 quét trong `loop()` bị bỏ qua, màn hình AOD bị đơ không thức dậy được sau 36.5h chạy liên tục. | **Decoupled Core 0 KeypadTask & Non-blocking WebSocket Backoff**: Chuyển toàn bộ quét phím ADC 7 nút và cảm ứng TTP223 sang task FreeRTOS riêng trên Core 0 (Priority 3, 10ms = 100Hz); đánh thức màn hình tức thì (<10ms) qua LEDC PWM phần cứng; chuyển WebSocket XiaoZhi sang cơ chế phục hồi bất đồng bộ (Async WsRestartTask) với Exponential Backoff (15s..120s), giải phóng hoàn toàn Core 1 duy trì 800+ FPS; bổ sung log vi giây ($\\mu\\text{s}$) từng task vào bản tin Snapshot định kỳ 10 phút trên thẻ nhớ SD. |
+| **10. Hệ Thống Dọn Rác Bộ Nhớ Thông Minh & Chế Độ Nghiêm Ngặt Android Low-RAM (v3.2.6)** | Các ứng dụng (Audio Rec 256KB, Stream Ring Buffer 384KB, Video Async 64KB, XiaoZhi Opus Decoder 25KB) sau khi sử dụng vẫn giữ lại các mảng đệm tĩnh lớn trên RAM & PSRAM gây lãng phí tài nguyên sau nhiều giờ nhàn rỗi. | **MemoryScavenger & Strict Mode Engine**: Tự động giám sát thời gian nhàn rỗi (idle tracking) và thu hồi toàn bộ 4 buffer lớn (~700-800KB) khi không sử dụng; 3 chế độ nghiêm ngặt bền vững (Mode 0: Tắt, Mode 1: Cân bằng 3 phút, Mode 2: Nghiêm ngặt 60s hoặc khi màn hình vào Always-On-Display/Sleep); cơ chế tự động cấp phát lại 100% trong suốt (Zero-Crash On-Demand Reallocation); tích hợp REST APIs (`/api/memory/status`, `/api/memory/scavenge`, `/api/memory/config`), widget điều khiển Dọn RAM trên Web Dashboard, phím tắt phần cứng S40 Mode 10 và lệnh Serial `[c]`. |
 
 ---
 

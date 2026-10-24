@@ -30,4 +30,8 @@ public:
   static float getFps();
   static uint32_t getDroppedFrames();
   static void getStatusJson(JsonDocument& doc);
+
+  // 6. Thu hồi bộ nhớ an toàn (Memory Scavenger)
+  static size_t trimMemory();
+  static bool hasAllocatedBuffers();
 };

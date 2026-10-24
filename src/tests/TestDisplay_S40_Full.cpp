@@ -19,6 +19,7 @@
 #include "TelemetryManager.h"
 #include "SystemLogger.h"
 #include "TimeManager.h"
+#include "MemoryScavenger.h"
 #include <SPI.h>
 #include <WiFi.h>
 #include <LittleFS.h>
@@ -5285,12 +5286,13 @@ namespace TestDisplay {
       tft->fillRoundRect(14, 218, lfsW, 12, 4, C_NEON_CYAN);
 
       tft->setTextColor(C_YELLOW, C_CARD_BG);
-      tft->setCursor(14, 240);
-      tft->print("[OK]: Mở Danh sách Thư mục & Tệp tin");
-      tft->setCursor(14, 255);
-      tft->print("[MENU]: Tùy chọn Quản lý Bộ nhớ");
+      tft->setCursor(14, 238);
+      tft->printf("RAM Heap: %uK | PSRAM: %.1fM", (unsigned)(ESP.getFreeHeap() / 1024), (float)ESP.getFreePsram() / (1024.0f * 1024.0f));
+      tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+      tft->setCursor(14, 252);
+      tft->print("[OK]: Mở tệp  |  [MENU]: Dọn RAM");
 
-      drawSymbianSoftkeys("Mở tệp", "Tùy chọn", "Về Menu");
+      drawSymbianSoftkeys("Mở tệp", "Dọn RAM", "Về Menu");
       lastDrawnMemSubState = 0;
     } else if (s40MemSubState == 3) {
       // TRẠNG THÁI 3: XEM TRƯỚC TRỰC TIẾP ẢNH / NGHE THỬ NHẠC / ĐỌC VĂN BẢN (KHI BẤM OK TRÊN TỆP)
@@ -8609,11 +8611,18 @@ namespace TestDisplay {
         s40MemSubState = 1;
       } else if (s40MemSubState == 2) {
         s40MemSubState = 1;
+      } else if (s40MemSubState == 0) {
+        // Tại màn hình Tổng quan Bộ nhớ: Bấm MENU (Softkey giữa) để DỌN RAM NGAY!
+        ScavengeReport rep = MemoryScavenger::scavenge(true, "S40_SOFTKEY");
+        char toastBuf[36];
+        snprintf(toastBuf, sizeof(toastBuf), "DA THU HOI %u KB RAM!", (unsigned int)(rep.totalFreedBytes / 1024));
+        showSymbianToast(toastBuf);
+        TestAudio::playOkChime();
       } else {
         s40MemPopupCursor = 0;
         s40MemSubState = 2;
       }
-      drawMemoryManagerAppScreen();
+      drawMemoryManagerAppScreen(true);
       return;
     }
 
@@ -9037,6 +9046,13 @@ namespace TestDisplay {
           s40MemSubState = 1;
           s40MemFileCursor = 0;
           drawMemoryManagerAppScreen();
+        } else if (keyIndex >= 1 && keyIndex <= 4) {
+          ScavengeReport rep = MemoryScavenger::scavenge(true, "S40_KEYPAD");
+          char toastBuf[36];
+          snprintf(toastBuf, sizeof(toastBuf), "DA THU HOI %u KB RAM!", (unsigned int)(rep.totalFreedBytes / 1024));
+          showSymbianToast(toastBuf);
+          TestAudio::playOkChime();
+          drawMemoryManagerAppScreen(true);
         } else if (keyIndex == 6) {
           currentMode = 4;
           refreshActiveScreen();

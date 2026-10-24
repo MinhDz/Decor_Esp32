@@ -15,6 +15,7 @@
 #include "TaskProfiler.h"
 #include "SystemLogger.h"
 #include "TimeManager.h"
+#include "MemoryScavenger.h"
 
 void setup() {
   Serial.begin(115200);
@@ -54,6 +55,9 @@ void setup() {
 
   // 1G. Khởi tạo Trình quản lý Thời gian Thực (SNTP tức thì GMT+7)
   TimeManager::init();
+
+  // 1H. Khởi tạo Trình dọn rác và thu hồi bộ nhớ thông minh (Memory Scavenger & Strict Mode)
+  MemoryScavenger::init();
 
   // 2. Khởi chạy Hệ thống 4 Màn hình ST7789 + Mic INMP441 + Cảm biến SHT31 + 7 Phím Bấm DIO
   ModuleTestRunner::init();
@@ -131,6 +135,9 @@ void loop() {
   TaskProfiler::start(PROF_LOGGER);
   SystemLogger::loop();
   TaskProfiler::stop(PROF_LOGGER);
+
+  // 5. Giám sát thời gian nhàn rỗi và tự động thu hồi RAM (Memory Scavenger & Strict Mode)
+  MemoryScavenger::loop();
 
   TaskProfiler::endLoop();
 }

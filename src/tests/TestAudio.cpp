@@ -865,7 +865,7 @@ namespace TestAudio {
 
   // --- LƯU BẢN THU ÂM THÀNH FILE .WAV CHUẨN 16kHz 16-BIT MONO VÀO THẺ NHỚ SD ---
   bool saveRecordedVoiceToSd(const char* filepath) {
-    if (pcmRecSampleCount == 0) {
+    if (pcmRecSampleCount == 0 || !pcmRecBuffer) {
       Serial.println("⚠️ [SD WAV] Khong co du lieu thu am de luu!");
       return false;
     }
@@ -1391,6 +1391,26 @@ namespace TestAudio {
 
   uint32_t getVoicePlaybackCurrentSample() {
     return audioPlayCurSample;
+  }
+
+  // --- THU HỒI BỘ NHỚ AN TOÀN (MEMORY SCAVENGER / STRICT MODE) ---
+  bool hasAllocatedRecBuffer() {
+    return (pcmRecBuffer != nullptr);
+  }
+
+  size_t trimMemory() {
+    // Chỉ giải phóng khi không đang thu âm và không đang phát lại
+    if (voiceRecordingActive || audioPlayRunning) return 0;
+    if (pcmRecBuffer == nullptr) return 0;
+
+    size_t freedBytes = pcmRecAllocatedSamples * sizeof(int16_t);
+    free(pcmRecBuffer);
+    pcmRecBuffer = nullptr;
+    pcmRecAllocatedSamples = 0;
+    pcmRecSampleCount = 0;
+    Serial.printf("🧹 [TRIM AUDIO] Đã giải phóng bộ đệm thu âm (%u bytes / %u KB)\n",
+                  (unsigned int)freedBytes, (unsigned int)(freedBytes / 1024));
+    return freedBytes;
   }
 
   bool handleSerial(char cmd) {

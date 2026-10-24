@@ -1116,6 +1116,21 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
   return (outUserText.length() > 0 || outAiReply.length() > 0);
 }
 
+bool XiaoZhiClient::hasAllocatedDecoder() {
+  return (s_opusDecoder != nullptr);
+}
+
+size_t XiaoZhiClient::trimMemory() {
+  if (s_opusDecoder == nullptr) return 0;
+  // Nếu AI đang phát âm thanh (luồng âm thanh đang phát), không thu hồi
+  if (TestAudio::isVoiceStreamActive()) return 0;
+
+  opus_decoder_destroy(s_opusDecoder);
+  s_opusDecoder = nullptr;
+  Serial.println("🧹 [TRIM XIAOZHI] Đã giải phóng Opus Decoder (~25 KB)");
+  return 25 * 1024;
+}
+
 
 
 

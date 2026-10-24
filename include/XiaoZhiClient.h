@@ -45,6 +45,10 @@ public:
   static bool isTtsFinished();
   static uint32_t getLastAiReplyTime();
   static void clearLastTurn();
+
+  // Thu hồi bộ nhớ Opus Decoder khi nhàn rỗi (Memory Scavenger)
+  static size_t trimMemory();
+  static bool hasAllocatedDecoder();
 };
 
 

@@ -281,6 +281,10 @@ void SystemLogger::flushBufferToSd() {
   f.close();
 }
 
+void SystemLogger::flush() {
+  flushBufferToSd();
+}
+
 void SystemLogger::logSystemSnapshot() {
   uint32_t nowSec = millis() / 1000;
   uint32_t days = nowSec / 86400;
