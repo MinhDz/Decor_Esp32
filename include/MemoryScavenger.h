@@ -49,3 +49,4 @@ public:
   // 5. Kết xuất JSON cho REST API Web
   static void getStatusJson(JsonDocument& doc);
 };
+

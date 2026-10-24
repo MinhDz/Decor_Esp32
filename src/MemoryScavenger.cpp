@@ -275,3 +275,4 @@ void MemoryScavenger::getStatusJson(JsonDocument& doc) {
   doc["min_free_heap"]        = ESP.getMinFreeHeap();
   doc["free_psram"]           = ESP.getFreePsram();
 }
+
