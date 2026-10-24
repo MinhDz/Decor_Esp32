@@ -1,4 +1,4 @@
-#include "tests/TestAudio.h"
+#include "drivers/AudioDriver.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestSDCard.h"
 #include "WebStreamManager.h"
@@ -12,7 +12,7 @@
 #define MINIMP3_IMPLEMENTATION
 #include "minimp3.h"
 
-namespace TestAudio {
+namespace AudioDriver {
 
   static const i2s_port_t I2S_PORT_MIC = I2S_NUM_0;
   static const i2s_port_t I2S_PORT_SPK = I2S_NUM_1;

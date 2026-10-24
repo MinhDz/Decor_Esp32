@@ -1,4 +1,4 @@
-#include "tests/TestSensors.h"
+#include "drivers/SensorDriver.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestAudio.h"
 #include "WebStreamManager.h"
@@ -6,7 +6,7 @@
 #include "Config.h"
 #include <Wire.h>
 
-namespace TestSensors {
+namespace SensorDriver {
 
   static bool sht31Online = false;
   static uint8_t sht31Addr = SHT31_I2C_ADDR_1;

@@ -1,8 +1,8 @@
-#include "tests/TestButtons.h"
+#include "drivers/KeypadDriver.h"
 #include "tests/TestDisplay.h"
 #include "Config.h"
 
-namespace TestButtons {
+namespace KeypadDriver {
 
   // Danh sách 7 nút theo đúng thứ tự bảng thiết kế Thang Điện Trở ADC của người dùng:
   // Index: 0=OK (0Ω), 1=UP (1kΩ), 2=DOWN (2.2kΩ), 3=LEFT (4.7kΩ), 4=RIGHT (10kΩ), 5=MENU (20kΩ), 6=EXIT (47kΩ)

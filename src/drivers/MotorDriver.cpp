@@ -1,4 +1,4 @@
-#include "tests/TestWindmill.h"
+#include "drivers/MotorDriver.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestSensors.h"
 #include "tests/TestAudio.h"
@@ -9,7 +9,7 @@
 #include <math.h>
 #include "driver/gpio.h"
 
-namespace TestWindmill {
+namespace MotorDriver {
 
   static const uint8_t PWM_CH_MOTOR    = 2; // Kênh LEDC PWM cho Motor & Vành đèn LED cối xay (GPIO 1)
   static const uint8_t PWM_CH_EDISON_L = 4; // Kênh LEDC PWM cho cặp LED ống Edison Sườn Trái (GPIO 47)

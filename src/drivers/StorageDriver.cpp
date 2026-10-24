@@ -1,4 +1,4 @@
-#include "tests/TestSDCard.h"
+#include "drivers/StorageDriver.h"
 #include "tests/TestDisplay.h"
 #include "SystemLogger.h"
 #include "Config.h"
@@ -7,7 +7,7 @@
 #include <LittleFS.h>
 #include <driver/gpio.h>
 
-namespace TestSDCard {
+namespace StorageDriver {
 
   static SPIClass* sdSpi = nullptr;
   static bool sdMounted = false;
