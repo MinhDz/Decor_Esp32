@@ -19,6 +19,7 @@
 #include "TaskProfiler.h"
 #include "SystemLogger.h"
 #include "MemoryScavenger.h"
+#include "WebAuth.h"
 
 #include <WebServer.h>
 #include <ESPmDNS.h>
@@ -865,6 +866,22 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           <div style="margin-top:6px;font-size:0.74rem;color:#f59e0b;">⚠️ Đang nạp trực tiếp vào Flash ESP32. Vui lòng giữ nguyên nguồn điện!</div>
         </div>
       </div>
+
+      <!-- 4. KHÔI PHỤC CÀI ĐẶT GỐC (FACTORY RESET - MÈO GOME CHIBI) -->
+      <div class="designer-panel" style="margin-top:16px;width:100%;max-width:100%;border-color:#f43f5e;box-shadow:0 0 15px rgba(244,63,94,0.15);">
+        <div class="designer-title" style="color:#f43f5e;">
+          <span>⚠️ Khôi Phục Cài Đặt Ban Đầu (Factory Reset)</span>
+          <span style="font-size:0.74rem;color:#f43f5e;font-weight:700;background:rgba(244,63,94,0.15);padding:2px 8px;border-radius:4px;border:1px solid rgba(244,63,94,0.3);">MÈO CHIBI DEFAULT</span>
+        </div>
+        <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:14px;line-height:1.6;">
+          Khôi phục toàn bộ cài đặt của trạm về nguyên bản ban đầu: Xóa toàn bộ tùy chỉnh người dùng, đặt lại âm lượng thông báo (70%), hiệu ứng đèn LED, mật khẩu quản trị Web về mặc định (<strong>admin / admin</strong>), và tự động kích hoạt giao diện mặc định <strong>MÈO GOME CHIBI</strong> trên màn hình trạm.
+        </div>
+        <div style="display:flex;justify-content:flex-end;">
+          <button class="btn-primary" style="background:#e11d48;border-color:#f43f5e;width:auto;padding:8px 20px;font-size:0.82rem;font-weight:700;box-shadow:0 0 12px rgba(225,29,72,0.4);" onclick="window.performFactoryResetWeb()">
+            🔄 Khôi Phục Cài Đặt Gốc (Mèo Chibi)
+          </button>
+        </div>
+      </div>
     `;
 
     const wifiSec = document.getElementById('tab-wifi');
@@ -1349,6 +1366,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     { cmd: "snapshot", display: "snapshot", type: "ACT", badge: "badge-act", desc: "Ghi bản chụp nhật ký & phần cứng ra thẻ nhớ SD", syntax: "snapshot" },
     { cmd: "clear", display: "clear", type: "CMD", badge: "badge-cmd", desc: "Xóa sạch nội dung hiển thị trên màn hình Terminal Web", syntax: "clear" },
     { cmd: "reboot", display: "reboot", type: "CMD", badge: "badge-cmd", desc: "Khởi động lại vi điều khiển ESP32-S3 từ xa", syntax: "reboot" },
+    { cmd: "factory-reset", display: "factory-reset", type: "ACT", badge: "badge-act", desc: "Khôi phục cài đặt gốc ban đầu (Theme Mèo Chibi và admin/admin)", syntax: "factory-reset" },
     { cmd: "help", display: "help", type: "CMD", badge: "badge-cmd", desc: "Xem hướng dẫn chi tiết và danh mục toàn bộ lệnh CLI", syntax: "help" }
   ];
 
@@ -6560,6 +6578,595 @@ static const char TELEMETRY_WEATHER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 </script>
 )rawliteral";
 
+
+// ============================================================================
+// INJECT SCRIPT: BẢO MẬT ĐĂNG NHẬP (WEB AUTH) & KHÔI PHỤC CÀI ĐẶT GỐC (FACTORY RESET)
+// ============================================================================
+static const char AUTH_FACTORY_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
+<style>
+/* SPACE OS AUTHENTICATION MODAL & OVERLAY */
+#spaceos-auth-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1000000;
+  background: radial-gradient(circle at 50% 32%, #0f1f38 0%, #030712 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+  transition: opacity 0.3s ease, visibility 0.3s ease;
+}
+#spaceos-auth-overlay.hidden {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.spaceos-auth-card {
+  width: 90%;
+  max-width: 400px;
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid #0284c7;
+  box-shadow: 0 0 35px rgba(56, 189, 248, 0.25), 0 25px 50px -12px rgba(0, 0, 0, 0.9);
+  border-radius: 16px;
+  padding: 32px 26px;
+  text-align: center;
+  color: #f8fafc;
+  animation: authCardIn 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+@keyframes authCardIn {
+  from { opacity: 0; transform: scale(0.92) translateY(12px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+.spaceos-auth-badge {
+  display: inline-block;
+  padding: 4px 14px;
+  border-radius: 9999px;
+  background: rgba(56, 189, 248, 0.12);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 1.2px;
+  margin-bottom: 12px;
+}
+.spaceos-auth-title {
+  font-size: 1.35rem;
+  font-weight: 800;
+  color: #f8fafc;
+  margin-bottom: 6px;
+  letter-spacing: 0.5px;
+}
+.spaceos-auth-sub {
+  font-size: 0.8rem;
+  color: #94a3b8;
+  margin-bottom: 22px;
+}
+.spaceos-input-group {
+  margin-bottom: 14px;
+  text-align: left;
+}
+.spaceos-input-label {
+  display: block;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #94a3b8;
+  margin-bottom: 6px;
+}
+.spaceos-input-wrap {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.spaceos-input-wrap span.icon {
+  position: absolute;
+  left: 12px;
+  font-size: 0.95rem;
+  color: #64748b;
+  pointer-events: none;
+}
+.spaceos-auth-input {
+  width: 100%;
+  padding: 10px 12px 10px 38px;
+  background: #090d16;
+  border: 1px solid #334155;
+  border-radius: 8px;
+  color: #f8fafc;
+  font-size: 0.88rem;
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  box-sizing: border-box;
+}
+.spaceos-auth-input:focus {
+  border-color: #38bdf8;
+  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+}
+.spaceos-auth-btn {
+  width: 100%;
+  padding: 11px;
+  background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%);
+  border: 1px solid #38bdf8;
+  border-radius: 8px;
+  color: white;
+  font-size: 0.9rem;
+  font-weight: 700;
+  cursor: pointer;
+  margin-top: 8px;
+  transition: all 0.2s;
+  box-shadow: 0 4px 15px rgba(2, 132, 199, 0.4);
+}
+.spaceos-auth-btn:hover {
+  background: linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.6);
+  transform: translateY(-1px);
+}
+.spaceos-auth-err {
+  display: none;
+  background: rgba(225, 29, 72, 0.15);
+  border: 1px solid #f43f5e;
+  border-radius: 8px;
+  padding: 8px 12px;
+  color: #fda4af;
+  font-size: 0.78rem;
+  margin-bottom: 14px;
+  text-align: left;
+}
+.spaceos-auth-hint {
+  font-size: 0.73rem;
+  color: #64748b;
+  margin-top: 14px;
+  line-height: 1.4;
+}
+
+/* User pill in status bar */
+.auth-user-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  background: #0f172a;
+  border: 1px solid #1e293b;
+  padding: 3px 10px;
+  border-radius: 8px;
+  font-size: 0.76rem;
+}
+.auth-user-pill .auth-name {
+  color: #38bdf8;
+  font-weight: 700;
+}
+.auth-action-btn {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  font-size: 0.72rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  transition: 0.15s;
+}
+.auth-action-btn:hover {
+  color: white;
+  background: #334155;
+}
+.auth-action-btn.logout:hover {
+  color: #fda4af;
+  background: rgba(225, 29, 72, 0.25);
+}
+
+/* Change password modal */
+#spaceos-pwd-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 999999;
+  background: rgba(0,0,0,0.75);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(8px);
+}
+#spaceos-pwd-modal.hidden {
+  display: none;
+}
+</style>
+
+<!-- FULLSCREEN LOGIN MODAL -->
+<div id="spaceos-auth-overlay">
+  <div class="spaceos-auth-card">
+    <div class="spaceos-auth-badge">SPACE STATION // ESP32-S3</div>
+    <div class="spaceos-auth-title">🔐 TRẠM VŨ TRỤ DECOR</div>
+    <div class="spaceos-auth-sub">Xác thực quyền quản trị hệ thống điều khiển trạm</div>
+
+    <div id="spaceos-auth-err" class="spaceos-auth-err"></div>
+
+    <form id="spaceos-login-form" onsubmit="window.doSpaceOsLogin(event)">
+      <div class="spaceos-input-group">
+        <label class="spaceos-input-label">Tên Đăng Nhập</label>
+        <div class="spaceos-input-wrap">
+          <span class="icon">👤</span>
+          <input type="text" id="spaceos-user-input" class="spaceos-auth-input" placeholder="admin" autocomplete="username" required />
+        </div>
+      </div>
+
+      <div class="spaceos-input-group">
+        <label class="spaceos-input-label">Mật Khẩu</label>
+        <div class="spaceos-input-wrap">
+          <span class="icon">🔒</span>
+          <input type="password" id="spaceos-pass-input" class="spaceos-auth-input" placeholder="••••••••" autocomplete="current-password" required />
+        </div>
+      </div>
+
+      <button type="submit" id="spaceos-login-btn" class="spaceos-auth-btn">🚀 ĐĂNG NHẬP HỆ THỐNG</button>
+    </form>
+
+    <div class="spaceos-auth-hint">
+      💡 Tài khoản ban đầu: <strong>admin</strong> / <strong>admin</strong><br>
+      (Bạn có thể đổi mật khẩu bất kỳ lúc nào sau khi đăng nhập)
+    </div>
+  </div>
+</div>
+
+<!-- CHANGE PASSWORD MODAL -->
+<div id="spaceos-pwd-modal" class="hidden">
+  <div class="spaceos-auth-card" style="max-width:360px;padding:26px 22px;">
+    <div class="spaceos-auth-title" style="font-size:1.15rem;">🔑 ĐỔI MẬT KHẨU</div>
+    <div class="spaceos-auth-sub" style="margin-bottom:16px;">Cập nhật mật khẩu quản trị Web Control Center</div>
+
+    <div id="spaceos-pwd-err" class="spaceos-auth-err"></div>
+
+    <form id="spaceos-pwd-form" onsubmit="window.doChangePasswordSubmit(event)">
+      <div class="spaceos-input-group">
+        <label class="spaceos-input-label">Mật Khẩu Hiện Tại</label>
+        <div class="spaceos-input-wrap">
+          <span class="icon">🔒</span>
+          <input type="password" id="spaceos-old-pwd" class="spaceos-auth-input" required />
+        </div>
+      </div>
+      <div class="spaceos-input-group">
+        <label class="spaceos-input-label">Mật Khẩu Mới (≥ 3 ký tự)</label>
+        <div class="spaceos-input-wrap">
+          <span class="icon">✨</span>
+          <input type="password" id="spaceos-new-pwd" class="spaceos-auth-input" required />
+        </div>
+      </div>
+      <div class="spaceos-input-group">
+        <label class="spaceos-input-label">Xác Nhận Mật Khẩu Mới</label>
+        <div class="spaceos-input-wrap">
+          <span class="icon">✔️</span>
+          <input type="password" id="spaceos-confirm-pwd" class="spaceos-auth-input" required />
+        </div>
+      </div>
+
+      <div style="display:flex;gap:8px;margin-top:14px;">
+        <button type="button" class="btn-secondary" style="flex:1;padding:9px;" onclick="window.closeChangePasswordModal()">Hủy</button>
+        <button type="submit" class="btn-primary" style="flex:1;padding:9px;">Lưu Thay Đổi</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+(function() {
+  // 1. Fetch Wrapper: Tự động đính kèm Cookie + Header Token và bắt lỗi 401 Unauthorized
+  const origFetch = window.fetch;
+  window.fetch = function(url, init) {
+    init = init || {};
+    init.credentials = 'same-origin';
+    const tok = localStorage.getItem('spaceos_token');
+    if (tok) {
+      init.headers = init.headers || {};
+      if (init.headers instanceof Headers) {
+        if (!init.headers.has('X-Auth-Token')) init.headers.append('X-Auth-Token', tok);
+      } else if (Array.isArray(init.headers)) {
+        init.headers.push(['X-Auth-Token', tok]);
+      } else {
+        if (!init.headers['X-Auth-Token']) init.headers['X-Auth-Token'] = tok;
+      }
+    }
+    return origFetch(url, init).then(res => {
+      if (res.status === 401 && !url.includes('/api/auth/login') && !url.includes('/api/auth/status')) {
+        window.showLoginOverlay();
+      }
+      return res;
+    });
+  };
+
+  // 2. Quản lý trạng thái xác thực
+  window.showLoginOverlay = function() {
+    const ov = document.getElementById('spaceos-auth-overlay');
+    if (ov) ov.classList.remove('hidden');
+    const uInput = document.getElementById('spaceos-user-input');
+    if (uInput) setTimeout(() => uInput.focus(), 100);
+  };
+
+  window.hideLoginOverlay = function() {
+    const ov = document.getElementById('spaceos-auth-overlay');
+    if (ov) ov.classList.add('hidden');
+  };
+
+  window.checkAuthStatus = function() {
+    fetch('/api/auth/status')
+      .then(r => r.json())
+      .then(d => {
+        if (d && d.authenticated) {
+          window.hideLoginOverlay();
+          updateUserBadge(d.username || 'admin');
+        } else {
+          window.showLoginOverlay();
+        }
+      })
+      .catch(() => {
+        window.showLoginOverlay();
+      });
+  };
+
+  // 3. Đăng nhập
+  window.doSpaceOsLogin = function(e) {
+    if (e) e.preventDefault();
+    const u = (document.getElementById('spaceos-user-input').value || '').trim();
+    const p = (document.getElementById('spaceos-pass-input').value || '').trim();
+    const btn = document.getElementById('spaceos-login-btn');
+    const errBox = document.getElementById('spaceos-auth-err');
+
+    if (!u || !p) return;
+    if (btn) btn.innerText = '⏳ Đang xác thực...';
+    if (errBox) errBox.style.display = 'none';
+
+    fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p })
+    })
+    .then(r => r.json().then(data => ({ status: r.status, data })))
+    .then(res => {
+      if (btn) btn.innerText = '🚀 ĐĂNG NHẬP HỆ THỐNG';
+      if (res.status === 200 && res.data.status === 'ok') {
+        if (res.data.token) {
+          localStorage.setItem('spaceos_token', res.data.token);
+          document.cookie = 'spaceos_token=' + res.data.token + '; Path=/; Max-Age=2592000; SameSite=Lax';
+        }
+        window.hideLoginOverlay();
+        updateUserBadge(res.data.username || u);
+      } else {
+        if (errBox) {
+          errBox.innerText = '❌ ' + (res.data.message || 'Sai tên đăng nhập hoặc mật khẩu!');
+          errBox.style.display = 'block';
+        }
+      }
+    })
+    .catch(err => {
+      if (btn) btn.innerText = '🚀 ĐĂNG NHẬP HỆ THỐNG';
+      if (errBox) {
+        errBox.innerText = '❌ Lỗi kết nối đến thiết bị: ' + err;
+        errBox.style.display = 'block';
+      }
+    });
+  };
+
+  // 4. Đăng xuất
+  window.doSpaceOsLogout = function() {
+    if (!confirm('Bạn có chắc chắn muốn đăng xuất khỏi Trạm Điều Khiển?')) return;
+    fetch('/api/auth/logout', { method: 'POST' })
+      .finally(() => {
+        localStorage.removeItem('spaceos_token');
+        document.cookie = 'spaceos_token=; Path=/; Max-Age=0; SameSite=Lax';
+        window.showLoginOverlay();
+      });
+  };
+
+  // 5. Đổi mật khẩu
+  window.openChangePasswordModal = function() {
+    const modal = document.getElementById('spaceos-pwd-modal');
+    if (modal) modal.classList.remove('hidden');
+    const err = document.getElementById('spaceos-pwd-err');
+    if (err) err.style.display = 'none';
+    const oldP = document.getElementById('spaceos-old-pwd');
+    if (oldP) { oldP.value = ''; oldP.focus(); }
+    const newP = document.getElementById('spaceos-new-pwd');
+    if (newP) newP.value = '';
+    const cfP = document.getElementById('spaceos-confirm-pwd');
+    if (cfP) cfP.value = '';
+  };
+
+  window.closeChangePasswordModal = function() {
+    const modal = document.getElementById('spaceos-pwd-modal');
+    if (modal) modal.classList.add('hidden');
+  };
+
+  window.doChangePasswordSubmit = function(e) {
+    if (e) e.preventDefault();
+    const oldPass = (document.getElementById('spaceos-old-pwd').value || '').trim();
+    const newPass = (document.getElementById('spaceos-new-pwd').value || '').trim();
+    const confPass = (document.getElementById('spaceos-confirm-pwd').value || '').trim();
+    const errBox = document.getElementById('spaceos-pwd-err');
+
+    if (!oldPass || !newPass) return;
+    if (newPass !== confPass) {
+      if (errBox) {
+        errBox.innerText = '❌ Xác nhận mật khẩu mới không khớp!';
+        errBox.style.display = 'block';
+      }
+      return;
+    }
+    if (newPass.length < 3) {
+      if (errBox) {
+        errBox.innerText = '❌ Mật khẩu mới phải từ 3 ký tự trở lên!';
+        errBox.style.display = 'block';
+      }
+      return;
+    }
+
+    fetch('/api/auth/change_password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_password: oldPass, new_password: newPass })
+    })
+    .then(r => r.json().then(data => ({ status: r.status, data })))
+    .then(res => {
+      if (res.status === 200 && res.data.status === 'ok') {
+        if (res.data.token) {
+          localStorage.setItem('spaceos_token', res.data.token);
+          document.cookie = 'spaceos_token=' + res.data.token + '; Path=/; Max-Age=2592000; SameSite=Lax';
+        }
+        window.closeChangePasswordModal();
+        alert('✅ ' + (res.data.message || 'Đổi mật khẩu thành công!'));
+      } else {
+        if (errBox) {
+          errBox.innerText = '❌ ' + (res.data.message || 'Không thể đổi mật khẩu!');
+          errBox.style.display = 'block';
+        }
+      }
+    })
+    .catch(err => {
+      if (errBox) {
+        errBox.innerText = '❌ Lỗi kết nối: ' + err;
+        errBox.style.display = 'block';
+      }
+    });
+  };
+
+  // 6. Khôi phục cài đặt ban đầu (Factory Reset)
+  window.performFactoryResetWeb = function() {
+    const cf = confirm('⚠️ CẢNH BÁO KHÔI PHỤC CÀI ĐẶT GỐC:\n\n' +
+                     'Toàn bộ tùy chỉnh cá nhân sẽ bị xóa!\n' +
+                     '- Giao diện màn hình trạm sẽ chuyển về MÈO GOME CHIBI\n' +
+                     '- Tài khoản đăng nhập Web sẽ khôi phục về admin / admin\n' +
+                     '- Đặt lại âm lượng (70%) và cấu hình hệ thống ban đầu.\n\n' +
+                     'Bạn có chắc chắn muốn thực hiện không?');
+    if (!cf) return;
+
+    fetch('/api/system/factory_reset', { method: 'POST' })
+      .then(r => r.json().then(data => ({ status: r.status, data })))
+      .then(res => {
+        if (res.status === 200 && res.data.status === 'ok') {
+          alert('✅ ' + (res.data.message || 'Đã khôi phục cài đặt ban đầu thành công!'));
+          localStorage.removeItem('spaceos_token');
+          document.cookie = 'spaceos_token=; Path=/; Max-Age=0; SameSite=Lax';
+          location.reload();
+        } else {
+          alert('❌ Lỗi: ' + (res.data.message || 'Không thể thực hiện khôi phục cài đặt gốc!'));
+        }
+      })
+      .catch(e => {
+        alert('❌ Lỗi kết nối: ' + e);
+      });
+  };
+
+  // 7. Inject User Badge vào Header Status Bar
+  function updateUserBadge(username) {
+    let pill = document.getElementById('auth-user-pill');
+    if (!pill) {
+      const statusBar = document.querySelector('.status-bar');
+      const statusLeft = document.querySelector('.status-left') || statusBar;
+      if (statusLeft) {
+        pill = document.createElement('div');
+        pill.id = 'auth-user-pill';
+        pill.className = 'auth-user-pill';
+        pill.innerHTML = `
+          <span>👤 <strong id="auth-pill-username" class="auth-name">${username}</strong></span>
+          <button class="auth-action-btn" onclick="window.openChangePasswordModal()" title="Đổi mật khẩu">🔑 Đổi MK</button>
+          <button class="auth-action-btn logout" onclick="window.doSpaceOsLogout()" title="Đăng xuất">🚪 Thoát</button>
+        `;
+        statusLeft.appendChild(pill);
+      }
+    } else {
+      const nameEl = document.getElementById('auth-pill-username');
+      if (nameEl) nameEl.innerText = username;
+    }
+  }
+
+  // Khởi động kiểm tra trạng thái xác thực
+  setTimeout(window.checkAuthStatus, 150);
+})();
+</script>
+)rawliteral";
+
+// --- CÁC HÀM XỬ LÝ AUTH ROUTE ---
+static void handleAuthStatus() {
+  bool authed = WebAuth::isAuthenticated(server);
+  String user = authed ? WebAuth::getUsername() : "";
+  server.send(200, "application/json", "{\"authenticated\":" + String(authed ? "true" : "false") + ",\"username\":\"" + user + "\"}");
+}
+
+static void handleAuthLogin() {
+  String u = "";
+  String p = "";
+  if (server.hasArg("plain")) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (!err) {
+      u = doc["username"] | "";
+      p = doc["password"] | "";
+    }
+  }
+  if (u.length() == 0 && server.hasArg("username")) u = server.arg("username");
+  if (p.length() == 0 && server.hasArg("password")) p = server.arg("password");
+  u.trim();
+  p.trim();
+
+  if (WebAuth::verify(u, p)) {
+    String token = WebAuth::generateNewSessionToken();
+    server.sendHeader("Set-Cookie", "spaceos_token=" + token + "; Path=/; Max-Age=2592000; SameSite=Lax");
+    server.send(200, "application/json", "{\"status\":\"ok\",\"token\":\"" + token + "\",\"username\":\"" + u + "\"}");
+  } else {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Sai tên đăng nhập hoặc mật khẩu!\"}");
+  }
+}
+
+static void handleAuthLogout() {
+  WebAuth::clearSession();
+  server.sendHeader("Set-Cookie", "spaceos_token=; Path=/; Max-Age=0; SameSite=Lax");
+  server.send(200, "application/json", "{\"status\":\"ok\"}");
+}
+
+static void handleAuthChangePassword() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Phiên làm việc hết hạn hoặc chưa đăng nhập!\"}");
+    return;
+  }
+  String oldPass = "";
+  String newPass = "";
+  String newUser = "";
+  if (server.hasArg("plain")) {
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    oldPass = doc["old_password"] | "";
+    newPass = doc["new_password"] | "";
+    newUser = doc["username"] | "";
+  }
+  if (oldPass.length() == 0 && server.hasArg("old_password")) oldPass = server.arg("old_password");
+  if (newPass.length() == 0 && server.hasArg("new_password")) newPass = server.arg("new_password");
+  if (newUser.length() == 0 && server.hasArg("username")) newUser = server.arg("username");
+  oldPass.trim();
+  newPass.trim();
+  newUser.trim();
+
+  if (newPass.length() < 3) {
+    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Mật khẩu mới phải từ 3 ký tự trở lên!\"}");
+    return;
+  }
+  if (newUser.length() > 0) {
+    WebAuth::changeCredentials(newUser, newPass);
+    String token = WebAuth::getSessionToken();
+    server.sendHeader("Set-Cookie", "spaceos_token=" + token + "; Path=/; Max-Age=2592000; SameSite=Lax");
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Đã đổi tài khoản và mật khẩu thành công!\",\"token\":\"" + token + "\"}");
+  } else if (WebAuth::changePassword(oldPass, newPass)) {
+    String token = WebAuth::getSessionToken();
+    server.sendHeader("Set-Cookie", "spaceos_token=" + token + "; Path=/; Max-Age=2592000; SameSite=Lax");
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Đã đổi mật khẩu thành công!\",\"token\":\"" + token + "\"}");
+  } else {
+    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Mật khẩu cũ không chính xác!\"}");
+  }
+}
+
+static void handleFactoryResetRoute() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Chưa đăng nhập quyền quản trị!\"}");
+    return;
+  }
+  TestDisplay::performFactoryReset();
+  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Đã khôi phục cài đặt ban đầu và chuyển sang giao diện MÈO GOME CHIBI!\"}");
+}
+
 static void handleRoot() {
   if (LittleFS.exists("/index.html")) {
     File file = LittleFS.open("/index.html", "r");
@@ -6578,6 +7185,7 @@ static void handleRoot() {
     server.sendContent_P(DECOR_PAGE_INJECT_SCRIPT);
     server.sendContent_P(KEYPAD_PAGE_INJECT_SCRIPT);
     server.sendContent_P(TELEMETRY_WEATHER_INJECT_SCRIPT);
+    server.sendContent_P(AUTH_FACTORY_INJECT_SCRIPT);
     server.sendContent("");
   } else {
     server.send(404, "text/plain", "Chưa tìm thấy index.html trên LittleFS!");
@@ -6633,6 +7241,10 @@ static void handleDeleteSavedWifi() {
 }
 
 static void handleWifiConnect() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+    return;
+  }
   if (!server.hasArg("plain")) {
     server.send(400, "application/json", "{\"error\":\"Missing body\"}");
     return;
@@ -6764,6 +7376,10 @@ static void handleSdFileRoute() {
 }
 
 static void handleDeleteImage() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+    return;
+  }
   if (!server.hasArg("name")) {
     server.send(400, "application/json", "{\"error\":\"Missing name\"}");
     return;
@@ -6777,6 +7393,10 @@ static void handleDeleteImage() {
 }
 
 static void handleSelectImage() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+    return;
+  }
   if (!server.hasArg("name")) {
     server.send(400, "application/json", "{\"error\":\"Missing name\"}");
     return;
@@ -6819,6 +7439,10 @@ static void handleGetStandbyConfig() {
 }
 
 static void handleSaveStandbyConfig() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+    return;
+  }
   if (!server.hasArg("plain")) {
     server.send(400, "application/json", "{\"error\":\"Missing body\"}");
     return;
@@ -6964,6 +7588,10 @@ static void handleDecorStatus() {
 }
 
 static void handleDecorControl() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+    return;
+  }
   String target = "";
   int mode = -1;
   int brightness = -1;
@@ -7019,6 +7647,10 @@ static void handleDecorControl() {
 // ---------------- REST APIS ĐIỀU KHIỂN BÀN PHÍM ẢO SIMULATOR ----------------
 
 static void handleKeypadPress() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+    return;
+  }
   int keyIdx = -1;
   String keyStr = "";
 
@@ -7375,6 +8007,10 @@ static void cloudOtaTask(void* param) {
 }
 
 static void handleOtaStart() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+    return;
+  }
   if (OtaManager::isUpdating()) {
     server.send(409, "application/json", "{\"error\":\"Already updating\"}");
     return;
@@ -7417,6 +8053,10 @@ static size_t s_localOtaTotalExpected = 0;
 static int s_lastLocalOtaPct = -1;
 
 static void handleLocalUpdate() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
+    return;
+  }
   server.sendHeader("Connection", "close");
   if (!Update.hasError()) {
     server.send(200, "text/html",
@@ -8065,6 +8705,10 @@ static const char* getResetReasonStr(esp_reset_reason_t r) {
 }
 
 static void handleTerminalExec() {
+  if (!WebAuth::isAuthenticated(server)) {
+    server.send(401, "application/json", "{\"success\":false,\"output\":\"Lỗi: Chưa xác thực quyền quản trị Web!\"}");
+    return;
+  }
   String rawCmd = "";
   if (server.hasArg("plain")) {
     JsonDocument inDoc;
@@ -8356,6 +9000,16 @@ static void handleTerminalExec() {
       resp["success"] = false;
     }
   }
+  // 3b. FACTORY-RESET / RESET-DEFAULTS
+  else if (verb == "factory-reset" || verb == "reset-defaults" || (verb == "sys" && args == "reset")) {
+    TestDisplay::performFactoryReset();
+    out = "================ KHÔI PHỤC CÀI ĐẶT BAN ĐẦU ================\n";
+    out += "Trạng thái : ĐÃ HOÀN TẤT THÀNH CÔNG\n";
+    out += "Giao diện  : Đã chuyển sang MÈO GOME CHIBI (Theme 5)\n";
+    out += "Tài khoản  : admin / admin (Web Control Center)\n";
+    out += "Hệ thống   : Toàn bộ tùy chỉnh cá nhân đã được đặt lại.\n";
+    out += "===========================================================\n";
+  }
   // 4. CLEAN / SCAVENGE
   else if (verb == "clean" || verb == "scavenge" || verb == "gc") {
     ScavengeReport rep = MemoryScavenger::scavenge(true, "CLI_COMMAND");
@@ -8508,8 +9162,22 @@ static void handleTerminalExec() {
 }
 
 void WebRoutes::begin() {
+  // Thu thập các Headers xác thực (Cookie, Authorization, X-Auth-Token)
+  const char* headerkeys[] = {"Cookie", "Authorization", "X-Auth-Token"};
+  server.collectHeaders(headerkeys, 3);
+
+  // Khởi tạo hệ thống xác thực WebAuth
+  WebAuth::init();
+
   // 1. Phục vụ trang chủ "/"
   server.on("/", HTTP_GET, handleRoot);
+
+  // 1a. REST APIs Xác Thực (Authentication) & Khôi Phục Cài Đặt Ban Đầu (Factory Reset)
+  server.on("/api/auth/status", HTTP_GET, handleAuthStatus);
+  server.on("/api/auth/login", HTTP_POST, handleAuthLogin);
+  server.on("/api/auth/logout", HTTP_POST, handleAuthLogout);
+  server.on("/api/auth/change_password", HTTP_POST, handleAuthChangePassword);
+  server.on("/api/system/factory_reset", HTTP_POST, handleFactoryResetRoute);
 
   // 1b. Các REST API Thời tiết Real-time & Telemetry (1MB PSRAM Circular Buffer)
   server.on("/api/memory/status", HTTP_GET, handleMemoryStatus);

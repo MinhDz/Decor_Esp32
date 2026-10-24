@@ -101,5 +101,8 @@ namespace TestDisplay {
   void showSymbianToast(const String& msg, unsigned long durationMs = 2500);
   void refreshActiveScreen();
   void triggerStandbyRedraw();
+
+  // Khôi phục Cài đặt Ban đầu (Factory Reset): Chuyển giao diện mặc định sang Mèo Gome Chibi, xóa tùy chỉnh người dùng
+  void performFactoryReset();
 }
 

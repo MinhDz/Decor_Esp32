@@ -31,6 +31,7 @@
 #include <TJpg_Decoder.h>
 #include <Preferences.h>
 #include <qrcode.h>
+#include "WebAuth.h"
 
 // Bảng màu 16-bit RGB565 gốc ( hằng số cố định )
 #define C_BLACK       0x0000
@@ -3147,7 +3148,7 @@ namespace TestDisplay {
   static int lastDrawnSettingsCursor = -1;
   static int lastDrawnSettingsFirstRow = -1;
 
-  static const int S40_SETTINGS_COUNT = 14;
+  static const int S40_SETTINGS_COUNT = 15;
 
   static void drawSingleSettingsRow(int idx, int vis, bool sel) {
     if (!tft || idx < 0 || idx >= S40_SETTINGS_COUNT || vis < 0 || vis >= 7) return;
@@ -3163,7 +3164,7 @@ namespace TestDisplay {
       "3. Đồng hồ kim (Analog)"
     };
 
-    const char* labels[14] = {
+    const char* labels[15] = {
       "1. Phong cách Giao diện",
       "2. Độ sáng màn hình",
       "3. Thời gian tắt màn hình",
@@ -3177,10 +3178,11 @@ namespace TestDisplay {
       "11. Cối xay gió L298N (G1)",
       "12. LED Edison Trái (G47)",
       "13. LED Edison Phải (G21)",
-      "14. LED Nước Chảy COB (G18/38)"
+      "14. LED Nước Chảy COB (G18/38)",
+      "15. Khôi phục Cài đặt Gốc"
     };
 
-    String values[14] = {
+    String values[15] = {
       String(curTheme().name),
       String(screenBrightnessPct) + "%",
       String(TIMEOUT_LABELS[screenTimeoutIdx % 6]),
@@ -3194,7 +3196,8 @@ namespace TestDisplay {
       String(TestWindmill::getModeName()),
       String(TestWindmill::getEdisonLeftModeName()),
       String(TestWindmill::getEdisonRightModeName()),
-      String(CobLeds::getModeName())
+      String(CobLeds::getModeName()),
+      "< Bấm OK để đặt lại >"
     };
 
     tft->fillRect(6, ry, w - 12, 34, C_DARK_BG);
@@ -3228,6 +3231,10 @@ namespace TestDisplay {
       tft->setTextColor(barCol, sel ? C_CARD_SEL : C_CARD_BG);
       tft->setCursor(156, ry + 19);
       tft->print(values[idx]);
+    } else if (idx == 14) {
+      tft->setTextColor(sel ? C_YELLOW : C_NEON_PINK, sel ? C_CARD_SEL : C_CARD_BG);
+      tft->setCursor(16, ry + 19);
+      tft->print(values[14]);
     } else {
       uint16_t valCol = (idx == 3) ? (aodClockStyle > 0 ? C_NEON_GREEN : C_NEON_PINK) : (sel ? C_NEON_GREEN : C_NEON_CYAN);
       tft->setTextColor(valCol, sel ? C_CARD_SEL : C_CARD_BG);
@@ -8514,8 +8521,115 @@ namespace TestDisplay {
       TestWindmill::setFlowingLeds(CobLeds::isOn());
       saveSystemSettingsPrefs();
       showSymbianToast(String("LED COB: ") + CobLeds::getModeName());
+    } else if (row == 14) {
+      performFactoryReset();
+      return;
     }
     drawSettingsAppScreen(false);
+  }
+
+
+  // ============================================================================
+  // KHÔI PHỤC CÀI ĐẶT BAN ĐẦU (FACTORY RESET)
+  // Đưa giao diện về mặc định MÈO GOME CHIBI (Theme 5), xóa tùy chỉnh cá nhân,
+  // khôi phục mật khẩu Web về admin/admin, khôi phục âm lượng & LED.
+  // ============================================================================
+  void performFactoryReset() {
+    Serial.println("[FactoryReset] === BAT DAU KHOI PHUC CAI DAT BAN DAU (MEO GOME CHIBI) ===");
+
+    // 1. Chuyen giao dien mac dinh sang MEO GOME CHIBI (Theme 5)
+    s40UiThemeIdx = 5;
+    applyS40UiTheme(5);
+
+    // 2. Thiet lap cau hinh Man Hinh Cho mac dinh voi Theme Meo Chibi
+    const S40ThemeSpec& th = S40_THEMES[5];
+    stCfg.theme         = "gome_chibi";
+    stCfg.clockStyle    = "digital";
+    stCfg.clockColorHex = "#3df7f7";
+    stCfg.clockColor    = th.neonCyan;
+    stCfg.clockFormat   = "24h";
+    stCfg.showSeconds   = true;
+    stCfg.clockPos      = "center";
+    stCfg.showDate      = true;
+    stCfg.dateFormat    = "vi";
+    stCfg.showWeather   = true;
+    stCfg.temp          = 28.5f;
+    stCfg.humidity      = 65;
+    stCfg.customText    = "Tram Decor Vu Tru *";
+    stCfg.textColor     = C_WHITE;
+    stCfg.bgColor       = th.darkBg;
+    stCfg.bgMode        = "gradient-cyber";
+    stCfg.bgImage       = "";
+    stCfg.dimOverlay    = 35;
+    saveConfigToFile();
+
+    // 3. Khoi phuc Cai Dat He Thong (s40_sys)
+    screenBrightnessPct    = 100;
+    setBacklightBrightness(100);
+    screenTimeoutIdx       = 2; // 30 giay tu tat man hinh
+    aodClockStyle          = 1; // Dong ho AOD ky thuat so
+    alwaysOnDisplayEnabled = true;
+    keyBeepEnabled         = true;
+    micSensitivityMode     = 1; // Tieu chuan (3.5x)
+    TestAudio::setMicSensitivityMode(1);
+    TestWindmill::setMode(0);
+    TestWindmill::setEdisonLeftMode(0);
+    TestWindmill::setEdisonRightMode(0);
+    CobLeds::init(true);
+    CobLeds::setCurrentMode(1);
+    TestWindmill::setFlowingLeds(true);
+    saveSystemSettingsPrefs();
+
+    // 4. Khoi phuc Am Luong Thong Bao & Loa
+    TestAudio::setNotifyVolumePct(70);
+    TestAudio::setSpeakerVolumePct(70);
+
+    // 5. Khoi phuc Bao Thuc / Hen Gio (s40_clock)
+    Preferences pClock;
+    if (pClock.begin("s40_clock", false)) {
+      pClock.clear();
+      pClock.end();
+    }
+    for (int i = 0; i < 3; i++) {
+      s40AlarmEnable[i] = false;
+      s40AlarmHour[i]   = 7;
+      s40AlarmMin[i]    = 0;
+    }
+    s40AlarmTuneIdx   = 1; // Nokia Tune mac dinh
+    s40TimerPresetSec = 300;
+    s40TimerRemainSec = 300;
+    s40TimerRunning   = false;
+
+    // 6. Dat lai Diem Ky Luc Tro Choi (s40_games)
+    Preferences pGames;
+    if (pGames.begin("s40_games", false)) {
+      pGames.clear();
+      pGames.end();
+    }
+    snakeBestScore  = 0;
+    flappyBestScore = 0;
+    tetrisBestScore = 0;
+
+    // 7. Khoi phuc Mat Khau Quan Tri Web (admin / admin)
+    WebAuth::resetToDefault();
+
+    // 8. Dat lai anh nen active
+    ImageManager::selectActiveImage("");
+
+    // 9. Am thanh chao mung & Thong bao truc quan
+    TestAudio::playStartupChime();
+    showSymbianToast("DA KHOI PHUC CAI DAT GOC (MEO CHIBI)", 3500);
+
+    // 10. Dat lai con tro cai dat ve dong 1 va ve lai man hinh
+    s40SettingsCursor = 0;
+    lastDrawnSettingsCursor = -1;
+    lastDrawnSettingsFirstRow = -1;
+    if (currentMode == 6) {
+      drawSettingsAppScreen(true);
+    } else {
+      refreshActiveScreen();
+    }
+    Serial.println("[FactoryReset] === HOAN TAT KHOI PHUC CAI DAT BAN DAU ===");
   }
 
   // ============================================================================
@@ -8817,10 +8931,10 @@ namespace TestDisplay {
       }
     } else if (currentMode == 6) {
       if (keyIndex == 1) {
-        s40SettingsCursor = (s40SettingsCursor + 13) % 14;
+        s40SettingsCursor = (s40SettingsCursor + S40_SETTINGS_COUNT - 1) % S40_SETTINGS_COUNT;
         drawSettingsAppScreen(false);
       } else if (keyIndex == 2) {
-        s40SettingsCursor = (s40SettingsCursor + 1) % 14;
+        s40SettingsCursor = (s40SettingsCursor + 1) % S40_SETTINGS_COUNT;
         drawSettingsAppScreen(false);
       } else if (keyIndex == 3) {
         adjustSettingsAppItem(s40SettingsCursor, -1);
