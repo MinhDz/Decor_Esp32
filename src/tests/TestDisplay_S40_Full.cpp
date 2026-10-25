@@ -37,6 +37,7 @@
 #include "SpaceOS_GameCenter.h"
 #include "SpaceOS_ClockSuite.h"
 #include "SpaceOS_Settings.h"
+#include "drivers/DisplayDriver.h"
 #include "SpaceOS_VnGfx.h"
 
 namespace TestDisplay {
@@ -44,122 +45,21 @@ namespace TestDisplay {
   // ============================================================================
   // Vietnamese Diacritic GFX Engine is modularized in SpaceOS_VnGfx.h
 
-  extern VnST7789* tft7789;
-  extern VnILI9341* tft9341;
-
   // ============================================================================
-  // LỚP CANVAS 16-BIT RGB565 TOÀN KHUNG HÌNH (240x320) NẰM TRÊN BỘ NHỚ PSRAM
-  // Hỗ trợ Double-Buffering 2 tầng, memcpy dòng cực nhanh & SPI 80MHz Non-blocking
+  // DISPLAY HARDWARE & PSRAM CANVAS (Modularized in DisplayDriver.h)
   // ============================================================================
-  class PsramCanvas16 : public Adafruit_GFX {
-  public:
-    uint16_t* buffer;
-    PsramCanvas16(uint16_t w, uint16_t h) : Adafruit_GFX(w, h), buffer(nullptr) {
-      size_t bytes = (size_t)w * h * sizeof(uint16_t);
-      if (psramFound()) {
-        buffer = (uint16_t*)ps_malloc(bytes);
-      }
-      if (!buffer) {
-        buffer = (uint16_t*)malloc(bytes);
-      }
-      if (buffer) {
-        memset(buffer, 0, bytes);
-      }
-    }
+  using DisplayDriver::PsramCanvas16;
+  using DisplayDriver::VnPsramCanvas16;
 
-    virtual ~PsramCanvas16() {
-      if (buffer) free(buffer);
-      buffer = nullptr;
-    }
-
-    void drawPixel(int16_t x, int16_t y, uint16_t color) override {
-      if (buffer && (x >= 0) && (x < _width) && (y >= 0) && (y < _height)) {
-        buffer[y * _width + x] = color;
-      }
-    }
-
-    void fillScreen(uint16_t color) override {
-      if (!buffer) return;
-      int count = _width * _height;
-      for (int i = 0; i < count; i++) {
-        buffer[i] = color;
-      }
-    }
-
-    void drawFastHLine(int16_t x, int16_t y, int16_t w, uint16_t color) override {
-      if (!buffer || y < 0 || y >= _height) return;
-      if (x < 0) { w += x; x = 0; }
-      if (x + w > _width) w = _width - x;
-      if (w <= 0) return;
-      uint16_t* p = &buffer[y * _width + x];
-      for (int i = 0; i < w; i++) p[i] = color;
-    }
-
-    void drawFastVLine(int16_t x, int16_t y, int16_t h, uint16_t color) override {
-      if (!buffer || x < 0 || x >= _width) return;
-      if (y < 0) { h += y; y = 0; }
-      if (y + h > _height) h = _height - y;
-      if (h <= 0) return;
-      uint16_t* p = &buffer[y * _width + x];
-      for (int i = 0; i < h; i++) {
-        *p = color;
-        p += _width;
-      }
-    }
-
-    void drawRGBBitmap(int16_t x, int16_t y, const uint16_t *bitmap, int16_t w, int16_t h) {
-      if (!buffer || !bitmap) return;
-      int16_t x2 = x + w - 1;
-      int16_t y2 = y + h - 1;
-      if (x >= _width || y >= _height || x2 < 0 || y2 < 0) return;
-
-      int16_t bx1 = 0, by1 = 0, saveW = w;
-      if (x < 0) { w += x; bx1 = -x; x = 0; }
-      if (y < 0) { h += y; by1 = -y; y = 0; }
-      if (x2 >= _width)  w = _width - x;
-      if (y2 >= _height) h = _height - y;
-      if (w <= 0 || h <= 0) return;
-
-      const uint16_t* src = bitmap + by1 * saveW + bx1;
-      for (int row = 0; row < h; row++) {
-        uint16_t* dst = &buffer[(y + row) * _width + x];
-        memcpy(dst, src, w * sizeof(uint16_t));
-        src += saveW;
-      }
-    }
-
-    void drawRGBBitmap(int16_t x, int16_t y, uint16_t *bitmap, int16_t w, int16_t h) {
-      drawRGBBitmap(x, y, (const uint16_t*)bitmap, w, h);
-    }
-
-    void invertDisplay(bool i) {
-      if (tft7789) tft7789->invertDisplay(i);
-      else if (tft9341) tft9341->invertDisplay(i);
-    }
-
-    uint16_t* getBuffer() const { return buffer; }
-  };
-
-  using VnPsramCanvas16 = VnGfxAdapter<PsramCanvas16>;
-
-  // vnStrLen and vnSubstr are modularized in SpaceOS_VnGfx.h
-
-
-  // ============================================================================
-  // HỆ THỐNG 6 PHONG CÁCH GIAO DIỆN (ĐƯỢC ĐỊNH NGHĨA TRONG SpaceOS_Themes.h)
-  // ============================================================================
-
-  // curTheme() and dynamic theme macros are modularized in SpaceOS_Themes.h
-
-  static SPIClass* spiBus = nullptr;
-  VnST7789* tft7789 = nullptr;
-  VnILI9341* tft9341 = nullptr;
-  static Adafruit_SPITFT* tft = nullptr;
+  static SPIClass*& spiBus = DisplayDriver::getSpiBusRef();
+  static SpaceOS::VnST7789*& tft7789 = DisplayDriver::getST7789Ref();
+  static SpaceOS::VnILI9341*& tft9341 = DisplayDriver::getILI9341Ref();
+  static Adafruit_SPITFT*& tft = DisplayDriver::getTftRef();
   static volatile bool s_standbyNeedsRedraw = false;
 
-  static bool useST7789 = true;
-  static bool inverted = false;
-  static uint8_t rotation = 0;      // 0: Dọc (240x320)
+  static bool& useST7789 = DisplayDriver::getUseST7789Ref();
+  static bool& inverted = DisplayDriver::getInvertedRef();
+  static uint8_t& rotation = DisplayDriver::getRotationRef();
 
   static inline void commitFrame() {}
 
@@ -235,8 +135,8 @@ namespace TestDisplay {
   static int&  micSensitivityMode     = SpaceOS_Settings::getMicSensitivityRef();
   static const int S40_SETTINGS_COUNT = SpaceOS_Settings::SETTINGS_COUNT;
   static unsigned long lastUserActivityMs = 0;
-  static volatile bool isScreenSleeping = false;
-  static volatile bool s_wakeUpRequested = false;
+  static volatile bool& isScreenSleeping = DisplayDriver::getSleepingRef();
+  static volatile bool& s_wakeUpRequested = DisplayDriver::getWakeUpRequestedRef();
   static int lastAodDrawnMinute = -1;
   static bool lastTtp223State = false;
   static unsigned long lastTtp223ChangeMs = 0;
@@ -606,28 +506,19 @@ namespace TestDisplay {
   // Điều chỉnh độ sáng đèn nền màn hình bằng xung PWM trên chân GPIO 7 (PIN_TFT_BL)
   void setBacklightBrightness(int pct) {
     screenBrightnessPct = constrain(pct, 10, 100);
-    if (!isScreenSleeping) {
-      uint32_t duty = (uint32_t)((screenBrightnessPct * 255) / 100);
-      ledcWrite(0, duty);
-    }
+    DisplayDriver::setBrightness(screenBrightnessPct);
   }
 
   int getBacklightBrightness() {
-    return screenBrightnessPct;
+    return DisplayDriver::getBrightness();
   }
 
   bool isSleeping() {
-    return isScreenSleeping;
+    return DisplayDriver::isSleeping();
   }
 
   void wakeUpScreenFromTask() {
-    if (!isScreenSleeping) return;
-    isScreenSleeping = false;
-    lastUserActivityMs = millis();
-    uint32_t duty = (uint32_t)((screenBrightnessPct * 255) / 100);
-    ledcWrite(0, duty);
-    s_wakeUpRequested = true;
-    Serial.println("💡 [TASK WAKEUP] Đã đánh thức màn hình tức thì từ FreeRTOS KeypadTask!");
+    DisplayDriver::wakeUpScreenFromTask();
   }
 
   // Lấy thời gian hiện tại (từ NTP nếu đã đồng bộ, hoặc đếm từ mốc mặc định)
@@ -7691,18 +7582,7 @@ namespace TestDisplay {
   }
 
   static void initDriver() {
-    if (useST7789) {
-      tft7789->init(240, 320);
-      tft7789->setSPISpeed(80000000); // Tăng tốc độ xung SPI phần cứng lên 80 MHz tối đa của ESP32-S3!
-      tft7789->invertDisplay(inverted);
-      tft7789->setRotation(rotation);
-      tft = tft7789;
-    } else {
-      tft9341->begin(80000000);
-      tft9341->invertDisplay(inverted);
-      tft9341->setRotation(rotation);
-      tft = tft9341;
-    }
+    DisplayDriver::reinitController();
   }
 
   // ============================================================================
@@ -8337,22 +8217,11 @@ namespace TestDisplay {
                   PIN_TFT_SCK, PIN_TFT_MOSI, PIN_TFT_RST, PIN_TFT_DC, PIN_TFT_CS, PIN_TFT_BL);
     Serial.println("-------------------------------------------------------");
 
-    ledcSetup(0, 5000, 8);
-    ledcAttachPin(PIN_TFT_BL, 0);
-    pinMode(PIN_TOUCH_TTP223, INPUT_PULLDOWN); // Cảm biến chạm điện dung TTP223 trên GPIO 21 (Active HIGH, RTC_GPIO21, chống nhiễu khi chưa cắm)
+    DisplayDriver::initHardware(useST7789, inverted, rotation);
     lastTtp223State = (digitalRead(PIN_TOUCH_TTP223) == HIGH);
     lastUserActivityMs = millis();
-    isScreenSleeping = false;
     setBacklightBrightness(screenBrightnessPct);
 
-    if (!spiBus) {
-      spiBus = new SPIClass(FSPI);
-      spiBus->begin(PIN_TFT_SCK, -1, PIN_TFT_MOSI, PIN_TFT_CS);
-    }
-    if (!tft7789) tft7789 = new VnST7789(spiBus, PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
-    if (!tft9341) tft9341 = new VnILI9341(spiBus, PIN_TFT_CS, PIN_TFT_DC, PIN_TFT_RST);
-
-    initDriver();
     loadConfigFromFile();
     loadSystemSettingsPrefsIfNeeded();
     loadClockSuitePrefsIfNeeded();

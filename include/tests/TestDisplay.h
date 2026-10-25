@@ -1,6 +1,7 @@
 #pragma once
 #include <Arduino.h>
 #include <Preferences.h>
+#include "drivers/DisplayDriver.h"
 
 namespace TestDisplay {
   // Khởi tạo màn hình ST7789 (GPIO 12, 11, 10, 13, 14) và nạp giao diện Màn Hình Chờ
