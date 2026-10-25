@@ -928,34 +928,39 @@ namespace TestDisplay {
 
   // ============================================================================
   // HE THONG BIEU CAM DA PHONG CACH XIAOZHI (NEON / CUTE GIRL / DOI MAT ANIMATED)
+  // BO DEM KEP (DOUBLE-BUFFER) TRONG OCTAL PSRAM: CHONG CHOP & CHONG XE HINH 100%
   // ============================================================================
-  static int16_t s_emojiClipX = 0, s_emojiClipY = 0, s_emojiClipW = 240, s_emojiClipH = 320;
+  static VnCanvas16* s_emojiCanvas = nullptr;
+  static int16_t s_canvasBoxX = 6, s_canvasBoxY = 24, s_canvasBoxW = 228, s_canvasBoxH = 140;
 
   static bool jpgEmojiClipRenderCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-    if (!tft) return false;
-    // Neu khoi nam hoan toan ben ngoai khung cat (clip rect): bo qua giai ma block nay
-    if (x + w <= s_emojiClipX || x >= s_emojiClipX + s_emojiClipW ||
-        y + h <= s_emojiClipY || y >= s_emojiClipY + s_emojiClipH) {
-      return true;
-    }
-    // Neu khoi nam hoan toan ben trong khung cat: ve thang toan bo khoi len man hinh
-    if (x >= s_emojiClipX && x + w <= s_emojiClipX + s_emojiClipW &&
-        y >= s_emojiClipY && y + h <= s_emojiClipY + s_emojiClipH) {
-      tft->drawRGBBitmap(x, y, bitmap, w, h);
-      return true;
-    }
-    // Neu khoi nam mot phan ben trong khung cat: ve tung dong pixel hop le
-    for (uint16_t row = 0; row < h; row++) {
-      int16_t py = y + row;
-      if (py < s_emojiClipY || py >= s_emojiClipY + s_emojiClipH) continue;
+    if (!s_emojiCanvas) return false;
+    uint16_t* dest = s_emojiCanvas->getBuffer();
+    int cW = s_emojiCanvas->width();
+    int cH = s_emojiCanvas->height();
 
-      int16_t startCol = 0;
-      if (x < s_emojiClipX) startCol = s_emojiClipX - x;
-      int16_t endCol = w;
-      if (x + w > s_emojiClipX + s_emojiClipW) endCol = s_emojiClipX + s_emojiClipW - x;
+    int relX = x - s_canvasBoxX;
+    int relY = y - s_canvasBoxY;
+
+    if (relX + w <= 0 || relX >= s_canvasBoxW || relY + h <= 0 || relY >= s_canvasBoxH) {
+      return true;
+    }
+
+    for (uint16_t row = 0; row < h; row++) {
+      int cy = relY + row;
+      if (cy < 0 || cy >= s_canvasBoxH || cy >= cH) continue;
+
+      int startCol = 0;
+      if (relX < 0) startCol = -relX;
+      int endCol = w;
+      if (relX + w > s_canvasBoxW) endCol = s_canvasBoxW - relX;
+      if (relX + endCol > cW) endCol = cW - relX;
 
       if (startCol < endCol) {
-        tft->drawRGBBitmap(x + startCol, py, &bitmap[row * w + startCol], endCol - startCol, 1);
+        int copyLen = endCol - startCol;
+        memcpy(&dest[cy * cW + (relX + startCol)],
+               &bitmap[row * w + startCol],
+               copyLen * sizeof(uint16_t));
       }
     }
     return true;
@@ -1086,18 +1091,11 @@ namespace TestDisplay {
     return false;
   }
 
-  // Ve doi mat vector Neon Cyberpunk goc (Style 0 mac dinh)
-  static void drawNeonVectorEyes(int boxX, int boxY, int boxW, int boxH, uint8_t state, uint8_t scaleMode) {
-    if (!tft) return;
-    int cx = boxX + boxW / 2;
-    int cy = boxY + boxH / 2;
-
-    if (scaleMode == 2) {
-      tft->fillRect(boxX, boxY, boxW, boxH, C_BLACK);
-    } else {
-      tft->fillRoundRect(boxX + 2, boxY + 2, boxW - 4, boxH - 4, 6, C_BLACK);
-      tft->drawRoundRect(boxX, boxY, boxW, boxH, 6, C_NEON_CYAN);
-    }
+  // Ve doi mat vector Neon Cyberpunk goc (Style 0 mac dinh) truc tiep vao Canvas RAM bo dem kep
+  static void drawNeonVectorEyesToCanvas(VnCanvas16* cv, int boxW, int boxH, uint8_t state, uint8_t scaleMode) {
+    if (!cv) return;
+    int cx = boxW / 2;
+    int cy = boxH / 2;
 
     int radius = (scaleMode == 2) ? 29 : 18;
     int gap    = (scaleMode == 2) ? 32 : 18;
@@ -1110,10 +1108,10 @@ namespace TestDisplay {
     uint16_t haloCyan = C_NEON_CYAN;
 
     auto drawGlowingCircleEye = [&](int ex, int ey, int r, uint16_t col, int pupDx, int pupDy) {
-      tft->drawCircle(ex, ey, r + 2, haloCyan);
-      tft->drawCircle(ex, ey, r + 1, col);
-      tft->fillCircle(ex, ey, r, col);
-      tft->fillCircle(ex + pupDx, ey + pupDy, pupR, C_WHITE);
+      cv->drawCircle(ex, ey, r + 2, haloCyan);
+      cv->drawCircle(ex, ey, r + 1, col);
+      cv->fillCircle(ex, ey, r, col);
+      cv->fillCircle(ex + pupDx, ey + pupDy, pupR, C_WHITE);
     };
 
     switch (state) {
@@ -1123,85 +1121,105 @@ namespace TestDisplay {
         break;
 
       case 1: // BLINK (Nhay mat - -)
-        tft->fillRoundRect(leftCx - radius,  eyeCy - 4, radius * 2, 8, 4, mainCyan);
-        tft->fillRoundRect(rightCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
+        cv->fillRoundRect(leftCx - radius,  eyeCy - 4, radius * 2, 8, 4, mainCyan);
+        cv->fillRoundRect(rightCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
         break;
 
       case 2: // HAPPY (Vui ve ^ ^)
         drawGlowingCircleEye(leftCx,  eyeCy + 4, radius, C_NEON_GREEN, 0, -8);
         drawGlowingCircleEye(rightCx, eyeCy + 4, radius, C_NEON_GREEN, 0, -8);
-        tft->fillCircle(leftCx,  eyeCy + radius / 2 + 6, radius, C_BLACK);
-        tft->fillCircle(rightCx, eyeCy + radius / 2 + 6, radius, C_BLACK);
+        cv->fillCircle(leftCx,  eyeCy + radius / 2 + 6, radius, C_BLACK);
+        cv->fillCircle(rightCx, eyeCy + radius / 2 + 6, radius, C_BLACK);
         break;
 
-      case 3: // LOOK LEFT (Liec Trai)
+      case 3: // LOOK LEFT
         drawGlowingCircleEye(leftCx - 12,  eyeCy, radius, mainCyan, -10, -4);
         drawGlowingCircleEye(rightCx - 12, eyeCy, radius, mainCyan, -10, -4);
         break;
 
-      case 4: // LOOK RIGHT (Liec Phai)
+      case 4: // LOOK RIGHT
         drawGlowingCircleEye(leftCx + 12,  eyeCy, radius, mainCyan, 10, -4);
         drawGlowingCircleEye(rightCx + 12, eyeCy, radius, mainCyan, 10, -4);
         break;
 
-      case 5: // LOOK UP (Nhin Len)
+      case 5: // LOOK UP
         drawGlowingCircleEye(leftCx,  eyeCy - 12, radius, mainCyan, 0, -11);
         drawGlowingCircleEye(rightCx, eyeCy - 12, radius, mainCyan, 0, -11);
         break;
 
-      case 6: // LOOK DOWN (Nhin Xuong)
+      case 6: // LOOK DOWN
         drawGlowingCircleEye(leftCx,  eyeCy + 12, radius, mainCyan, 0, 11);
         drawGlowingCircleEye(rightCx, eyeCy + 12, radius, mainCyan, 0, 11);
         break;
 
-      case 7: // ANGRY (Gian >_<)
-        tft->fillCircle(leftCx,  eyeCy, radius, C_NEON_PINK);
-        tft->fillCircle(rightCx, eyeCy, radius, C_NEON_PINK);
+      case 7: // ANGRY
+        cv->fillCircle(leftCx,  eyeCy, radius, C_NEON_PINK);
+        cv->fillCircle(rightCx, eyeCy, radius, C_NEON_PINK);
         for (int i = -radius; i <= radius; i++) {
           int cutLeftY  = eyeCy - radius / 2 + (i + radius) / 3;
           int cutRightY = eyeCy - radius / 2 + (radius - i) / 3;
-          tft->drawFastVLine(leftCx + i,  eyeCy - radius - 2, max(0, cutLeftY - (eyeCy - radius - 2)), C_BLACK);
-          tft->drawFastVLine(rightCx + i, eyeCy - radius - 2, max(0, cutRightY - (eyeCy - radius - 2)), C_BLACK);
+          cv->drawFastVLine(leftCx + i,  eyeCy - radius - 2, max(0, cutLeftY - (eyeCy - radius - 2)), C_BLACK);
+          cv->drawFastVLine(rightCx + i, eyeCy - radius - 2, max(0, cutRightY - (eyeCy - radius - 2)), C_BLACK);
         }
         break;
 
-      case 8: // CONFUSED (Boi roi @@)
+      case 8: // CONFUSED
         for (int r = radius; r >= 6; r -= 7) {
-          tft->drawCircle(leftCx,  eyeCy, r, (r % 2 == 0) ? C_NEON_AMBER : C_WHITE);
-          tft->drawCircle(rightCx, eyeCy, r, (r % 2 == 0) ? C_NEON_AMBER : C_WHITE);
+          cv->drawCircle(leftCx,  eyeCy, r, (r % 2 == 0) ? C_NEON_AMBER : C_WHITE);
+          cv->drawCircle(rightCx, eyeCy, r, (r % 2 == 0) ? C_NEON_AMBER : C_WHITE);
         }
-        tft->fillCircle(leftCx,  eyeCy, 4, C_NEON_AMBER);
-        tft->fillCircle(rightCx, eyeCy, 4, C_NEON_AMBER);
+        cv->fillCircle(leftCx,  eyeCy, 4, C_NEON_AMBER);
+        cv->fillCircle(rightCx, eyeCy, 4, C_NEON_AMBER);
         break;
 
-      case 9: // WINK LEFT (Nhay mat trai)
-        tft->fillRoundRect(leftCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
+      case 9: // WINK LEFT
+        cv->fillRoundRect(leftCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
         drawGlowingCircleEye(rightCx, eyeCy, radius, mainCyan, 6, -6);
         break;
 
-      case 10: // WINK RIGHT (Nhay mat phai)
+      case 10: // WINK RIGHT
         drawGlowingCircleEye(leftCx, eyeCy, radius, mainCyan, 6, -6);
-        tft->fillRoundRect(rightCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
+        cv->fillRoundRect(rightCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
         break;
 
-      case 11: // SLEEPY (Buon ngu)
+      case 11: // SLEEPY
       default:
         drawGlowingCircleEye(leftCx,  eyeCy + 4, radius, C_NEON_PURPLE, 0, 4);
         drawGlowingCircleEye(rightCx, eyeCy + 4, radius, C_NEON_PURPLE, 0, 4);
-        tft->fillRect(leftCx - radius - 2,  eyeCy - radius - 2, radius * 2 + 4, radius + 2, C_BLACK);
-        tft->fillRect(rightCx - radius - 2, eyeCy - radius - 2, radius * 2 + 4, radius + 2, C_BLACK);
-        tft->drawFastHLine(leftCx - radius,  eyeCy, radius * 2, C_NEON_CYAN);
-        tft->drawFastHLine(rightCx - radius, eyeCy, radius * 2, C_NEON_CYAN);
+        cv->fillRect(leftCx - radius - 2,  eyeCy - radius - 2, radius * 2 + 4, radius + 2, C_BLACK);
+        cv->fillRect(rightCx - radius - 2, eyeCy - radius - 2, radius * 2 + 4, radius + 2, C_BLACK);
+        cv->drawFastHLine(leftCx - radius,  eyeCy, radius * 2, C_NEON_CYAN);
+        cv->drawFastHLine(rightCx - radius, eyeCy, radius * 2, C_NEON_CYAN);
         break;
     }
   }
 
   // Ve doi mat robot XiaoZhi: Ho tro Da Phong Cach (0: Neon Cyberpunk, 1: Co be Chibi, 2: Doi mat Robot)
+  // Kien truc Bo dem kep (Double-Buffered Canvas) trong Octal PSRAM: Chong chop & chong xe hinh 100%
   static void drawXiaoZhiEyesBox(int boxX, int boxY, int boxW, int boxH, uint8_t state, uint8_t scaleMode) {
     if (!tft) return;
 
+    if (!s_emojiCanvas || s_emojiCanvas->width() != boxW || s_emojiCanvas->height() != boxH) {
+      if (s_emojiCanvas) delete s_emojiCanvas;
+      s_emojiCanvas = new VnCanvas16(boxW, boxH);
+    }
+    if (!s_emojiCanvas) return;
+
+    // 1. Ve nen va khung vien trong Canvas bo dem RAM (Sieu nhanh < 50us, khong chop man hinh)
+    s_emojiCanvas->fillScreen(C_BLACK);
+    if (scaleMode != 2) {
+      s_emojiCanvas->fillRoundRect(2, 2, boxW - 4, boxH - 4, 6, C_BLACK);
+      s_emojiCanvas->drawRoundRect(0, 0, boxW, boxH, 6, C_NEON_CYAN);
+    }
+
+    s_canvasBoxX = boxX;
+    s_canvasBoxY = boxY;
+    s_canvasBoxW = boxW;
+    s_canvasBoxH = boxH;
+
     if (s_emojiStyle == 0) {
-      drawNeonVectorEyes(boxX, boxY, boxW, boxH, state, scaleMode);
+      drawNeonVectorEyesToCanvas(s_emojiCanvas, boxW, boxH, state, scaleMode);
+      tft->drawRGBBitmap(boxX, boxY, s_emojiCanvas->getBuffer(), boxW, boxH);
       return;
     }
 
@@ -1209,18 +1227,9 @@ namespace TestDisplay {
     String canonical = mapToCanonicalEmotion(state, s40AiEmotionTag);
 
     if (s_emojiStyle == 1) {
-      // 1. Cute Girl: 128x128 JPEG can giua co dinh (Center Anchor - Khong bi lech tam)
+      // 1. Cute Girl: 128x128 JPEG can giua co dinh tuyet doi (Center Anchor)
       int imgX = boxX + (boxW - 128) / 2;
       int imgY = boxY + (boxH - 128) / 2;
-
-      if (scaleMode == 2) {
-        tft->fillRect(boxX, boxY, boxW, boxH, C_BLACK);
-        s_emojiClipX = boxX; s_emojiClipY = boxY; s_emojiClipW = boxW; s_emojiClipH = boxH;
-      } else {
-        tft->fillRoundRect(boxX + 2, boxY + 2, boxW - 4, boxH - 4, 6, C_BLACK);
-        tft->drawRoundRect(boxX, boxY, boxW, boxH, 6, C_NEON_CYAN);
-        s_emojiClipX = boxX + 2; s_emojiClipY = boxY + 2; s_emojiClipW = boxW - 4; s_emojiClipH = boxH - 4;
-      }
 
       String fld = "/emojis/cute_girl/";
       if (canonical == "neutral") rendered = drawEmojiWithAliases(imgX, imgY, fld, "neutral", "binhthuong", "binh_thuong");
@@ -1245,19 +1254,18 @@ namespace TestDisplay {
         }
       }
     } else if (s_emojiStyle == 2) {
-      // 2. Doi Mat Robot: 240x240 JPEG can giua theo truc doc tam mat (y=98, Center Anchor)
+      // 2. Doi Mat Robot: 240x240 JPEG can giua theo tam mat thuc te cua tung bieu cam (Eye-Center Alignment)
+      int eyeCenterY = 120; // Mac dinh: 1macdinh, suynghi2, ngacnhien2, tucgian2, vuimung
+      if (canonical == "happy") eyeCenterY = 92;         // vuive, cuoito
+      else if (canonical == "confused") eyeCenterY = 93; // chamhoi, hoamat
+      else if (canonical == "winking") eyeCenterY = 94;  // nhaymat
+      else if (canonical == "sleepy") eyeCenterY = 98;   // buonngu
+      else if (canonical == "sad") eyeCenterY = 103;     // buon
+      else if (canonical == "angry") eyeCenterY = 116;   // tucgian
+
       int cy = boxY + boxH / 2;
       int imgX = boxX + (boxW - 240) / 2;
-      int imgY = cy - 98;
-
-      if (scaleMode == 2) {
-        tft->fillRect(boxX, boxY, boxW, boxH, C_BLACK);
-        s_emojiClipX = boxX; s_emojiClipY = boxY; s_emojiClipW = boxW; s_emojiClipH = boxH;
-      } else {
-        tft->fillRoundRect(boxX + 2, boxY + 2, boxW - 4, boxH - 4, 6, C_BLACK);
-        tft->drawRoundRect(boxX, boxY, boxW, boxH, 6, C_NEON_CYAN);
-        s_emojiClipX = boxX + 2; s_emojiClipY = boxY + 2; s_emojiClipW = boxW - 4; s_emojiClipH = boxH - 4;
-      }
+      int imgY = cy - eyeCenterY;
 
       String fld = "/emojis/doi_mat/";
       int aFrm = (int)s_doiMatFrameIdx;
@@ -1284,10 +1292,12 @@ namespace TestDisplay {
       }
     }
 
-    // Tu dong Fallback ve Mat Neon mac dinh neu that bai hoan toan
     if (!rendered) {
-      drawNeonVectorEyes(boxX, boxY, boxW, boxH, state, scaleMode);
+      drawNeonVectorEyesToCanvas(s_emojiCanvas, boxW, boxH, state, scaleMode);
     }
+
+    // 2. Day toan bo buc tranh tu Canvas RAM len LCD trong 1 lenh duy nhat (Zero Tearing, Zero Flicker, 60 FPS)
+    tft->drawRGBBitmap(boxX, boxY, s_emojiCanvas->getBuffer(), boxW, boxH);
   }
 
   // Cập nhật Đồng hồ số nổi trong suốt trên nền ảnh JPEG / Gradient (Không vẽ hộp đen che ảnh & không nháy hình)
@@ -1521,7 +1531,7 @@ namespace TestDisplay {
     drawTopStatusBar();
 
     // Phần trên (70%): Đôi mắt tròn phát sáng đồng bộ 100% với Web UI
-    drawXiaoZhiEyesBox(8, 28, w - 16, 186, eyeState, 2);
+    drawXiaoZhiEyesBox(6, 24, w - 12, 140, eyeState, 2);
 
     // Phần dưới (30%): Hộp phụ đề 3 dòng
     drawEmojiSubtitleBox();
@@ -8635,11 +8645,7 @@ namespace TestDisplay {
 
     if ((currentMode == 1 || currentMode == 11) && tft && !isScreenSleeping) {
       if (stateChanged) {
-        if (currentMode == 1) {
-          drawXiaoZhiEyesBox(8, 28, tft->width() - 16, 186, eyeState, 2);
-        } else {
-          drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
-        }
+        drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
       }
     }
   }
@@ -8653,11 +8659,7 @@ namespace TestDisplay {
     }
     Serial.printf("[XIAOZHI EMOJI STYLE]: Da chuyen sang Style %u (%s)\n", (unsigned)s_emojiStyle, getEmojiStyleName().c_str());
     if ((currentMode == 1 || currentMode == 11) && tft && !isScreenSleeping) {
-      if (currentMode == 1) {
-        drawXiaoZhiEyesBox(8, 28, tft->width() - 16, 186, eyeState, 2);
-      } else {
-        drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
-      }
+      drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
     }
   }
 
