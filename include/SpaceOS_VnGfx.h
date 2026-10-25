@@ -399,6 +399,43 @@ namespace SpaceOS {
   using VnILI9341  = VnGfxAdapter<Adafruit_ILI9341>;
   using VnCanvas16 = VnGfxAdapter<GFXcanvas16>;
 
+
+  // Đếm số ký tự hiển thị thực tế của chuỗi UTF-8 (mỗi chữ Tiếng Việt có dấu tính đúng 1 ô 6px)
+  inline int vnStrLen(const char* s) {
+    if (!s) return 0;
+    int count = 0;
+    while (*s) {
+      uint8_t c = (uint8_t)(*s++);
+      if ((c & 0xC0) != 0x80) count++;
+    }
+    return count;
+  }
+
+  inline int vnStrLen(const String& s) {
+    return vnStrLen(s.c_str());
+  }
+
+  // Cắt chuỗi UTF-8 theo số lượng ký tự hiển thị (không bao giờ cắt đứt giữa byte UTF-8)
+  inline String vnSubstr(const String& s, int startChar, int maxChars) {
+    if (maxChars <= 0) return "";
+    int curChar = 0;
+    int startByte = -1;
+    int endByte = s.length();
+    for (int i = 0; i < (int)s.length(); i++) {
+      uint8_t c = (uint8_t)s[i];
+      if ((c & 0xC0) != 0x80) {
+        if (curChar == startChar && startByte < 0) startByte = i;
+        if (curChar == startChar + maxChars) {
+          endByte = i;
+          break;
+        }
+        curChar++;
+      }
+    }
+    if (startByte < 0) return "";
+    return s.substring(startByte, endByte);
+  }
+
 } // namespace SpaceOS
 
 // Backward compatibility for TestDisplay namespace
@@ -412,4 +449,6 @@ namespace TestDisplay {
   using SpaceOS::VnST7789;
   using SpaceOS::VnILI9341;
   using SpaceOS::VnCanvas16;
+  using SpaceOS::vnStrLen;
+  using SpaceOS::vnSubstr;
 }
