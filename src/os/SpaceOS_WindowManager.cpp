@@ -32,6 +32,7 @@
 #include <Preferences.h>
 #include <qrcode.h>
 #include "WebAuth.h"
+#include "WebStreamManager.h"
 
 #include "SpaceOS_Themes.h"
 #include "SpaceOS_GameCenter.h"
@@ -4813,8 +4814,10 @@ namespace TestDisplay {
   static uint8_t s40MediaVuPeaks[16] = {0};
   static unsigned long s40MediaLastSecMs = 0;
   static VnCanvas16* mediaVisCanvas = nullptr;
+  static void invalidateCoverArtCache();
 
   static void refreshMediaPlaylist() {
+    invalidateCoverArtCache();
     s40MediaTrackCount = 0;
     // 0. Quét thư mục /recording trên Thẻ nhớ SD (Chứa các bản ghi âm từ Mic INMP441)
     if (TestSDCard::isMounted()) {
@@ -5125,6 +5128,78 @@ namespace TestDisplay {
     return "";
   }
 
+  // Bộ đệm Cache Ảnh bìa Album 64x64 RGB565 (8KB PSRAM) - Giải mã 1 lần duy nhất khi đổi bài hát
+  static uint16_t* s_cachedCoverArt = nullptr;
+  static int s_cachedCoverTrackIdx = -999;
+  static bool s_cachedCoverValid = false;
+
+  static void invalidateCoverArtCache() {
+    s_cachedCoverTrackIdx = -999;
+    s_cachedCoverValid = false;
+  }
+
+  static void ensureCoverArtCache(int cbX, int cbY) {
+    if (s_cachedCoverTrackIdx == s40MediaTrackIdx && s_cachedCoverArt != nullptr) {
+      return; // Đã nạp sẵn trong PSRAM, không đọc lại SD
+    }
+    s_cachedCoverTrackIdx = s40MediaTrackIdx;
+    s_cachedCoverValid = false;
+
+    if (!s_cachedCoverArt) {
+      if (psramFound()) s_cachedCoverArt = (uint16_t*)ps_malloc(64 * 64 * sizeof(uint16_t));
+      if (!s_cachedCoverArt) s_cachedCoverArt = (uint16_t*)malloc(64 * 64 * sizeof(uint16_t));
+    }
+    if (!s_cachedCoverArt) return;
+
+    memset(s_cachedCoverArt, 0, 64 * 64 * sizeof(uint16_t));
+
+    String coverPath = findCoverArtForCurrentTrack();
+    if (coverPath.length() == 0) return;
+
+    if (coverPath.endsWith(".jpg") || coverPath.endsWith(".jpeg")) {
+      uint16_t jw = 0, jh = 0;
+      bool isSd = !coverPath.startsWith("[FS]");
+      if (isSd && TestSDCard::isMounted()) {
+        if (StorageDriver::lock(pdMS_TO_TICKS(150))) {
+          File f = SD.open(coverPath, FILE_READ);
+          if (f) {
+            size_t sz = f.size();
+            if (sz > 0 && sz <= 65536) {
+              uint8_t* jBuf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
+              if (jBuf && f.read(jBuf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, jBuf, sz) == JDR_OK && jw > 0 && jh > 0) {
+                uint8_t scale = 1;
+                if (jw >= 256 || jh >= 256) scale = 4;
+                else if (jw >= 128 || jh >= 128) scale = 2;
+                TJpgDec.setJpgScale(scale);
+                TJpgDec.setCallback([](int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) -> bool {
+                  if (!s_cachedCoverArt) return false;
+                  for (uint16_t r = 0; r < h; r++) {
+                    int py = y + r;
+                    if (py < 0 || py >= 64) continue;
+                    for (uint16_t c = 0; c < w; c++) {
+                      int px = x + c;
+                      if (px < 0 || px >= 64) continue;
+                      s_cachedCoverArt[py * 64 + px] = bitmap[r * w + c];
+                    }
+                  }
+                  return true;
+                });
+                int ox = max(0, (64 - (int)(jw / scale)) / 2);
+                int oy = max(0, (64 - (int)(jh / scale)) / 2);
+                if (TJpgDec.drawJpg(ox, oy, jBuf, sz) == JDR_OK) {
+                  s_cachedCoverValid = true;
+                }
+              }
+              if (jBuf) free(jBuf);
+            }
+            f.close();
+          }
+          StorageDriver::unlock();
+        }
+      }
+    }
+  }
+
   // Vẽ vùng 1/3 Màn hình trên cùng (Top Visualizer Box: 224x82) bằng Canvas chống nháy 100%
   static void drawMediaTopVisualizerOnly() {
     if (!tft || s40MediaSubState != 0) return;
@@ -5157,8 +5232,8 @@ namespace TestDisplay {
     if (ampScale > 1.25f) ampScale = 1.25f;
 
     if (s40MediaVisMode == 0) {
-      String coverPath = findCoverArtForCurrentTrack();
-      bool hasCover = (coverPath.length() > 0);
+      ensureCoverArtCache(14, 7);
+      bool hasCover = s_cachedCoverValid;
 
       if (hasCover) {
         // --- CÓ ẢNH BÌA ALBUM: Hiển thị Khung Ảnh Bìa 68x68 nổi bật bo tròn góc ---
@@ -5167,54 +5242,13 @@ namespace TestDisplay {
         mediaVisCanvas->drawRoundRect(cbX, cbY, cbW, cbH, 6, C_NEON_PINK);
         mediaVisCanvas->drawRoundRect(cbX - 1, cbY - 1, cbW + 2, cbH + 2, 7, C_NEON_CYAN);
 
-        // Đọc và vẽ ảnh thumbnail bìa vào khung 64x64 bên trong
-        bool drawnCover = false;
-        if (coverPath.endsWith(".jpg") || coverPath.endsWith(".jpeg")) {
-          uint16_t jw = 0, jh = 0;
-          bool isSd = !coverPath.startsWith("[FS]");
-          if (isSd && TestSDCard::isMounted()) {
-            if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
-              File f = SD.open(coverPath, FILE_READ);
-              if (f) {
-                size_t sz = f.size();
-                if (sz > 0 && sz <= 65536) {
-                  uint8_t* jBuf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
-                  if (jBuf && f.read(jBuf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, jBuf, sz) == JDR_OK && jw > 0 && jh > 0) {
-                    uint8_t scale = 1;
-                    if (jw >= 256 || jh >= 256) scale = 4;
-                    else if (jw >= 128 || jh >= 128) scale = 2;
-                    TJpgDec.setJpgScale(scale);
-                    int ox = cbX + 2 + max(0, (64 - (int)(jw / scale)) / 2);
-                    int oy = cbY + 2 + max(0, (64 - (int)(jh / scale)) / 2);
-                    TJpgDec.setCallback([](int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) -> bool {
-                      if (!mediaVisCanvas) return false;
-                      for (uint16_t r = 0; r < h; r++) {
-                        int py = y + r;
-                        if (py < 9 || py >= 73) continue;
-                        for (uint16_t c = 0; c < w; c++) {
-                          int px = x + c;
-                          if (px < 16 || px >= 80) continue;
-                          mediaVisCanvas->drawPixel(px, py, bitmap[r * w + c]);
-                        }
-                      }
-                      return true;
-                    });
-                    if (TJpgDec.drawJpg(ox, oy, jBuf, sz) == JDR_OK) drawnCover = true;
-                  }
-                  if (jBuf) free(jBuf);
-                }
-                f.close();
-              }
-              StorageDriver::unlock();
+        if (s_cachedCoverArt) {
+          // Blit trực tiếp 64x64 từ PSRAM Cache vào Canvas cực nhanh (0.02ms, KHÔNG đọc thẻ nhớ SD!)
+          for (int py = 0; py < 64; py++) {
+            for (int px = 0; px < 64; px++) {
+              mediaVisCanvas->drawPixel(cbX + 2 + px, cbY + 2 + py, s_cachedCoverArt[py * 64 + px]);
             }
           }
-        }
-        if (!drawnCover) {
-          // Biểu tượng đĩa nhạc / nốt nhạc phát sáng nếu chưa đọc được ảnh bìa
-          mediaVisCanvas->fillCircle(cbX + 34, cbY + 34, 22, 0x1949);
-          mediaVisCanvas->drawCircle(cbX + 34, cbY + 34, 22, C_NEON_PINK);
-          mediaVisCanvas->fillCircle(cbX + 34, cbY + 34, 8, C_YELLOW);
-          mediaVisCanvas->fillCircle(cbX + 34, cbY + 34, 3, C_BLACK);
         }
 
         // Phần nhãn thông tin bài hát & Phổ sóng âm mini 8 cột bên phải ảnh bìa
@@ -5932,6 +5966,9 @@ namespace TestDisplay {
 
   bool drawStreamJpegFrame(const uint8_t* buf, size_t len) {
     if (!tft || !buf || len == 0) return false;
+    if (currentMode != 17 && !WebStreamManager::isStreamSessionActive()) {
+      return false;
+    }
     lastUserActivityMs = millis();
     lastStreamFrameMs = millis();
     s_streamFrameCount++;
@@ -5950,8 +5987,10 @@ namespace TestDisplay {
   }
 
   void stopStreamMode() {
+    lastStreamFrameMs = 0;
     if (currentMode == 17) {
       currentMode = 0;
+      tft->fillRect(0, 0, 240, 320, C_BLACK);
       refreshActiveScreen();
     }
   }
@@ -6968,6 +7007,7 @@ namespace TestDisplay {
                 s40MediaPlaying = true;
                 s40MediaSubState = 0;
                 currentMode = 12;
+                startMediaAudioPlayback();
                 refreshActiveScreen();
                 return;
               } else {
@@ -7034,6 +7074,7 @@ namespace TestDisplay {
               s40MediaPlaying = true;
               s40MediaSubState = 0;
               currentMode = 12;
+              startMediaAudioPlayback();
               refreshActiveScreen();
               return;
             } else {
@@ -7115,6 +7156,7 @@ namespace TestDisplay {
                 s40MediaPlaying = true;
                 s40MediaSubState = 0;
                 currentMode = 12;
+                startMediaAudioPlayback();
                 refreshActiveScreen();
                 return;
               } else if (s40MemPopupCursor == 1) {
@@ -7219,6 +7261,7 @@ namespace TestDisplay {
               s40MediaPlaying = true;
               s40MediaSubState = 0;
               currentMode = 12;
+              startMediaAudioPlayback();
               refreshActiveScreen();
               return;
             } else {
@@ -8556,8 +8599,7 @@ namespace TestDisplay {
       if (currentMode == 0) {
         updateStandbyClockDigits(false);
       } else if (currentMode == 17 && (now - lastStreamFrameMs >= 8000)) {
-        currentMode = 0;
-        refreshActiveScreen();
+        stopStreamMode();
       } else if (currentMode == 2) {
         drawPcHudScreen(false);
       } else if (currentMode == 9) {

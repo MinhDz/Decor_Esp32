@@ -4086,7 +4086,7 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   // ---------------- PHÁT STREAM URL QUA TRÌNH DUYỆT HOẶC ESP32 ----------------
 
   window.fillUrl = function(url, type) {
-    const input = document.getElementById('stream-url-input');
+    const input = document.getElementById('transcoder-url-input') || document.getElementById('stream-url-input');
     if (input) input.value = url;
   };
 
@@ -4095,12 +4095,12 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   }
 
   window.playUrlStreamWebRelay = function(type) {
-    const input = document.getElementById('stream-url-input');
+    const input = document.getElementById('transcoder-url-input') || document.getElementById('stream-url-input');
     const url = (input ? input.value : '').trim();
     if (!url) return alert("Vui lòng nhập đường link stream!");
 
     if (isWebVideoPlatform(url)) {
-      const pcInput = document.getElementById('transcoder-url-input');
+      const pcInput = document.getElementById('transcoder-url-input') || document.getElementById('stream-url-input');
       if (pcInput) pcInput.value = url;
       alert("ℹ️ Đây là link trang web video (YouTube / TikTok), vi xử lý ESP32 không thể tự phân tích HTML.\n\nHệ thống đang tự động kích hoạt Trạm Chuyển Mã PC (FFmpeg) để giải mã mượt mà!");
       return window.startPcTranscoderStream();
@@ -4149,12 +4149,12 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   };
 
   window.playUrlStream = async function(type) {
-    const input = document.getElementById('stream-url-input');
+    const input = document.getElementById('transcoder-url-input') || document.getElementById('stream-url-input');
     const url = (input ? input.value : '').trim();
     if (!url) return alert("Vui lòng nhập đường link stream HTTP/HTTPS!");
 
     if (isWebVideoPlatform(url)) {
-      const pcInput = document.getElementById('transcoder-url-input');
+      const pcInput = document.getElementById('transcoder-url-input') || document.getElementById('stream-url-input');
       if (pcInput) pcInput.value = url;
       alert("ℹ️ Đây là link trang web video (YouTube / TikTok), vi xử lý ESP32 không thể tự phân tích HTML.\n\nHệ thống đang tự động kích hoạt Trạm Chuyển Mã PC (FFmpeg) để giải mã mượt mà!");
       return window.startPcTranscoderStream();
@@ -4301,6 +4301,9 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     let host = localStorage.getItem('pc_transcoder_host') || 'localhost';
     try {
       await fetch('http://' + host + ':5050/api/stop', { method: 'POST' });
+    } catch(e) {}
+    try {
+      await fetch('/api/stream/stop', { method: 'POST' });
     } catch(e) {}
     window.stopAllStreams();
     const statusTxt = document.getElementById('transcoder-status-txt');

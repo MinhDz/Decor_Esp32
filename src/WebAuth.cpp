@@ -5,6 +5,8 @@
 
 static Preferences authPrefs;
 static String activeSessionToken = "";
+static String s_cachedUser = "admin";
+static String s_cachedPass = "admin";
 static bool initialized = false;
 
 static String createRandomHex(int lenBytes = 16) {
@@ -28,6 +30,8 @@ void WebAuth::init() {
   if (!authPrefs.isKey("pass")) {
     authPrefs.putString("pass", "admin");
   }
+  s_cachedUser = authPrefs.getString("user", "admin");
+  s_cachedPass = authPrefs.getString("pass", "admin");
   activeSessionToken = authPrefs.getString("token", "");
   if (activeSessionToken.length() < 16) {
     activeSessionToken = createRandomHex(16);
@@ -39,23 +43,16 @@ void WebAuth::init() {
 
 bool WebAuth::verify(const String& username, const String& password) {
   init();
-  authPrefs.begin("web_auth", true);
-  String u = authPrefs.getString("user", "admin");
-  String p = authPrefs.getString("pass", "admin");
-  authPrefs.end();
-  return (username == u && password == p);
+  return (username == s_cachedUser && password == s_cachedPass);
 }
 
 bool WebAuth::changePassword(const String& oldPass, const String& newPass) {
   init();
-  authPrefs.begin("web_auth", false);
-  String p = authPrefs.getString("pass", "admin");
-  if (oldPass != p) {
-    authPrefs.end();
-    return false;
-  }
-  authPrefs.putString("pass", newPass);
+  if (oldPass != s_cachedPass) return false;
+  s_cachedPass = newPass;
   activeSessionToken = createRandomHex(16);
+  authPrefs.begin("web_auth", false);
+  authPrefs.putString("pass", newPass);
   authPrefs.putString("token", activeSessionToken);
   authPrefs.end();
   return true;
@@ -64,10 +61,12 @@ bool WebAuth::changePassword(const String& oldPass, const String& newPass) {
 bool WebAuth::changeCredentials(const String& newUsername, const String& newPassword) {
   init();
   if (newUsername.length() == 0 || newPassword.length() == 0) return false;
+  s_cachedUser = newUsername;
+  s_cachedPass = newPassword;
+  activeSessionToken = createRandomHex(16);
   authPrefs.begin("web_auth", false);
   authPrefs.putString("user", newUsername);
   authPrefs.putString("pass", newPassword);
-  activeSessionToken = createRandomHex(16);
   authPrefs.putString("token", activeSessionToken);
   authPrefs.end();
   return true;
@@ -75,10 +74,7 @@ bool WebAuth::changeCredentials(const String& newUsername, const String& newPass
 
 String WebAuth::getUsername() {
   init();
-  authPrefs.begin("web_auth", true);
-  String u = authPrefs.getString("user", "admin");
-  authPrefs.end();
-  return u;
+  return s_cachedUser;
 }
 
 String WebAuth::getSessionToken() {
@@ -89,9 +85,7 @@ String WebAuth::getSessionToken() {
 String WebAuth::generateNewSessionToken() {
   init();
   activeSessionToken = createRandomHex(16);
-  authPrefs.begin("web_auth", false);
-  authPrefs.putString("token", activeSessionToken);
-  authPrefs.end();
+  // Không ghi vào NVS Flash mỗi lần đăng nhập để tránh ngắt Flash Cache gây panic Core 0 khi đang phát nhạc
   return activeSessionToken;
 }
 
@@ -104,9 +98,6 @@ bool WebAuth::isValidToken(const String& token) {
 void WebAuth::clearSession() {
   init();
   activeSessionToken = createRandomHex(16);
-  authPrefs.begin("web_auth", false);
-  authPrefs.putString("token", activeSessionToken);
-  authPrefs.end();
 }
 
 void WebAuth::resetToDefault() {
@@ -117,6 +108,8 @@ void WebAuth::resetToDefault() {
   activeSessionToken = createRandomHex(16);
   authPrefs.putString("token", activeSessionToken);
   authPrefs.end();
+  s_cachedUser = "admin";
+  s_cachedPass = "admin";
   initialized = true;
 }
 

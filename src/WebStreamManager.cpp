@@ -26,6 +26,8 @@ namespace {
   static String s_activeUrlType           = ""; // "audio" hoặc "video"
   static volatile bool s_urlStreamRunning = false;
   static TaskHandle_t s_urlStreamTaskHandle = nullptr;
+  static volatile bool s_streamSessionActive = false;
+  static volatile unsigned long s_lastStopMs = 0;
 
   // Buffer video truyền không đồng bộ an toàn từ Core 0 sang Core 1 (tránh xung đột bus SPI ST7789)
   static const size_t MAX_STREAM_JPG_SIZE = 64 * 1024;
@@ -99,9 +101,12 @@ namespace {
       uint8_t* mp3Buf = (uint8_t*)(psramFound() ? ps_malloc(MP3_BUF_SIZE) : malloc(MP3_BUF_SIZE));
       mp3d_sample_t* pcmOut = (mp3d_sample_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)));
       int16_t* stereoPcm = (int16_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)));
+      size_t scratchSz = mp3dec_scratch_size();
+      mp3dec_scratch_t* scratch = (mp3dec_scratch_t*)(psramFound() ? ps_malloc(scratchSz) : malloc(scratchSz));
 
-      if (!mp3d || !mp3Buf || !pcmOut || !stereoPcm) {
+      if (!mp3d || !mp3Buf || !pcmOut || !stereoPcm || !scratch) {
         Serial.println("❌ [AUDIO STREAM] Không đủ bộ nhớ cấp phát cho bộ giải mã MP3!");
+        if (scratch) free(scratch);
         if (mp3d) free(mp3d);
         if (mp3Buf) free(mp3Buf);
         if (pcmOut) free(pcmOut);
@@ -136,7 +141,7 @@ namespace {
         }
 
         mp3dec_frame_info_t info;
-        int samplesPerChannel = mp3dec_decode_frame(mp3d, mp3Buf, bufValid, pcmOut, &info);
+        int samplesPerChannel = mp3dec_decode_frame_scratch(mp3d, mp3Buf, bufValid, pcmOut, &info, scratch);
 
         if (info.frame_bytes > 0) {
           bufValid -= info.frame_bytes;
@@ -199,6 +204,7 @@ namespace {
         vTaskDelay(pdMS_TO_TICKS(1));
       }
 
+      free(scratch);
       free(mp3d);
       free(mp3Buf);
       free(pcmOut);
@@ -357,7 +363,7 @@ void WebStreamManager::loop() {
   unsigned long now = millis();
 
   // 1. Kiểm tra nếu có Video Frame mới nhất, vẽ ra màn hình ST7789 trên Core 1
-  if (s_asyncVideoReady && s_asyncVideoBuf) {
+  if (s_streamSessionActive && s_asyncVideoReady && s_asyncVideoBuf) {
     taskENTER_CRITICAL(&s_streamMux);
     size_t len = s_asyncVideoLen;
     s_asyncVideoReady = false;
@@ -370,6 +376,11 @@ void WebStreamManager::loop() {
     }
 
     s_isDisplayRendering = false;
+  } else if (!s_streamSessionActive && s_asyncVideoReady) {
+    taskENTER_CRITICAL(&s_streamMux);
+    s_asyncVideoReady = false;
+    s_asyncVideoLen = 0;
+    taskEXIT_CRITICAL(&s_streamMux);
   }
 
   // 2. Tính FPS trung bình mỗi 1000ms
@@ -382,6 +393,14 @@ void WebStreamManager::loop() {
 
 bool WebStreamManager::queueVideoFrame(const uint8_t* jpegData, size_t len) {
   if (!jpegData || len == 0 || len > MAX_STREAM_JPG_SIZE) return false;
+
+  // Chặn frame video tàn dư trong vòng 1.2s sau khi người dùng bấm dừng stream
+  if (millis() - s_lastStopMs < 1200) {
+    s_videoFramesDropped++;
+    return false;
+  }
+
+  s_streamSessionActive = true;
   s_lastVideoFrameMs = millis();
   s_videoFrameCount++;
 
@@ -672,12 +691,13 @@ bool WebStreamManager::startUrlStream(const String& type, const String& url) {
   s_activeUrlType = type;
   s_activeUrl = url;
   s_urlStreamRunning = true;
+  s_streamSessionActive = true;
 
-  // Tạo Task trên Core 0 với Stack 14KB (tối ưu, không gây tràn bộ nhớ SRAM)
+  // Tạo Task trên Core 0 với Stack 12KB (an toàn cho minimp3 scratch và HTTP Client)
   BaseType_t res = xTaskCreatePinnedToCore(
     urlStreamTask,
     "urlStreamTask",
-    10240,
+    12288,
     nullptr,
     1,
     &s_urlStreamTaskHandle,
@@ -702,6 +722,8 @@ void WebStreamManager::stopUrlStream() {
 }
 
 void WebStreamManager::stopAll() {
+  s_streamSessionActive = false;
+  s_lastStopMs = millis();
   stopUrlStream();
   TestDisplay::stopStreamMode();
   s_lastVideoFrameMs = 0;
@@ -720,8 +742,19 @@ void WebStreamManager::stopAll() {
   taskEXIT_CRITICAL(&s_audioRingMux);
 }
 
+bool WebStreamManager::isStreamSessionActive() {
+  return s_streamSessionActive;
+}
+
+void WebStreamManager::setStreamSessionActive(bool active) {
+  s_streamSessionActive = active;
+  if (!active) {
+    s_lastStopMs = millis();
+  }
+}
+
 bool WebStreamManager::isVideoStreaming() {
-  return (s_lastVideoFrameMs > 0 && millis() - s_lastVideoFrameMs < 4000) || (s_urlStreamRunning && s_activeUrlType == "video");
+  return s_streamSessionActive && ((s_lastVideoFrameMs > 0 && millis() - s_lastVideoFrameMs < 4000) || (s_urlStreamRunning && s_activeUrlType == "video"));
 }
 
 bool WebStreamManager::isAudioStreaming() {

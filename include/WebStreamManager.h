@@ -25,6 +25,8 @@ public:
   static void stopAll();
 
   // 5. Kiểm tra trạng thái
+  static bool isStreamSessionActive();
+  static void setStreamSessionActive(bool active);
   static bool isVideoStreaming();
   static bool isAudioStreaming();
   static float getFps();

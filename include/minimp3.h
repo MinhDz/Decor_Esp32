@@ -36,6 +36,7 @@ void mp3dec_f32_to_s16(const float *in, int16_t *out, int num_samples);
 typedef struct mp3dec_scratch_t mp3dec_scratch_t;
 int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_sample_t *pcm, mp3dec_frame_info_t *info);
 int mp3dec_decode_frame_scratch(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_sample_t *pcm, mp3dec_frame_info_t *info, mp3dec_scratch_t *scratch);
+size_t mp3dec_scratch_size(void);
 
 #ifdef __cplusplus
 }
@@ -1714,11 +1715,10 @@ void mp3dec_init(mp3dec_t *dec)
 
 int mp3dec_decode_frame_scratch(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_sample_t *pcm, mp3dec_frame_info_t *info, mp3dec_scratch_t *scratch)
 {
+    if (!scratch) return 0;
     int i = 0, igr, frame_size = 0, success = 1;
     const uint8_t *hdr;
     bs_t bs_frame[1];
-    mp3dec_scratch_t local_scratch;
-    if (!scratch) scratch = &local_scratch;
 
     if (mp3_bytes > 4 && dec->header[0] == 0xff && hdr_compare(dec->header, mp3))
     {
@@ -1808,10 +1808,18 @@ int mp3dec_decode_frame_scratch(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes
     return success*hdr_frame_samples(dec->header);
 }
 
+size_t mp3dec_scratch_size(void)
+{
+    return sizeof(mp3dec_scratch_t);
+}
+
 int mp3dec_decode_frame(mp3dec_t *dec, const uint8_t *mp3, int mp3_bytes, mp3d_sample_t *pcm, mp3dec_frame_info_t *info)
 {
-    mp3dec_scratch_t scratch;
-    return mp3dec_decode_frame_scratch(dec, mp3, mp3_bytes, pcm, info, &scratch);
+    mp3dec_scratch_t *scratch = (mp3dec_scratch_t *)malloc(sizeof(mp3dec_scratch_t));
+    if (!scratch) return 0;
+    int res = mp3dec_decode_frame_scratch(dec, mp3, mp3_bytes, pcm, info, scratch);
+    free(scratch);
+    return res;
 }
 
 #ifdef MINIMP3_FLOAT_OUTPUT

@@ -501,10 +501,13 @@ class StreamSession:
                 pass
             self.proc_audio = None
 
+        # Chờ các worker kết thúc gửi gói mạng đang dở trước khi gửi tín hiệu STOP
+        time.sleep(0.08)
+
         # Báo cho ESP32 dừng stream
         try:
             import requests
-            requests.post(f"http://{self.esp_ip}/api/stream/stop", timeout=0.8)
+            requests.post(f"http://{self.esp_ip}/api/stream/stop", timeout=1.0)
         except Exception:
             pass
 
@@ -1069,7 +1072,15 @@ def api_pause():
 def api_stop():
     if request.method == "OPTIONS":
         return "", 204
-    return jsonify(session.stop())
+    res = session.stop()
+    try:
+        import requests
+        cfg = load_config()
+        esp_ip = cfg.get("esp_ip", session.esp_ip)
+        requests.post(f"http://{esp_ip}/api/stream/stop", timeout=0.8)
+    except Exception:
+        pass
+    return jsonify(res)
 
 @app.route("/api/volume", methods=["POST", "OPTIONS"])
 def api_volume():
