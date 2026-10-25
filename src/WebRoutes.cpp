@@ -38,95 +38,9 @@ WebServer& WebRoutes::getServer() {
 
 // ---------------- REST APIS MẠNG & HỆ THỐNG ----------------
 
+#include "api/ApiSystem.h"
 #include "api/ApiTerminal.h"
 #include "web/WebInjectedScripts.h"
-
-// --- CÁC HÀM XỬ LÝ AUTH ROUTE ---
-static void handleAuthStatus() {
-  bool authed = WebAuth::isAuthenticated(server);
-  String user = authed ? WebAuth::getUsername() : "";
-  server.send(200, "application/json", "{\"authenticated\":" + String(authed ? "true" : "false") + ",\"username\":\"" + user + "\"}");
-}
-
-static void handleAuthLogin() {
-  String u = "";
-  String p = "";
-  if (server.hasArg("plain")) {
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, server.arg("plain"));
-    if (!err) {
-      u = doc["username"] | "";
-      p = doc["password"] | "";
-    }
-  }
-  if (u.length() == 0 && server.hasArg("username")) u = server.arg("username");
-  if (p.length() == 0 && server.hasArg("password")) p = server.arg("password");
-  u.trim();
-  p.trim();
-
-  if (WebAuth::verify(u, p)) {
-    String token = WebAuth::generateNewSessionToken();
-    server.sendHeader("Set-Cookie", "spaceos_token=" + token + "; Path=/; Max-Age=2592000; SameSite=Lax");
-    server.send(200, "application/json", "{\"status\":\"ok\",\"token\":\"" + token + "\",\"username\":\"" + u + "\"}");
-  } else {
-    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Sai tên đăng nhập hoặc mật khẩu!\"}");
-  }
-}
-
-static void handleAuthLogout() {
-  WebAuth::clearSession();
-  server.sendHeader("Set-Cookie", "spaceos_token=; Path=/; Max-Age=0; SameSite=Lax");
-  server.send(200, "application/json", "{\"status\":\"ok\"}");
-}
-
-static void handleAuthChangePassword() {
-  if (!WebAuth::isAuthenticated(server)) {
-    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Phiên làm việc hết hạn hoặc chưa đăng nhập!\"}");
-    return;
-  }
-  String oldPass = "";
-  String newPass = "";
-  String newUser = "";
-  if (server.hasArg("plain")) {
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, server.arg("plain"));
-    oldPass = doc["old_password"] | "";
-    newPass = doc["new_password"] | "";
-    newUser = doc["username"] | "";
-  }
-  if (oldPass.length() == 0 && server.hasArg("old_password")) oldPass = server.arg("old_password");
-  if (newPass.length() == 0 && server.hasArg("new_password")) newPass = server.arg("new_password");
-  if (newUser.length() == 0 && server.hasArg("username")) newUser = server.arg("username");
-  oldPass.trim();
-  newPass.trim();
-  newUser.trim();
-
-  if (newPass.length() < 3) {
-    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Mật khẩu mới phải từ 3 ký tự trở lên!\"}");
-    return;
-  }
-  if (newUser.length() > 0) {
-    WebAuth::changeCredentials(newUser, newPass);
-    String token = WebAuth::getSessionToken();
-    server.sendHeader("Set-Cookie", "spaceos_token=" + token + "; Path=/; Max-Age=2592000; SameSite=Lax");
-    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Đã đổi tài khoản và mật khẩu thành công!\",\"token\":\"" + token + "\"}");
-  } else if (WebAuth::changePassword(oldPass, newPass)) {
-    String token = WebAuth::getSessionToken();
-    server.sendHeader("Set-Cookie", "spaceos_token=" + token + "; Path=/; Max-Age=2592000; SameSite=Lax");
-    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Đã đổi mật khẩu thành công!\",\"token\":\"" + token + "\"}");
-  } else {
-    server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Mật khẩu cũ không chính xác!\"}");
-  }
-}
-
-static void handleFactoryResetRoute() {
-  if (!WebAuth::isAuthenticated(server)) {
-    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Chưa đăng nhập quyền quản trị!\"}");
-    return;
-  }
-  TestDisplay::performFactoryReset();
-  server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Đã khôi phục cài đặt ban đầu và chuyển sang giao diện MÈO GOME CHIBI!\"}");
-}
 
 static void handleRoot() {
   if (LittleFS.exists("/index.html")) {
@@ -235,57 +149,6 @@ static void handleWifiConnect() {
   } else {
     server.send(200, "application/json", "{\"status\":\"error\",\"connected\":false,\"message\":\"Không thể kết nối (Sai mật khẩu hoặc sóng yếu)\"}");
   }
-}
-
-static void handleSystemStatus() {
-  JsonDocument doc;
-  doc["device_name"] = OtaManager::getDeviceName();
-  doc["os_name"] = OtaManager::getOsName();
-  doc["firmware_version"] = OtaManager::getFirmwareVersion();
-  doc["build_date"] = OtaManager::getBuildDateTime();
-  doc["running_partition"] = OtaManager::getRunningPartitionName();
-  doc["next_partition"] = OtaManager::getNextPartitionName();
-  doc["free_heap_kb"] = HardwareManager::getFreeHeapKb();
-  doc["free_psram_mb"] = HardwareManager::getFreePsramMb();
-  doc["fs_used_mb"] = HardwareManager::getFsUsedMb();
-  doc["fs_total_mb"] = HardwareManager::getFsTotalMb();
-  doc["ip"] = WifiManager::getIp();
-  doc["mac"] = WiFi.macAddress();
-  doc["connected"] = WifiManager::isConnected();
-  doc["current_ssid"] = WifiManager::getCurrentSsid();
-  doc["wifi_rssi"] = WifiManager::getRssi();
-  doc["wifi_notification"] = WifiManager::getLastNotification();
-  doc["active_img"] = ImageManager::getActiveImage();
-  doc["screen_mode"] = TestDisplay::getScreenModeName();
-  doc["emoji_state"] = TestDisplay::getEmojiStateName();
-  doc["emoji_subtitle"] = TestDisplay::getSubtitle();
-  doc["hud_style"] = TestDisplay::getHudStyleName();
-  doc["sht31_online"] = TestSensors::isSht31Connected();
-  doc["temperature_c"] = serialized(String(TestSensors::getTemperatureC(), 1));
-  doc["humidity_pct"] = (int)roundf(TestSensors::getHumidityPct());
-  doc["touch_pressed"] = TestSensors::isTouchPressed();
-  doc["last_button"] = TestButtons::getLastButtonName();
-  doc["battery_v"] = serialized(String(TestSensors::getBatteryVoltage(), 2));
-  doc["battery_mv"] = TestSensors::getBatteryMilliVolts();
-  doc["battery_pct"] = TestSensors::getBatteryPercentage();
-  doc["is_charging"] = TestSensors::isCharging();
-  doc["edison_l_mode"] = TestWindmill::getEdisonLeftMode();
-  doc["edison_l_name"] = TestWindmill::getEdisonLeftModeName();
-  doc["edison_l_pct"] = TestWindmill::getEdisonLeftBrightness();
-  doc["edison_r_mode"] = TestWindmill::getEdisonRightMode();
-  doc["edison_r_name"] = TestWindmill::getEdisonRightModeName();
-  doc["edison_r_pct"] = TestWindmill::getEdisonRightBrightness();
-  doc["windmill_mode"] = TestWindmill::getMode();
-  doc["windmill_name"] = TestWindmill::getModeName();
-  doc["windmill_speed"] = TestWindmill::getMotorSpeed();
-  doc["flowing_leds_on"] = CobLeds::isOn();
-  doc["flowing_leds_mode"] = CobLeds::getModeName();
-  doc["xiaozhi_bound"] = XiaoZhiClient::isDeviceBound();
-  doc["xiaozhi_ws_connected"] = XiaoZhiClient::isWebSocketConnected();
-
-  String res;
-  serializeJson(doc, res);
-  server.send(200, "application/json", res);
 }
 
 // ---------------- REST APIS QUẢN LÝ ẢNH ----------------
@@ -903,294 +766,6 @@ static void handlePcMetricsPost() {
   }
 }
 
-// ---------------- REST APIS HỆ THỐNG & OTA ----------------
-
-static void handleSystemInfo() {
-  JsonDocument doc;
-  doc["device_name"]        = OtaManager::getDeviceName();
-  doc["os_name"]            = OtaManager::getOsName();
-  doc["firmware_version"]   = OtaManager::getFirmwareVersion();
-  doc["build_date"]         = OtaManager::getBuildDateTime();
-  doc["running_partition"]  = OtaManager::getRunningPartitionName();
-  doc["next_partition"]     = OtaManager::getNextPartitionName();
-  doc["chip_model"]         = ESP.getChipModel();
-  doc["chip_revision"]      = ESP.getChipRevision();
-  doc["cpu_freq_mhz"]       = ESP.getCpuFreqMHz();
-  doc["flash_size_bytes"]   = ESP.getFlashChipSize();
-  doc["free_heap_bytes"]    = ESP.getFreeHeap();
-  doc["min_free_heap_bytes"]= ESP.getMinFreeHeap();
-  doc["max_alloc_heap_bytes"]= ESP.getMaxAllocHeap();
-  doc["total_heap_bytes"]   = ESP.getHeapSize();
-  doc["free_psram_bytes"]   = ESP.getFreePsram();
-  doc["min_free_psram_bytes"]= ESP.getMinFreePsram();
-  doc["max_alloc_psram_bytes"]= ESP.getMaxAllocPsram();
-  doc["total_psram_bytes"]  = ESP.getPsramSize();
-  doc["alloc_failures"]     = HardwareManager::getAllocFailures();
-  doc["loop_last_us"]       = TaskProfiler::getLoopLastUs();
-  doc["loop_avg_us"]        = TaskProfiler::getLoopAvgUs();
-  doc["loop_max_us"]        = TaskProfiler::getLoopMaxUs();
-  doc["loop_fps"]           = TaskProfiler::getFps();
-  doc["wifi_connected"]     = (WiFi.status() == WL_CONNECTED);
-  doc["wifi_ssid"]          = WiFi.SSID();
-  doc["wifi_rssi"]          = WiFi.RSSI();
-  doc["wifi_ip"]            = WiFi.localIP().toString();
-  doc["uptime_seconds"]     = millis() / 1000UL;
-
-  String json;
-  serializeJson(doc, json);
-  server.send(200, "application/json", json);
-}
-
-static void handleOtaCheck() {
-  String customUrl = server.hasArg("url") ? server.arg("url") : "";
-  OtaUpdateInfo info;
-  bool ok = OtaManager::checkCloudUpdate(info, customUrl);
-
-  JsonDocument doc;
-  doc["success"]          = ok;
-  doc["current_version"]  = OtaManager::getFirmwareVersion();
-  doc["has_update"]       = info.hasUpdate;
-  doc["latest_version"]   = info.latestVersion;
-  doc["bin_url"]          = info.downloadUrl;
-  doc["changelog"]        = info.changelog;
-  doc["size"]             = info.binSize;
-
-  String json;
-  serializeJson(doc, json);
-  server.send(200, "application/json", json);
-}
-
-static void cloudOtaTask(void* param) {
-  String* url = (String*)param;
-  OtaManager::startCloudUpdate(*url);
-  delete url;
-  vTaskDelete(NULL);
-}
-
-static void handleOtaStart() {
-  if (!WebAuth::isAuthenticated(server)) {
-    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
-    return;
-  }
-  if (OtaManager::isUpdating()) {
-    server.send(409, "application/json", "{\"error\":\"Already updating\"}");
-    return;
-  }
-
-  String binUrl = "";
-  if (server.hasArg("plain")) {
-    JsonDocument doc;
-    deserializeJson(doc, server.arg("plain"));
-    binUrl = doc["bin_url"] | "";
-  } else if (server.hasArg("bin_url")) {
-    binUrl = server.arg("bin_url");
-  }
-
-  if (binUrl.length() == 0) {
-    server.send(400, "application/json", "{\"error\":\"Missing bin_url\"}");
-    return;
-  }
-
-  OtaManager::setUpdating(true);
-  server.send(200, "application/json", "{\"status\":\"updating\"}");
-
-  String* urlCopy = new String(binUrl);
-  xTaskCreatePinnedToCore(cloudOtaTask, "cloud_ota_task", 10240, urlCopy, 1, NULL, 0);
-}
-
-static void handleOtaStatus() {
-  JsonDocument doc;
-  doc["updating"] = OtaManager::isUpdating();
-  doc["progress"] = OtaManager::getUpdateProgress();
-  doc["status"]   = OtaManager::getUpdateStatus();
-  doc["version"]  = OtaManager::getFirmwareVersion();
-
-  String json;
-  serializeJson(doc, json);
-  server.send(200, "application/json", json);
-}
-
-static size_t s_localOtaTotalExpected = 0;
-static int s_lastLocalOtaPct = -1;
-
-static void handleLocalUpdate() {
-  if (!WebAuth::isAuthenticated(server)) {
-    server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
-    return;
-  }
-  server.sendHeader("Connection", "close");
-  if (!Update.hasError()) {
-    server.send(200, "text/html",
-      "<html><body style='font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#fff;'>"
-      "<h2>✅ CẬP NHẬT FIRMWARE THÀNH CÔNG!</h2>"
-      "<p>Hệ thống đang khởi động lại vào firmware mới... Vui lòng đợi 5 giây rồi tải lại trang.</p>"
-      "<script>setTimeout(function(){ window.location.href='/'; }, 6000);</script>"
-      "</body></html>");
-    delay(1500);
-    ESP.restart();
-  } else {
-    OtaManager::setUpdating(false);
-    server.send(500, "text/html",
-      "<html><body style='font-family:sans-serif;text-align:center;padding:50px;background:#0f172a;color:#fff;'>"
-      "<h2>❌ CẬP NHẬT THẤT BẠI!</h2>"
-      "<p>Lỗi: " + String(Update.errorString()) + "</p>"
-      "<p><a href='/' style='color:#38bdf8;'>Quay lại trang chủ</a></p>"
-      "</body></html>");
-  }
-}
-
-static void handleLocalUpdateUpload() {
-  HTTPUpload& upload = server.upload();
-
-  if (upload.status == UPLOAD_FILE_START) {
-    OtaManager::setUpdating(true);
-    s_lastLocalOtaPct = -1;
-
-    // Lấy kích thước tổng file truyền từ client qua query param ?size=...
-    if (server.hasArg("size")) {
-      s_localOtaTotalExpected = (size_t)server.arg("size").toInt();
-    } else {
-      s_localOtaTotalExpected = 0;
-    }
-
-    Serial.printf("⬆️ [WEB OTA] Bắt đầu nhận file: %s (Kỳ vọng: %u bytes)\n",
-                  upload.filename.c_str(), (unsigned)s_localOtaTotalExpected);
-    OtaManager::drawMinimalOtaProgress("Nhan file qua Web...", 0);
-
-    if (!Update.begin(s_localOtaTotalExpected > 0 ? s_localOtaTotalExpected : UPDATE_SIZE_UNKNOWN, U_FLASH)) {
-      Update.printError(Serial);
-      OtaManager::drawMinimalOtaProgress("Loi khoi tao Flash!", 0);
-    }
-  } else if (upload.status == UPLOAD_FILE_WRITE) {
-    if (Update.write(upload.buf, upload.currentSize) != upload.currentSize) {
-      Update.printError(Serial);
-    }
-
-    // upload.totalSize là tổng số byte tích lũy đã ghi thành công
-    if (s_localOtaTotalExpected > 0) {
-      int pct = (int)((upload.totalSize * 100ULL) / s_localOtaTotalExpected);
-      pct = constrain(pct, 0, 99);
-      if (pct != s_lastLocalOtaPct) {
-        s_lastLocalOtaPct = pct;
-        char statusMsg[48];
-        snprintf(statusMsg, sizeof(statusMsg), "Dang ghi Flash (%u KB)...", (unsigned)(upload.totalSize / 1024));
-        OtaManager::drawMinimalOtaProgress(statusMsg, pct);
-      }
-    } else {
-      static unsigned long s_lastKbUpdateMs = 0;
-      if (millis() - s_lastKbUpdateMs >= 250) {
-        s_lastKbUpdateMs = millis();
-        char statusMsg[48];
-        snprintf(statusMsg, sizeof(statusMsg), "Da nhan %u KB...", (unsigned)(upload.totalSize / 1024));
-        OtaManager::drawMinimalOtaProgress(statusMsg, 50);
-      }
-    }
-  } else if (upload.status == UPLOAD_FILE_END) {
-    if (Update.end(true)) {
-      Serial.printf("✅ [WEB OTA] Nhận file xong: %u bytes! Đang khởi động lại...\n", upload.totalSize);
-      OtaManager::drawMinimalOtaProgress("Hoan tat! Dang reboot...", 100);
-    } else {
-      Update.printError(Serial);
-      OtaManager::drawMinimalOtaProgress("Loi ghi Flash!", 0);
-      OtaManager::setUpdating(false);
-    }
-  } else if (upload.status == UPLOAD_FILE_ABORTED) {
-    Update.end();
-    Serial.println("⚠️ [WEB OTA] Quá trình tải lên bị hủy!");
-    OtaManager::drawMinimalOtaProgress("Da huy tai len!", 0);
-    OtaManager::setUpdating(false);
-  }
-}
-
-// ---------------- REST APIS NHẬT KÝ HỆ THỐNG & THẺ NHỚ SD ----------------
-
-static void handleGetLogs() {
-  String fmt = server.hasArg("format") ? server.arg("format") : "json";
-  size_t limit = server.hasArg("limit") ? (size_t)server.arg("limit").toInt() : 120;
-  if (limit == 0 || limit > 500) limit = 120;
-
-  String lvlStr = server.hasArg("level") ? server.arg("level") : "all";
-  LogLevel minLvl = LOG_LVL_DEBUG;
-  if (lvlStr == "info") minLvl = LOG_LVL_INFO;
-  else if (lvlStr == "warn") minLvl = LOG_LVL_WARN;
-  else if (lvlStr == "error") minLvl = LOG_LVL_ERROR;
-
-  if (fmt == "text") {
-    String txt = SystemLogger::getRecentLogsText(limit, minLvl);
-    server.send(200, "text/plain; charset=utf-8", txt);
-  } else {
-    JsonDocument doc;
-    SystemLogger::getLogsJson(doc, limit, minLvl);
-    String out;
-    serializeJson(doc, out);
-    server.send(200, "application/json", out);
-  }
-}
-
-static void handleDownloadLogs() {
-  File logFile = SystemLogger::openCurrentLogFileForReading();
-  if (logFile) {
-    server.sendHeader("Content-Disposition", "attachment; filename=\"decor_esp32_syslog.log\"");
-    server.streamFile(logFile, "text/plain");
-    logFile.close();
-  } else {
-    String txt = SystemLogger::getRecentLogsText(1000, LOG_LVL_DEBUG);
-    server.sendHeader("Content-Disposition", "attachment; filename=\"decor_esp32_ram_syslog.txt\"");
-    server.send(200, "text/plain; charset=utf-8", txt);
-  }
-}
-
-static void handleGetLogStats() {
-  LogStats st = SystemLogger::getStats();
-  JsonDocument doc;
-  doc["total"] = st.totalLogged;
-  doc["written_bytes"] = st.totalWrittenBytes;
-  doc["written_kb"] = (uint32_t)(st.totalWrittenBytes / 1024);
-  doc["debug"] = st.debugCount;
-  doc["info"] = st.infoCount;
-  doc["warn"] = st.warnCount;
-  doc["error"] = st.errorCount;
-  doc["fatal"] = st.fatalCount;
-  doc["buffer_drops"] = st.bufferDrops;
-  doc["pending_bytes"] = st.pendingBytes;
-  doc["sd_active"] = st.sdLoggingActive;
-  doc["current_file"] = st.currentLogFile;
-  doc["sd_ready"] = SystemLogger::isSdReady();
-
-  String out;
-  serializeJson(doc, out);
-  server.send(200, "application/json", out);
-}
-
-static void handleGetLogFiles() {
-  JsonDocument doc;
-  SystemLogger::getLogFileList(doc);
-  String out;
-  serializeJson(doc, out);
-  server.send(200, "application/json", out);
-}
-
-static void handlePostLogSnapshot() {
-  SystemLogger::logSystemSnapshot();
-  JsonDocument doc;
-  doc["success"] = true;
-  doc["message"] = "Snapshot da duoc ghi vao nhat ky he thong";
-  String out;
-  serializeJson(doc, out);
-  server.send(200, "application/json", out);
-}
-
-static void handlePostLogClear() {
-  bool deleteSd = server.hasArg("delete_sd") && (server.arg("delete_sd") == "1" || server.arg("delete_sd") == "true");
-  bool ok = SystemLogger::clearLogs(deleteSd);
-  JsonDocument doc;
-  doc["success"] = ok;
-  doc["deleted_sd"] = deleteSd;
-  String out;
-  serializeJson(doc, out);
-  server.send(200, "application/json", out);
-}
-
 // ================================================================
 //     REST APIS ĐA PHƯƠNG TIỆN & THƯ MỤC /Musics TRÊN THẺ NHỚ SD
 // ================================================================
@@ -1558,99 +1133,6 @@ static void handleRefreshWeather() {
   server.send(200, "application/json", out);
 }
 
-static void handleGetTelemetryHistory() {
-  String range = server.hasArg("range") ? server.arg("range") : "24h";
-  size_t maxPoints = server.hasArg("points") ? server.arg("points").toInt() : 60;
-  if (maxPoints < 10) maxPoints = 10;
-  if (maxPoints > 200) maxPoints = 200;
-
-  JsonDocument doc;
-  TelemetryManager::getHistoryJson(doc, range, maxPoints);
-
-  String out;
-  serializeJson(doc, out);
-  server.send(200, "application/json", out);
-}
-
-static void handleGetTelemetryStats() {
-  String range = server.hasArg("range") ? server.arg("range") : "24h";
-  float minT = 0, maxT = 0, avgT = 0;
-  int minH = 0, maxH = 0;
-  float avgH = 0;
-  TelemetryManager::getStats(range, minT, maxT, avgT, minH, maxH, avgH);
-
-  JsonDocument doc;
-  doc["status"] = "ok";
-  doc["range"] = range;
-  doc["minTemp"] = minT;
-  doc["maxTemp"] = maxT;
-  doc["avgTemp"] = avgT;
-  doc["minHumidity"] = minH;
-  doc["maxHumidity"] = maxH;
-  doc["avgHumidity"] = avgH;
-  doc["psramRecords"] = (uint32_t)TelemetryManager::getRecordCount();
-  doc["psramCapacity"] = (uint32_t)TelemetryManager::getCapacity();
-  doc["flashWritesSaved"] = TelemetryManager::getFlashWritesSaved();
-
-  String out;
-  serializeJson(doc, out);
-  server.send(200, "application/json", out);
-}
-
-// ================================================================
-//                     KHỞI CHẠY WEB SERVER & ROUTES
-// ================================================================
-
-static void handleMemoryStatus() {
-  JsonDocument doc;
-  MemoryScavenger::getStatusJson(doc);
-  String out;
-  serializeJson(doc, out);
-  server.send(200, "application/json", out);
-}
-
-static void handleMemoryScavenge() {
-  ScavengeReport rep = MemoryScavenger::scavenge(true, "WEB_API");
-  JsonDocument doc;
-  doc["status"] = "ok";
-  doc["freed_bytes"] = rep.totalFreedBytes;
-  doc["freed_kb"] = rep.totalFreedBytes / 1024;
-  doc["heap_freed"] = rep.heapFreedBytes;
-  doc["psram_freed"] = rep.psramFreedBytes;
-  doc["reason"] = rep.triggerReason;
-  doc["free_heap"] = ESP.getFreeHeap();
-  doc["free_psram"] = ESP.getFreePsram();
-  String out;
-  serializeJson(doc, out);
-  server.send(200, "application/json", out);
-}
-
-static void handleMemoryConfig() {
-  if (!server.hasArg("plain")) {
-    server.send(400, "application/json", "{\"error\":\"Missing body\"}");
-    return;
-  }
-  JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, server.arg("plain"));
-  if (err) {
-    server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
-    return;
-  }
-  if (doc.containsKey("strict_mode")) {
-    uint8_t mode = doc["strict_mode"].as<uint8_t>();
-    if (mode > 2) mode = 1;
-    MemoryScavenger::setStrictMode((StrictModeLevel)mode);
-  }
-  JsonDocument resp;
-  resp["status"] = "ok";
-  resp["strict_mode"] = (uint8_t)MemoryScavenger::getStrictMode();
-  resp["mode_name"] = MemoryScavenger::getStrictModeName();
-  String out;
-  serializeJson(resp, out);
-  server.send(200, "application/json", out);
-}
-
-
 static void handleTerminalExec() {
   ApiTerminal::handleExec(server);
 }
@@ -1666,32 +1148,19 @@ void WebRoutes::begin() {
   // 1. Phục vụ trang chủ "/"
   server.on("/", HTTP_GET, handleRoot);
 
-  // 1a. REST APIs Xác Thực (Authentication) & Khôi Phục Cài Đặt Ban Đầu (Factory Reset)
-  server.on("/api/auth/status", HTTP_GET, handleAuthStatus);
-  server.on("/api/auth/login", HTTP_POST, handleAuthLogin);
-  server.on("/api/auth/logout", HTTP_POST, handleAuthLogout);
-  server.on("/api/auth/change_password", HTTP_POST, handleAuthChangePassword);
-  server.on("/api/system/factory_reset", HTTP_POST, handleFactoryResetRoute);
-
-  // 1b. Các REST API Thời tiết Real-time & Telemetry (1MB PSRAM Circular Buffer)
-  server.on("/api/memory/status", HTTP_GET, handleMemoryStatus);
-  server.on("/api/memory/scavenge", HTTP_POST, handleMemoryScavenge);
-  server.on("/api/memory/config", HTTP_POST, handleMemoryConfig);
+  // Đăng ký toàn bộ REST APIs Hệ Thống, Auth, OTA, Logs, Memory, Telemetry
+  ApiSystem::registerRoutes(server);
   server.on("/api/terminal/exec", HTTP_POST, handleTerminalExec);
 
 
   server.on("/api/weather", HTTP_GET, handleGetWeather);
   server.on("/api/weather/refresh", HTTP_POST, handleRefreshWeather);
-  server.on("/api/telemetry/history", HTTP_GET, handleGetTelemetryHistory);
-  server.on("/api/telemetry/stats", HTTP_GET, handleGetTelemetryStats);
 
   // 2. Các REST API Mạng & Hệ thống
   server.on("/api/wifi/scan", HTTP_GET, handleWifiScan);
   server.on("/api/wifi/saved", HTTP_GET, handleGetSavedWifi);
   server.on("/api/wifi/connect", HTTP_POST, handleWifiConnect);
   server.on("/api/wifi/delete", HTTP_POST, handleDeleteSavedWifi);
-  server.on("/api/system/status", HTTP_GET, handleSystemStatus);
-  server.on("/api/status", HTTP_GET, handleSystemStatus);
   server.on("/api/decor/status", HTTP_GET, handleDecorStatus);
   server.on("/api/decor/control", HTTP_POST, handleDecorControl);
   server.on("/api/keypad/press", HTTP_POST, handleKeypadPress);
@@ -1766,35 +1235,8 @@ void WebRoutes::begin() {
   server.on("/api/pc/metrics", HTTP_POST, handlePcMetricsPost);
 
   // 6b. Các REST API Cập Nhật Firmware OTA & Thông Tin Hệ Thống
-  server.on("/api/system_info", HTTP_GET, handleSystemInfo);
-  server.on("/api/ota_check", HTTP_GET, handleOtaCheck);
-  server.on("/api/ota_start", HTTP_POST, handleOtaStart);
-  server.on("/api/ota_status", HTTP_GET, handleOtaStatus);
-  server.on("/update", HTTP_POST, handleLocalUpdate, handleLocalUpdateUpload);
 
-  // 6b2. REST API phát thử các âm báo S40 (Nokia Tune, OK, Delete, SMS Morse, Beep)
-  server.on("/api/audio/play_tune", HTTP_POST, []() {
-    String tune = server.hasArg("tune") ? server.arg("tune") : "nokia";
-    if (server.hasArg("plain")) {
-      StaticJsonDocument<128> doc;
-      deserializeJson(doc, server.arg("plain"));
-      if (doc.containsKey("tune")) tune = doc["tune"].as<String>();
-    }
-    if (tune == "nokia" || tune == "1")       TestAudio::playNokiaTune();
-    else if (tune == "ok")                     TestAudio::playOkChime();
-    else if (tune == "delete" || tune == "del") TestAudio::playDeleteChime();
-    else if (tune == "sms" || tune == "2")     TestAudio::playSmsSpecialTone();
-    else if (tune == "beep" || tune == "0")    TestAudio::playKeyBeep();
-    else if (tune == "chime" || tune == "3")   TestAudio::playStartupChime();
-    else TestAudio::playAlarmTuneStep(tune.toInt(), 0);
 
-    StaticJsonDocument<64> res;
-    res["success"] = true;
-    res["played"] = tune;
-    String out;
-    serializeJson(res, out);
-    server.send(200, "application/json", out);
-  });
 
   // 6b3. REST APIs Stream Đa Phương Tiện (Web Browser / URL Video & Audio Stream)
   server.on("/api/stream/video_frame", HTTP_POST, handleStreamVideoFinish, handleStreamVideoUpload);
@@ -1804,12 +1246,6 @@ void WebRoutes::begin() {
   server.on("/api/stream/status", HTTP_GET, handleStreamStatus);
 
   // 6b4. REST APIs Nhật Ký Hệ Thống & Thẻ Nhớ SD (Smartphone-Style Syslog)
-  server.on("/api/logs", HTTP_GET, handleGetLogs);
-  server.on("/api/logs/download", HTTP_GET, handleDownloadLogs);
-  server.on("/api/logs/stats", HTTP_GET, handleGetLogStats);
-  server.on("/api/logs/files", HTTP_GET, handleGetLogFiles);
-  server.on("/api/logs/snapshot", HTTP_POST, handlePostLogSnapshot);
-  server.on("/api/logs/clear", HTTP_POST, handlePostLogClear);
 
   // 6c. Captive Portal Probes cho iOS / Android / Windows (Tự động mở trang Cấu hình Wi-Fi)
   auto handleCaptiveRedirect = []() {
