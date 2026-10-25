@@ -128,9 +128,11 @@ void handleExec(WebServer& server) {
       shtOk ? (String(TestSensors::getTemperatureC(), 1) + "°C | " + String((int)roundf(TestSensors::getHumidityPct())) + "% RH (Addr 0x" + String(TestSensors::getDetectedAddress(), HEX) + ")").c_str() : "Mất kết nối I2C");
     out += b;
 
-    bool sdOk = TestSDCard::isMounted();
-    snprintf(b, sizeof(b), "%-15s %-10s %s\n", "SD CARD (SPI)", sdOk ? "ONLINE" : "UNMOUNT",
-      sdOk ? (TestSDCard::getCardTypeName() + " | Trống " + String(TestSDCard::getFreeMB()) + "/" + String(TestSDCard::getTotalMB()) + " MB").c_str() : "Chưa cắm / Dùng đệm PSRAM");
+    bool sdOk = TestSDCard::isMounted() && TestSDCard::isHealthy();
+    snprintf(b, sizeof(b), "%-15s %-10s %s\n", "SD CARD (SPI)",
+      sdOk ? "HEALTHY" : (TestSDCard::isMounted() ? "DEGRADED" : "OFFLINE"),
+      sdOk ? (TestSDCard::getCardTypeName() + " | Trống " + String(TestSDCard::getFreeMB()) + "/" + String(TestSDCard::getTotalMB()) + " MB").c_str() :
+      (TestSDCard::isMounted() ? TestSDCard::getHealthStateStr() : "Chưa cắm / Đệm 128KB PSRAM"));
     out += b;
 
     snprintf(b, sizeof(b), "%-15s %-10s %s\n", "AUDIO DAC", "READY",
@@ -201,9 +203,19 @@ void handleExec(WebServer& server) {
       out += "Bản tóm tắt I2C    : " + TestSensors::getDiagSummary() + "\n";
     }
     else if (sub == "sd" || sub == "sdcard" || sub == "card") {
-      out = "=== [CHẨN ĐOÁN THẺ NHỚ MICROSD (SPI)] ===\n";
+      out = "=== [CHẨN ĐOÁN & SỨC KHỎE THẺ NHỚ MICROSD (SPI)] ===\n";
       bool mounted = TestSDCard::isMounted();
-      out += "Trạng thái Mount   : " + String(mounted ? "MOUNTED THÀNH CÔNG" : "CHƯA MOUNT / KHÔNG CẮM THẺ") + "\n";
+      bool healthy = TestSDCard::isHealthy();
+      StorageDriver::SdHealthStats hs = StorageDriver::getHealthStats();
+
+      out += "Trạng thái Mount   : " + String(mounted ? "ĐÃ MOUNT THÀNH CÔNG" : "CHƯA MOUNT / KHÔNG CẮM THẺ") + "\n";
+      out += "Sức khỏe phần cứng : " + String(TestSDCard::getHealthStateStr()) + "\n";
+      out += "Circuit Breaker    : " + String(hs.circuitBreakerTripped ? "⚠️ ĐÃ NGẮT BẢO VỆ (CÔ LẬP BUS)" : "BÌNH THƯỜNG") + "\n";
+      out += "Lỗi ghi flash (W)  : " + String(hs.writeErrors) + " lần\n";
+      out += "Lỗi đọc/mất SPI (R): " + String(hs.readErrors) + " lần\n";
+      out += "Lỗi dồn dập        : " + String(hs.consecutiveErrors) + "\n";
+      out += "Thao tác thành công: " + String(hs.successfulOps) + "\n";
+
       if (mounted) {
         out += "Loại thẻ nhớ       : " + TestSDCard::getCardTypeName() + "\n";
         out += "Dung lượng tổng    : " + String(TestSDCard::getTotalMB()) + " MB\n";
@@ -213,7 +225,8 @@ void handleExec(WebServer& server) {
         out += "Cấu hình chân SPI  : " + TestSDCard::getMatchedPinMapDesc() + "\n";
         out += "Bản tóm tắt        : " + TestSDCard::getStatusSummary() + "\n";
       } else {
-        out += "Ghi chú: Toàn bộ nhật ký và lịch sử đang được lưu an toàn trên đệm 1MB Octal PSRAM.\n";
+        out += "Cơ chế bảo vệ      : Toàn bộ nhật ký và lịch sử đang được lưu an toàn trên đệm 128KB Octal PSRAM.\n";
+        out += "Tự động phục hồi   : Hệ thống tự thăm dò định kỳ bằng xung CMD0 và mount lại ngay khi cắm thẻ mới.\n";
       }
     }
     else if (sub == "audio" || sub == "sound" || sub == "speaker") {

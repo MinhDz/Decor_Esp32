@@ -247,7 +247,10 @@ void SystemLogger::checkLogRotation() {
 }
 
 void SystemLogger::flushBufferToSd() {
-  if (!TestSDCard::isMounted() || !s_ringBuffer || s_pendingSdBytes == 0) return;
+  if (!TestSDCard::isMounted() || !TestSDCard::isHealthy() || !s_ringBuffer || s_pendingSdBytes == 0) {
+    s_stats.sdLoggingActive = false;
+    return;
+  }
 
   ensureLogDirExists();
   checkLogRotation();
@@ -256,6 +259,7 @@ void SystemLogger::flushBufferToSd() {
   File f = SD.open(logPath, FILE_APPEND);
   if (!f) {
     s_stats.sdLoggingActive = false;
+    TestSDCard::notifyIoError(false, "SystemLogger SD.open failed");
     return;
   }
 
@@ -265,18 +269,30 @@ void SystemLogger::flushBufferToSd() {
   portENTER_CRITICAL(&s_logMux);
   bytesToFlush = (s_pendingSdBytes < sizeof(chunk)) ? s_pendingSdBytes : sizeof(chunk);
   for (size_t i = 0; i < bytesToFlush; i++) {
-    chunk[i] = s_ringBuffer[s_sdFlushTail];
-    s_sdFlushTail = (s_sdFlushTail + 1) % s_bufferCapacity;
+    size_t peekIdx = (s_sdFlushTail + i) % s_bufferCapacity;
+    chunk[i] = s_ringBuffer[peekIdx];
   }
-  s_pendingSdBytes -= bytesToFlush;
   portEXIT_CRITICAL(&s_logMux);
 
   if (bytesToFlush > 0) {
     size_t written = f.write((const uint8_t*)chunk, bytesToFlush);
-    f.flush();
-    s_stats.totalWrittenBytes += written;
-    s_stats.sdLoggingActive = true;
-    s_stats.currentLogFile = logPath;
+    if (written == bytesToFlush) {
+      f.flush();
+      portENTER_CRITICAL(&s_logMux);
+      s_sdFlushTail = (s_sdFlushTail + bytesToFlush) % s_bufferCapacity;
+      s_pendingSdBytes -= bytesToFlush;
+      portEXIT_CRITICAL(&s_logMux);
+
+      s_stats.totalWrittenBytes += written;
+      s_stats.sdLoggingActive = true;
+      s_stats.currentLogFile = logPath;
+      TestSDCard::notifyIoSuccess();
+    } else {
+      // Ghi thất bại: Flash bad block, write-protect, hoặc thẻ bị rút đột ngột
+      s_stats.sdLoggingActive = false;
+      TestSDCard::notifyIoError(true, "SystemLogger f.write incomplete");
+      // Dữ liệu vẫn được giữ nguyên trong Ring Buffer Octal PSRAM, không bị mất!
+    }
   }
   f.close();
 }

@@ -23,6 +23,11 @@ namespace StorageDriver {
   static String firstFilesStr = "(Chua co du lieu)";
   static uint32_t scanCounter = 0;
   static unsigned long lastAutoProbeMs = 0;
+  static SdHealthStats s_healthStats = {
+    SD_HEALTH_NO_CARD, 0, 0, 0, 0, 0, 0, false
+  };
+  static unsigned long s_circuitBreakerBackoffMs = 5000;
+  static const unsigned long MAX_BACKOFF_MS = 60000;
 
   // Bảng thông số điện học trực tiếp của 4 chân Shield SD
   static SdPinDiag pinDiags[4] = {
@@ -95,6 +100,77 @@ namespace StorageDriver {
     return dataIn;
   }
 
+  bool isHealthy() {
+    return sdMounted && !s_healthStats.circuitBreakerTripped && (s_healthStats.health == SD_HEALTH_OK);
+  }
+
+  SdCardHealth getHealthState() {
+    return s_healthStats.health;
+  }
+
+  const char* getHealthStateStr() {
+    switch (s_healthStats.health) {
+      case SD_HEALTH_OK:          return "HOAT DONG TOT (HEALTHY)";
+      case SD_HEALTH_NO_CARD:     return "KHONG CO THE (NO CARD)";
+      case SD_HEALTH_UNMOUNTED:   return "CHUA MOUNT FAT (UNMOUNTED)";
+      case SD_HEALTH_WRITE_ERROR: return "LOI GHI FLASH / HONG THE (WRITE ERROR)";
+      case SD_HEALTH_IO_ERROR:    return "MAT KET NOI SPI / DA RUT (IO ERROR)";
+      case SD_HEALTH_CORRUPTED:   return "LOI HE THONG TEP (CORRUPTED FAT)";
+      case SD_HEALTH_OVERCURRENT: return "CANH BAO DONG CAO / MAT NGUON";
+      default:                    return "UNKNOWN";
+    }
+  }
+
+  SdHealthStats getHealthStats() {
+    return s_healthStats;
+  }
+
+  void unmountSafe() {
+    sdMounted = false;
+    SD.end();
+    if (sdSpi) {
+      sdSpi->end();
+    }
+    pinMode(PIN_SD_CS, OUTPUT);
+    digitalWrite(PIN_SD_CS, HIGH);
+  }
+
+  void notifyIoError(bool isWrite, const char* context) {
+    if (isWrite) s_healthStats.writeErrors++;
+    else s_healthStats.readErrors++;
+    s_healthStats.consecutiveErrors++;
+    s_healthStats.lastErrorMs = millis();
+
+    if (isWrite) {
+      s_healthStats.health = SD_HEALTH_WRITE_ERROR;
+    } else {
+      s_healthStats.health = SD_HEALTH_IO_ERROR;
+    }
+
+    if (context) {
+      LOG_W("SD", "Canh bao I/O the nho: %s (%s)", context, isWrite ? "WRITE" : "READ");
+    }
+
+    // Kích hoạt Circuit Breaker nếu lỗi dồn dập >= 2 lần
+    if (s_healthStats.consecutiveErrors >= 2 && !s_healthStats.circuitBreakerTripped) {
+      s_healthStats.circuitBreakerTripped = true;
+      unmountSafe();
+      statusSummary = isWrite ? "LOI GHI FLASH / HONG THE!" : "MAT KET NOI THE / DA RUT!";
+      LOG_E("SD", "⚠️ CIRCUIT BREAKER KICH HOAT: %s. Da co lap bus SPI de tranh treo he thong!",
+            statusSummary.c_str());
+    }
+  }
+
+  void notifyIoSuccess() {
+    s_healthStats.successfulOps++;
+    if (s_healthStats.consecutiveErrors > 0) {
+      s_healthStats.consecutiveErrors = 0;
+    }
+    if (sdMounted && s_healthStats.health != SD_HEALTH_OK) {
+      s_healthStats.health = SD_HEALTH_OK;
+    }
+  }
+
   static uint8_t probeRawCmd0(uint8_t sck, uint8_t miso, uint8_t mosi, uint8_t cs, uint8_t outRxBuf[8]) {
     pinMode(cs, OUTPUT);
     digitalWrite(cs, HIGH);
@@ -139,6 +215,14 @@ namespace StorageDriver {
 
     return bestR1;
   }
+
+  bool probeCardPresent() {
+    uint8_t rxBytes[8] = {0};
+    uint8_t r1 = probeRawCmd0(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS, rxBytes);
+    cmd0R1Byte = r1;
+    return (r1 == 0x01);
+  }
+
 
   static void refreshSdCapacityAndFiles() {
     if (!sdMounted) return;
@@ -211,6 +295,9 @@ namespace StorageDriver {
                   (ct == CARD_SDHC) ? "SDHC/XC" : "SD";
 
     sdMounted = true;
+    s_healthStats.health = SD_HEALTH_OK;
+    s_healthStats.circuitBreakerTripped = false;
+    s_healthStats.consecutiveErrors = 0;
 
     File wf = SD.open("/sd_test_ok.txt", FILE_WRITE);
     if (wf) {
@@ -480,11 +567,38 @@ namespace StorageDriver {
 
   void loop() {
     unsigned long now = millis();
-    // Chỉ tự động quét lặp lại mỗi 2 giây khi người dùng đang mở trực tiếp Màn hình Chẩn đoán SD (Mode 9)
-    if (now - lastAutoProbeMs >= 2000) {
-      lastAutoProbeMs = now;
-      if (!sdMounted && TestDisplay::getScreenModeName() == "sd_test") {
+
+    // 1. Chỉ tự động quét lặp lại mỗi 2 giây khi người dùng đang mở trực tiếp Màn hình Chẩn đoán SD (Mode 9)
+    if (TestDisplay::getScreenModeName() == "sd_test") {
+      if (now - lastAutoProbeMs >= 2000) {
+        lastAutoProbeMs = now;
         runFullElectricalAndSpiProbe();
+      }
+      return;
+    }
+
+    // 2. Cơ chế Tự Động Phục Hồi & Hotplug (Auto-Recovery & Hotplug Detection) cho toàn hệ thống:
+    // Nếu Circuit Breaker bị ngắt (thẻ bị rút hoặc lỗi flash) hoặc chưa mount được thẻ:
+    if (!sdMounted || s_healthStats.circuitBreakerTripped) {
+      if (now - s_healthStats.lastProbeMs >= s_circuitBreakerBackoffMs) {
+        s_healthStats.lastProbeMs = now;
+
+        // Thử kiểm tra nhanh sự hiện diện của thẻ bằng CMD0 nhẹ (không treo SPI)
+        if (probeCardPresent()) {
+          LOG_I("SD", "Phat hien the nho tren khe cam. Tien hanh mount lai FAT...");
+          if (tryMountFatFilesystem(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS)) {
+            s_healthStats.circuitBreakerTripped = false;
+            s_healthStats.consecutiveErrors = 0;
+            s_healthStats.health = SD_HEALTH_OK;
+            s_circuitBreakerBackoffMs = 5000;
+            LOG_I("SD", "✅ Phuc hoi the nho SD thanh cong! Dung luong: %u MB", (unsigned)detectedSizeMB);
+          } else {
+            s_circuitBreakerBackoffMs = min(s_circuitBreakerBackoffMs * 2, MAX_BACKOFF_MS);
+          }
+        } else {
+          s_healthStats.health = SD_HEALTH_NO_CARD;
+          s_circuitBreakerBackoffMs = min(s_circuitBreakerBackoffMs * 2, MAX_BACKOFF_MS);
+        }
       }
     }
   }

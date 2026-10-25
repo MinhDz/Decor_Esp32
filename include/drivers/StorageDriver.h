@@ -14,6 +14,48 @@ namespace StorageDriver {
     const char* stateDesc; // "3.3V (Pull-Up)", "Float->3.3V(PU)", "0.0V (Pull-Down/GND)"
   };
 
+  // ============================================================================
+  // HỆ THỐNG GIÁM SÁT SỨC KHỎE THẺ NHỚ & CƠ CHẾ BẢO VỆ NGẮT MẠCH (CIRCUIT BREAKER)
+  // Xử lý các lỗi: Không có thẻ, rút thẻ đột ngột khi đang ghi, hỏng do tuổi thọ flash,
+  // xung dòng làm chết thẻ, bad blocks, hoặc lỗi filesystem FAT.
+  // ============================================================================
+  enum SdCardHealth : uint8_t {
+    SD_HEALTH_OK = 0,          // Hoạt động bình thường
+    SD_HEALTH_NO_CARD = 1,     // Không có thẻ nhớ
+    SD_HEALTH_UNMOUNTED = 2,   // Thẻ có mặt nhưng chưa mount được FAT
+    SD_HEALTH_WRITE_ERROR = 3, // Lỗi ghi dữ liệu (Flash bad block / Write protect / Hết vòng đời)
+    SD_HEALTH_IO_ERROR = 4,    // Lỗi giao tiếp SPI / Thẻ bị rút đột ngột
+    SD_HEALTH_CORRUPTED = 5,   // Hệ thống tệp FAT bị lỗi
+    SD_HEALTH_OVERCURRENT = 6  // Cảnh báo sụt áp / xung dòng làm tê liệt bus SPI
+  };
+
+  struct SdHealthStats {
+    SdCardHealth health;
+    uint32_t writeErrors;
+    uint32_t readErrors;
+    uint32_t consecutiveErrors;
+    uint32_t successfulOps;
+    unsigned long lastErrorMs;
+    unsigned long lastProbeMs;
+    bool circuitBreakerTripped;
+  };
+
+  // Kiểm tra sức khỏe & trạng thái sẵn sàng
+  bool isHealthy();
+  SdCardHealth getHealthState();
+  const char* getHealthStateStr();
+  SdHealthStats getHealthStats();
+
+  // Báo cáo lỗi I/O để kích hoạt cơ chế ngắt mạch bảo vệ
+  void notifyIoError(bool isWrite = false, const char* context = nullptr);
+  void notifyIoSuccess();
+
+  // Thử kiểm tra sự hiện diện vật lý nhanh (Fast Low-Overhead CMD0 Probe)
+  bool probeCardPresent();
+
+  // Ngắt kết nối an toàn giải phóng tài nguyên SPI
+  void unmountSafe();
+
   // Khởi tạo & Kiểm tra Shield Thẻ nhớ Micro SD (Wemos D1 Mini Shield: D5/SCK=42, D6/MISO=41, D7/MOSI=40, D8/CS=39)
   bool init();
 
