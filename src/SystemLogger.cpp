@@ -92,7 +92,7 @@ void SystemLogger::init() {
     BaseType_t res = xTaskCreatePinnedToCore(
       sdLoggerTask,
       "SdLoggerTask",
-      4096,
+      6144,
       nullptr,
       1,
       &s_sdLoggerTaskHandle,
@@ -299,19 +299,19 @@ void SystemLogger::flushBufferToSd() {
     return;
   }
 
-  char chunk[2048];
+  static char s_sdFlushChunk[2048];
   size_t bytesToFlush = 0;
 
   portENTER_CRITICAL(&s_logMux);
-  bytesToFlush = (s_pendingSdBytes < sizeof(chunk)) ? s_pendingSdBytes : sizeof(chunk);
+  bytesToFlush = (s_pendingSdBytes < sizeof(s_sdFlushChunk)) ? s_pendingSdBytes : sizeof(s_sdFlushChunk);
   for (size_t i = 0; i < bytesToFlush; i++) {
     size_t peekIdx = (s_sdFlushTail + i) % s_bufferCapacity;
-    chunk[i] = s_ringBuffer[peekIdx];
+    s_sdFlushChunk[i] = s_ringBuffer[peekIdx];
   }
   portEXIT_CRITICAL(&s_logMux);
 
   if (bytesToFlush > 0) {
-    size_t written = f.write((const uint8_t*)chunk, bytesToFlush);
+    size_t written = f.write((const uint8_t*)s_sdFlushChunk, bytesToFlush);
     if (written == bytesToFlush) {
       f.flush();
       portENTER_CRITICAL(&s_logMux);
