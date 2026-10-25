@@ -114,7 +114,7 @@ namespace SpaceOS_Settings {
       "6. Âm báo phím bấm",
       "7. Nhạc chuông báo thức",
       "8. Độ nhạy Micro thu âm",
-      "9. Biểu cảm Trợ lý AI",
+      "9. Phong cách Biểu cảm AI",
       "10. Biểu đồ Sóng âm & Cảm biến",
       "11. Cối xay gió L298N (G1)",
       "12. LED Edison Trái (G47)",
@@ -132,7 +132,7 @@ namespace SpaceOS_Settings {
       keyBeepEnabled ? "Đang bật" : "Đang tắt",
       String(AudioDriver::getAlarmTuneName(SpaceOS_ClockSuite::getAlarmTuneIdx())),
       String(micSensNames[micSensitivityMode % 3]),
-      s_shell.getEmojiName ? s_shell.getEmojiName() : "Sẵn sàng",
+      s_shell.getEmojiStyleName ? s_shell.getEmojiStyleName() : "Mắt Neon",
       "Bấm OK để mở ->",
       String(MotorDriver::getModeName()),
       String(MotorDriver::getEdisonLeftModeName()),
@@ -286,7 +286,12 @@ namespace SpaceOS_Settings {
       const char* mNames[3] = { "Mic: THẤP (1.8x)", "Mic: TIÊU CHUẨN (3.5x)", "Mic: CAO (5.5x)" };
       if (s_shell.showToast) s_shell.showToast(mNames[micSensitivityMode], 2000);
     } else if (row == 8) {
-      // Toggle emoji/assist eye state handled externally via switchMode or helper
+      if (s_shell.cycleEmojiStyle) {
+        s_shell.cycleEmojiStyle(dir);
+        if (s_shell.showToast && s_shell.getEmojiStyleName) {
+          s_shell.showToast(String("BIỂU CẢM: ") + s_shell.getEmojiStyleName(), 2000);
+        }
+      }
     } else if (row == 9) {
       if (s_shell.switchMode) s_shell.switchMode(3);
       return;

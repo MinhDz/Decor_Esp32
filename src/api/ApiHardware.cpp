@@ -107,6 +107,16 @@ namespace ApiHardware {
       TestDisplay::setHudStyle(style);
     }
 
+    if (doc["emoji_style"].is<int>()) {
+      TestDisplay::setEmojiStyle((uint8_t)doc["emoji_style"].as<int>());
+    } else if (doc["emoji_style"].is<const char*>()) {
+      String st = doc["emoji_style"].as<String>();
+      st.toLowerCase();
+      if (st == "cute_girl" || st == "chibi") TestDisplay::setEmojiStyle(1);
+      else if (st == "doi_mat" || st == "robot") TestDisplay::setEmojiStyle(2);
+      else TestDisplay::setEmojiStyle(0);
+    }
+
     server.send(200, "application/json", "{\"status\":\"ok\"}");
   }
 
@@ -294,6 +304,8 @@ namespace ApiHardware {
     res["screen_title"] = TestDisplay::getCurrentScreenTitle();
     res["subtitle"] = TestDisplay::getSubtitle();
     res["hud_style"] = TestDisplay::getHudStyleName();
+    res["emoji_style"] = TestDisplay::getEmojiStyle();
+    res["emoji_style_name"] = TestDisplay::getEmojiStyleName();
     res["battery_v"] = TestSensors::getBatteryVoltage();
     res["battery_pct"] = TestSensors::getBatteryPercentage();
     res["is_charging"] = TestSensors::isCharging();

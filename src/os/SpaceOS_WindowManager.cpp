@@ -177,6 +177,9 @@ namespace TestDisplay {
   static int lastDrawnMinute = -1;
   static bool lastWifiState = false;
   static uint8_t eyeState = 0;
+  static String s40AiEmotionTag = "IDLE";
+  static uint8_t s_emojiStyle = 0; // 0: Neon Cyberpunk (Mặc định), 1: Cô bé Chibi (128x128), 2: Đôi mắt Robot (240x240)
+  static uint8_t s_doiMatFrameIdx = 0;
   static unsigned long lastExternalEmojiSync = 0;
   static bool isAutoBlinkActive = false;
   static String customSubtitle = "Xin chào! Mình là trợ lý ảo XiaoZhi trên Trạm Decor Vũ Trụ!";
@@ -189,6 +192,15 @@ namespace TestDisplay {
       "Giận dỗi", "Ngạc nhiên", "Nháy trái", "Nháy phải", "Buồn ngủ"
     };
     return names[eyeState % 12];
+  }
+
+  String getEmojiStyleName() {
+    static const char* styleNames[] = { "Mắt Neon", "Cô bé Chibi", "Đôi mắt động" };
+    return styleNames[s_emojiStyle % 3];
+  }
+
+  uint8_t getEmojiStyle() {
+    return s_emojiStyle;
   }
 
   // Bộ đệm lưu lát cắt nền phía sau đồng hồ (240 x 44 px = 21KB) giúp vẽ chữ nổi trong suốt trên nền ảnh JPEG mà không nháy hình
@@ -913,14 +925,187 @@ namespace TestDisplay {
     tft->print("5V");
   }
 
-  // Vẽ đôi mắt robot XiaoZhi đồng bộ 100% với 12 trạng thái mắt tròn phát sáng trên Web UI
-  static void drawXiaoZhiEyesBox(int boxX, int boxY, int boxW, int boxH, uint8_t state, uint8_t scaleMode) {
+  // ============================================================================
+  // HE THONG BIEU CAM DA PHONG CACH XIAOZHI (NEON / CUTE GIRL / DOI MAT ANIMATED)
+  // ============================================================================
+  static int16_t s_emojiClipX = 0, s_emojiClipY = 0, s_emojiClipW = 240, s_emojiClipH = 320;
+
+  static bool jpgEmojiClipRenderCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+    if (!tft) return false;
+    // Neu khoi nam hoan toan ben ngoai khung cat (clip rect): bo qua giai ma block nay
+    if (x + w <= s_emojiClipX || x >= s_emojiClipX + s_emojiClipW ||
+        y + h <= s_emojiClipY || y >= s_emojiClipY + s_emojiClipH) {
+      return true;
+    }
+    // Neu khoi nam hoan toan ben trong khung cat: ve thang toan bo khoi len man hinh
+    if (x >= s_emojiClipX && x + w <= s_emojiClipX + s_emojiClipW &&
+        y >= s_emojiClipY && y + h <= s_emojiClipY + s_emojiClipH) {
+      tft->drawRGBBitmap(x, y, bitmap, w, h);
+      return true;
+    }
+    // Neu khoi nam mot phan ben trong khung cat: ve tung dong pixel hop le
+    for (uint16_t row = 0; row < h; row++) {
+      int16_t py = y + row;
+      if (py < s_emojiClipY || py >= s_emojiClipY + s_emojiClipH) continue;
+
+      int16_t startCol = 0;
+      if (x < s_emojiClipX) startCol = s_emojiClipX - x;
+      int16_t endCol = w;
+      if (x + w > s_emojiClipX + s_emojiClipW) endCol = s_emojiClipX + s_emojiClipW - x;
+
+      if (startCol < endCol) {
+        tft->drawRGBBitmap(x + startCol, py, &bitmap[row * w + startCol], endCol - startCol, 1);
+      }
+    }
+    return true;
+  }
+
+  static bool drawEmojiJpg(int16_t x, int16_t y, const String& relPath) {
+    TJpgDec.setCallback(jpgEmojiClipRenderCallback);
+    TJpgDec.setSwapBytes(false);
+    TJpgDec.setJpgScale(1);
+
+    // 1. Kiem tra the nho MicroSD truoc
+    if (TestSDCard::isMounted() && SD.exists(relPath)) {
+      File f = SD.open(relPath, FILE_READ);
+      if (f) {
+        size_t sz = f.size();
+        if (sz > 0 && sz <= 65536) {
+          uint8_t* buf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
+          if (buf) {
+            if (f.read(buf, sz) == sz) {
+              bool ok = (TJpgDec.drawJpg(x, y, buf, sz) == JDR_OK);
+              free(buf);
+              f.close();
+              return ok;
+            }
+            free(buf);
+          }
+        }
+        f.close();
+      }
+    }
+
+    // 2. Kiem tra bo nho Flash LittleFS
+    if (LittleFS.exists(relPath)) {
+      File f = LittleFS.open(relPath, "r");
+      if (f) {
+        size_t sz = f.size();
+        if (sz > 0 && sz <= 65536) {
+          uint8_t* buf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
+          if (buf) {
+            if (f.read(buf, sz) == sz) {
+              bool ok = (TJpgDec.drawJpg(x, y, buf, sz) == JDR_OK);
+              free(buf);
+              f.close();
+              return ok;
+            }
+            free(buf);
+          }
+        }
+        f.close();
+        return (TJpgDec.drawFsJpg(x, y, relPath.c_str(), LittleFS) == JDR_OK);
+      }
+    }
+
+    return false;
+  }
+
+  // Anh xa trang thai cam xuc sang ten tap tin anh JPEG
+  static String getEmojiFilename(uint8_t style, uint8_t state, const String& emoTag) {
+    String e = emoTag;
+    e.toLowerCase();
+    e.trim();
+
+    if (style == 1) { // 1. Cute Girl Chibi (128x128)
+      if (e == "happy" || e == "pleased") return "happy.jpg";
+      if (e == "laughing") return "laughing.jpg";
+      if (e == "funny") return "funny.jpg";
+      if (e == "loving") return "loving.jpg";
+      if (e == "delicious") return "delicious.jpg";
+      if (e == "confident") return "confident.jpg";
+      if (e == "kissy") return "kissy.jpg";
+      if (e == "wink" || e == "winking" || e == "wink-left" || e == "wink-right" || e == "playful") return "winking.jpg";
+      if (e == "cool") return "cool.jpg";
+      if (e == "relaxed" || e == "chill") return "relaxed.jpg";
+      if (e == "neutral" || e == "idle" || e == "normal") return "neutral.jpg";
+      if (e == "thinking" || e == "pondering" || e == "curious") return "thinking.jpg";
+      if (e == "confused" || e == "puzzled") return "confused.jpg";
+      if (e == "surprised") return "surprised.jpg";
+      if (e == "shocked") return "shocked.jpg";
+      if (e == "silly") return "silly.jpg";
+      if (e == "sad") return "sad.jpg";
+      if (e == "crying") return "crying.jpg";
+      if (e == "embarrassed" || e == "shy") return "embarrassed.jpg";
+      if (e == "angry" || e == "mad" || e == "furious") return "angry.jpg";
+      if (e == "sleepy" || e == "tired" || e == "bored") return "sleepy.jpg";
+
+      // Fallback theo eyeState
+      switch (state) {
+        case 0: return "neutral.jpg";
+        case 1: return "winking.jpg";
+        case 2: return "happy.jpg";
+        case 3:
+        case 4:
+        case 5: return "thinking.jpg";
+        case 6: return "sad.jpg";
+        case 7: return "angry.jpg";
+        case 8: return "confused.jpg";
+        case 9:
+        case 10: return "winking.jpg";
+        case 11: return "sleepy.jpg";
+        default: return "neutral.jpg";
+      }
+    } else if (style == 2) { // 2. Doi Mat Robot Animated (240x240)
+      String base = "1macdinh";
+      if (e == "happy" || e == "pleased") base = "vuive";
+      else if (e == "laughing" || e == "funny") base = "cuoito";
+      else if (e == "loving" || e == "delicious" || e == "excited") base = "vuimung";
+      else if (e == "confident" || e == "cool") base = "nheomat";
+      else if (e == "kissy" || e == "wink" || e == "winking" || e == "wink-left" || e == "wink-right" || e == "playful") base = "nhaymat";
+      else if (e == "relaxed" || e == "chill" || e == "neutral" || e == "normal") base = "binhthuong";
+      else if (e == "idle") base = "1macdinh";
+      else if (e == "thinking" || e == "pondering" || e == "curious") base = "suynghi2";
+      else if (e == "confused" || e == "puzzled") base = "chamhoi";
+      else if (e == "surprised") base = "ngacnhien2";
+      else if (e == "shocked") base = "doxet";
+      else if (e == "silly") base = "hoamat";
+      else if (e == "crying") base = "buon2";
+      else if (e == "sad") base = "buon";
+      else if (e == "embarrassed" || e == "shy") base = "domohoi";
+      else if (e == "angry" || e == "mad") base = "tucgian";
+      else if (e == "furious") base = "tucgian2";
+      else if (e == "sleepy" || e == "tired" || e == "bored") base = "buonngu";
+      else if (e == "left" || e == "look-left" || e == "right" || e == "look-right" || e == "up" || e == "down") base = "duamat";
+      else {
+        switch (state) {
+          case 0: base = "1macdinh"; break;
+          case 1: base = "nhaymat"; break;
+          case 2: base = "vuive"; break;
+          case 3:
+          case 4: base = "duamat"; break;
+          case 5: base = "suynghi2"; break;
+          case 6: base = "buon"; break;
+          case 7: base = "tucgian"; break;
+          case 8: base = "chamhoi"; break;
+          case 9: base = "nhaymat"; break;
+          case 10: base = "nheomat"; break;
+          case 11: base = "buonngu"; break;
+          default: base = "1macdinh"; break;
+        }
+      }
+      return base;
+    }
+    return "";
+  }
+
+  // Ve doi mat vector Neon Cyberpunk goc (Style 0 mac dinh)
+  static void drawNeonVectorEyes(int boxX, int boxY, int boxW, int boxH, uint8_t state, uint8_t scaleMode) {
     if (!tft) return;
     int cx = boxX + boxW / 2;
     int cy = boxY + boxH / 2;
 
     if (scaleMode == 2) {
-      // Màn hình Emoji chính: nền đen tuyền giống hệt khung màn hình ảo trên Web UI
       tft->fillRect(boxX, boxY, boxW, boxH, C_BLACK);
     } else {
       tft->fillRoundRect(boxX + 2, boxY + 2, boxW - 4, boxH - 4, 6, C_BLACK);
@@ -934,7 +1119,7 @@ namespace TestDisplay {
     int eyeCy   = cy;
     int pupR    = (scaleMode == 2) ? 6 : 4;
 
-    uint16_t mainCyan = 0x5FFF; // #58ffff sáng rực như Web UI
+    uint16_t mainCyan = 0x5FFF; // #58ffff
     uint16_t haloCyan = C_NEON_CYAN;
 
     auto drawGlowingCircleEye = [&](int ex, int ey, int r, uint16_t col, int pupDx, int pupDy) {
@@ -945,44 +1130,44 @@ namespace TestDisplay {
     };
 
     switch (state) {
-      case 0: // IDLE (Bình thường - 2 mắt tròn phát sáng)
+      case 0: // IDLE (Binh thuong)
         drawGlowingCircleEye(leftCx,  eyeCy, radius, mainCyan,  6, -6);
         drawGlowingCircleEye(rightCx, eyeCy, radius, mainCyan,  6, -6);
         break;
 
-      case 1: // BLINK (Nháy mắt - -)
+      case 1: // BLINK (Nhay mat - -)
         tft->fillRoundRect(leftCx - radius,  eyeCy - 4, radius * 2, 8, 4, mainCyan);
         tft->fillRoundRect(rightCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
         break;
 
-      case 2: // HAPPY (Vui vẻ ^ ^)
+      case 2: // HAPPY (Vui ve ^ ^)
         drawGlowingCircleEye(leftCx,  eyeCy + 4, radius, C_NEON_GREEN, 0, -8);
         drawGlowingCircleEye(rightCx, eyeCy + 4, radius, C_NEON_GREEN, 0, -8);
         tft->fillCircle(leftCx,  eyeCy + radius / 2 + 6, radius, C_BLACK);
         tft->fillCircle(rightCx, eyeCy + radius / 2 + 6, radius, C_BLACK);
         break;
 
-      case 3: // LOOK LEFT (Liếc Trái)
+      case 3: // LOOK LEFT (Liec Trai)
         drawGlowingCircleEye(leftCx - 12,  eyeCy, radius, mainCyan, -10, -4);
         drawGlowingCircleEye(rightCx - 12, eyeCy, radius, mainCyan, -10, -4);
         break;
 
-      case 4: // LOOK RIGHT (Liếc Phải)
+      case 4: // LOOK RIGHT (Liec Phai)
         drawGlowingCircleEye(leftCx + 12,  eyeCy, radius, mainCyan, 10, -4);
         drawGlowingCircleEye(rightCx + 12, eyeCy, radius, mainCyan, 10, -4);
         break;
 
-      case 5: // LOOK UP (Nhìn Lên)
+      case 5: // LOOK UP (Nhin Len)
         drawGlowingCircleEye(leftCx,  eyeCy - 12, radius, mainCyan, 0, -11);
         drawGlowingCircleEye(rightCx, eyeCy - 12, radius, mainCyan, 0, -11);
         break;
 
-      case 6: // LOOK DOWN (Nhìn Xuống)
+      case 6: // LOOK DOWN (Nhin Xuong)
         drawGlowingCircleEye(leftCx,  eyeCy + 12, radius, mainCyan, 0, 11);
         drawGlowingCircleEye(rightCx, eyeCy + 12, radius, mainCyan, 0, 11);
         break;
 
-      case 7: // ANGRY (Giận >_<)
+      case 7: // ANGRY (Gian >_<)
         tft->fillCircle(leftCx,  eyeCy, radius, C_NEON_PINK);
         tft->fillCircle(rightCx, eyeCy, radius, C_NEON_PINK);
         for (int i = -radius; i <= radius; i++) {
@@ -993,7 +1178,7 @@ namespace TestDisplay {
         }
         break;
 
-      case 8: // CONFUSED (Bối rối @@)
+      case 8: // CONFUSED (Boi roi @@)
         for (int r = radius; r >= 6; r -= 7) {
           tft->drawCircle(leftCx,  eyeCy, r, (r % 2 == 0) ? C_NEON_AMBER : C_WHITE);
           tft->drawCircle(rightCx, eyeCy, r, (r % 2 == 0) ? C_NEON_AMBER : C_WHITE);
@@ -1002,17 +1187,17 @@ namespace TestDisplay {
         tft->fillCircle(rightCx, eyeCy, 4, C_NEON_AMBER);
         break;
 
-      case 9: // WINK LEFT (Nháy mắt trái)
+      case 9: // WINK LEFT (Nhay mat trai)
         tft->fillRoundRect(leftCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
         drawGlowingCircleEye(rightCx, eyeCy, radius, mainCyan, 6, -6);
         break;
 
-      case 10: // WINK RIGHT (Nháy mắt phải)
+      case 10: // WINK RIGHT (Nhay mat phai)
         drawGlowingCircleEye(leftCx, eyeCy, radius, mainCyan, 6, -6);
         tft->fillRoundRect(rightCx - radius, eyeCy - 4, radius * 2, 8, 4, mainCyan);
         break;
 
-      case 11: // SLEEPY (Buồn ngủ)
+      case 11: // SLEEPY (Buon ngu)
       default:
         drawGlowingCircleEye(leftCx,  eyeCy + 4, radius, C_NEON_PURPLE, 0, 4);
         drawGlowingCircleEye(rightCx, eyeCy + 4, radius, C_NEON_PURPLE, 0, 4);
@@ -1021,6 +1206,63 @@ namespace TestDisplay {
         tft->drawFastHLine(leftCx - radius,  eyeCy, radius * 2, C_NEON_CYAN);
         tft->drawFastHLine(rightCx - radius, eyeCy, radius * 2, C_NEON_CYAN);
         break;
+    }
+  }
+
+  // Ve doi mat robot XiaoZhi: Ho tro Da Phong Cach (0: Neon Cyberpunk, 1: Co be Chibi, 2: Doi mat Robot)
+  static void drawXiaoZhiEyesBox(int boxX, int boxY, int boxW, int boxH, uint8_t state, uint8_t scaleMode) {
+    if (!tft) return;
+
+    if (s_emojiStyle == 0) {
+      drawNeonVectorEyes(boxX, boxY, boxW, boxH, state, scaleMode);
+      return;
+    }
+
+    bool rendered = false;
+    String baseName = getEmojiFilename(s_emojiStyle, state, s40AiEmotionTag);
+
+    if (s_emojiStyle == 1 && baseName.length() > 0) {
+      // 1. Cute Girl: 128x128 JPEG can giua trong hop
+      int imgX = boxX + (boxW - 128) / 2;
+      int imgY = boxY + (boxH - 128) / 2;
+
+      if (scaleMode == 2) {
+        tft->fillRect(boxX, boxY, boxW, boxH, C_BLACK);
+        s_emojiClipX = boxX; s_emojiClipY = boxY; s_emojiClipW = boxW; s_emojiClipH = boxH;
+      } else {
+        tft->fillRoundRect(boxX + 2, boxY + 2, boxW - 4, boxH - 4, 6, C_BLACK);
+        tft->drawRoundRect(boxX, boxY, boxW, boxH, 6, C_NEON_CYAN);
+        s_emojiClipX = boxX + 2; s_emojiClipY = boxY + 2; s_emojiClipW = boxW - 4; s_emojiClipH = boxH - 4;
+      }
+
+      String path = "/emojis/cute_girl/" + baseName;
+      rendered = drawEmojiJpg(imgX, imgY, path);
+    } else if (s_emojiStyle == 2 && baseName.length() > 0) {
+      // 2. Doi Mat: 240x240 JPEG can giua theo truc doc tam mat (y=98)
+      int cy = boxY + boxH / 2;
+      int imgX = boxX + (boxW - 240) / 2;
+      int imgY = cy - 98;
+
+      if (scaleMode == 2) {
+        tft->fillRect(boxX, boxY, boxW, boxH, C_BLACK);
+        s_emojiClipX = boxX; s_emojiClipY = boxY; s_emojiClipW = boxW; s_emojiClipH = boxH;
+      } else {
+        tft->fillRoundRect(boxX + 2, boxY + 2, boxW - 4, boxH - 4, 6, C_BLACK);
+        tft->drawRoundRect(boxX, boxY, boxW, boxH, 6, C_NEON_CYAN);
+        s_emojiClipX = boxX + 2; s_emojiClipY = boxY + 2; s_emojiClipW = boxW - 4; s_emojiClipH = boxH - 4;
+      }
+
+      String animPath = "/emojis/doi_mat/" + baseName + "_" + String(s_doiMatFrameIdx) + ".jpg";
+      rendered = drawEmojiJpg(imgX, imgY, animPath);
+      if (!rendered) {
+        String staticPath = "/emojis/doi_mat/" + baseName + ".jpg";
+        rendered = drawEmojiJpg(imgX, imgY, staticPath);
+      }
+    }
+
+    // Tu dong Fallback ve Mat Neon mac dinh neu khong co file tren SD/LittleFS
+    if (!rendered) {
+      drawNeonVectorEyes(boxX, boxY, boxW, boxH, state, scaleMode);
     }
   }
 
@@ -2522,6 +2764,8 @@ namespace TestDisplay {
       del.applyTheme = [](int t) { applyS40UiTheme(t); };
       del.switchMode = [](int m) { currentMode = m; refreshActiveScreen(); };
       del.getEmojiName = []() { return getEmojiStateName(); };
+      del.cycleEmojiStyle = [](int d) { cycleEmojiStyle(d); };
+      del.getEmojiStyleName = []() { return getEmojiStyleName(); };
       del.resetConfig = []() {
         const S40ThemeSpec& th = S40_THEMES[5];
         stCfg.theme         = "gome_chibi";
@@ -3245,7 +3489,7 @@ namespace TestDisplay {
     return 2; // Mặc định vui vẻ (HAPPY)
   }
 
-  static String s40AiEmotionTag = "IDLE";
+  // s40AiEmotionTag da duoc khai bao o dau file
   static bool s40AiAutoScroll = true;
   static int& s40MemPopupCursor = s40MemOptionCursor;
   static unsigned long& s40AiStateChangeMs = s40AiStateStartMs;
@@ -8230,6 +8474,11 @@ namespace TestDisplay {
 
     loadConfigFromFile();
     loadSystemSettingsPrefsIfNeeded();
+    Preferences pEmoji;
+    if (pEmoji.begin("s40_sys", true)) {
+      s_emojiStyle = pEmoji.getUChar("ai_emoji_style", 0) % 3;
+      pEmoji.end();
+    }
     loadClockSuitePrefsIfNeeded();
     SpaceOS_GameCenter::init();
     setBacklightBrightness(screenBrightnessPct);
@@ -8361,9 +8610,34 @@ namespace TestDisplay {
 
     if ((currentMode == 1 || currentMode == 11) && tft && !isScreenSleeping) {
       if (stateChanged) {
+        if (currentMode == 1) {
+          drawXiaoZhiEyesBox(8, 28, tft->width() - 16, 186, eyeState, 2);
+        } else {
+          drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        }
+      }
+    }
+  }
+
+  void setEmojiStyle(uint8_t style) {
+    s_emojiStyle = style % 3;
+    Preferences p;
+    if (p.begin("s40_sys", false)) {
+      p.putUChar("ai_emoji_style", s_emojiStyle);
+      p.end();
+    }
+    Serial.printf("[XIAOZHI EMOJI STYLE]: Da chuyen sang Style %u (%s)\n", (unsigned)s_emojiStyle, getEmojiStyleName().c_str());
+    if ((currentMode == 1 || currentMode == 11) && tft && !isScreenSleeping) {
+      if (currentMode == 1) {
+        drawXiaoZhiEyesBox(8, 28, tft->width() - 16, 186, eyeState, 2);
+      } else {
         drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
       }
     }
+  }
+
+  void cycleEmojiStyle(int dir) {
+    setEmojiStyle((s_emojiStyle + dir + 3) % 3);
   }
 
   void setHudStyle(const String& style) {
@@ -8755,6 +9029,7 @@ namespace TestDisplay {
           static uint8_t thinkIdx = 0;
           eyeState = thinkSeq[thinkIdx % 4];
           thinkIdx++;
+          s_doiMatFrameIdx = (s_doiMatFrameIdx + 1) % 6;
           drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
         }
 

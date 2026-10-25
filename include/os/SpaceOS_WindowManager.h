@@ -23,6 +23,12 @@ namespace TestDisplay {
   // Đồng bộ trạng thái biểu cảm XiaoZhi từ Web ("idle", "happy", "angry", "confused", "left", "right", "up", "down", "blink")
   void setEmojiState(const String& state, const String& subtitle = "");
 
+  // --- ĐA PHONG CÁCH BIỂU CẢM XIAOZHI (0: Neon Cyberpunk, 1: Cô bé Chibi, 2: Đôi mắt Robot) ---
+  void    setEmojiStyle(uint8_t style);
+  uint8_t getEmojiStyle();
+  String  getEmojiStyleName();
+  void    cycleEmojiStyle(int dir = 1);
+
   // Đồng bộ phong cách PC HUD từ Web ("bars", "gauges", "graph", "matrix")
   void setHudStyle(const String& style);
 

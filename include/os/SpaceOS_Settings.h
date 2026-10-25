@@ -23,6 +23,8 @@ namespace SpaceOS_Settings {
   using SwitchModeFn     = void (*)(int newMode);
   using GetEmojiNameFn   = String (*)();
   using ResetConfigFn    = void (*)();
+  using CycleEmojiStyleFn = void (*)(int dir);
+  using GetEmojiStyleNameFn = String (*)();
 
   struct ShellDelegates {
     DrawChromeFn    drawChrome    = nullptr;
@@ -35,6 +37,8 @@ namespace SpaceOS_Settings {
     SwitchModeFn    switchMode    = nullptr;
     GetEmojiNameFn  getEmojiName  = nullptr;
     ResetConfigFn   resetConfig   = nullptr;
+    CycleEmojiStyleFn cycleEmojiStyle = nullptr;
+    GetEmojiStyleNameFn getEmojiStyleName = nullptr;
   };
 
   void setShellDelegates(const ShellDelegates& delegates);

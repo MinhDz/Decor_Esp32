@@ -707,6 +707,28 @@ static bool executeLocalVoiceIntent(const String& rawText) {
     return true;
   }
 
+  // 6. Đổi phong cách biểu cảm mắt XiaoZhi
+  if (s.indexOf("doi bieu cam sang co be") >= 0 || s.indexOf("doi sang co be") >= 0 ||
+      s.indexOf("doi sang chibi") >= 0 || s.indexOf("co be chibi") >= 0 || s.indexOf("bieu cam cute") >= 0 ||
+      s.indexOf("mat co be") >= 0) {
+    TestDisplay::setEmojiStyle(1);
+    Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm sang Cô Bé Chibi!");
+    return true;
+  }
+  if (s.indexOf("doi sang doi mat") >= 0 || s.indexOf("doi mat robot") >= 0 ||
+      s.indexOf("bieu cam doi mat") >= 0 || s.indexOf("doi mat dong") >= 0 ||
+      s.indexOf("mat robot") >= 0) {
+    TestDisplay::setEmojiStyle(2);
+    Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm sang Đôi Mắt Robot!");
+    return true;
+  }
+  if (s.indexOf("doi sang mat neon") >= 0 || s.indexOf("mat neon") >= 0 ||
+      s.indexOf("bieu cam mac dinh") >= 0 || s.indexOf("mat mac dinh") >= 0) {
+    TestDisplay::setEmojiStyle(0);
+    Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm về Mắt Neon mặc định!");
+    return true;
+  }
+
   return false;
 }
 
@@ -811,10 +833,22 @@ static void handleMcpMessage(const JsonDocument& doc) {
       props["volume"]["description"] = "Muc am luong tu 0 den 100%";
     }
 
+    // Tool 7: Phong cách biểu cảm mắt
+    {
+      JsonObject t = tools.add<JsonObject>();
+      t["name"] = "self.screen.set_emoji_style";
+      t["description"] = "Thay doi phong cach bieu cam cua tro ly XiaoZhi tren man hinh: 'neon' (doi mat vector neon cyberpunk mac dinh), 'cute_girl' (co be anime chibi de thuong), 'doi_mat' (doi mat robot song dong)";
+      JsonObject schema = t["inputSchema"].to<JsonObject>();
+      schema["type"] = "object";
+      JsonObject props = schema["properties"].to<JsonObject>();
+      props["style"]["type"] = "string";
+      props["style"]["description"] = "'neon', 'cute_girl', hoac 'doi_mat'";
+    }
+
     String resStr;
     serializeJson(resDoc, resStr);
     esp_websocket_client_send_text(s_wsClient, resStr.c_str(), resStr.length(), pdMS_TO_TICKS(2000));
-    Serial.printf("📤 [XIAOZHI MCP] Đã gửi danh mục 6 Tools tới XiaoZhi Cloud (%d bytes)\n", (int)resStr.length());
+    Serial.printf("📤 [XIAOZHI MCP] Đã gửi danh mục 7 Tools tới XiaoZhi Cloud (%d bytes)\n", (int)resStr.length());
     return;
   }
 
@@ -901,6 +935,19 @@ static void handleMcpMessage(const JsonDocument& doc) {
       AudioDriver::setSpeakerVolumePct(vol);
       AudioDriver::setXiaoZhiVolumePct(vol);
       replyText = "Đã đặt âm lượng loa: " + String(vol) + "%.";
+    } else if (toolName == "self.screen.set_emoji_style") {
+      String st = args["style"] | "neon";
+      st.toLowerCase();
+      if (st == "cute_girl" || st == "chibi" || st == "girl" || st == "co_be") {
+        TestDisplay::setEmojiStyle(1);
+        replyText = "Đã chuyển biểu cảm sang phong cách Cô Bé Chibi dễ thương!";
+      } else if (st == "doi_mat" || st == "robot" || st == "eyes" || st == "dong") {
+        TestDisplay::setEmojiStyle(2);
+        replyText = "Đã chuyển biểu cảm sang phong cách Đôi Mắt Robot sống động!";
+      } else {
+        TestDisplay::setEmojiStyle(0);
+        replyText = "Đã chuyển biểu cảm về phong cách Mắt Neon mặc định!";
+      }
     } else {
       replyText = "Không tìm thấy công cụ: " + toolName;
       isError = true;
