@@ -509,5 +509,8 @@ void handleExec(WebServer& server) {
   server.send(200, "application/json", resStr);
 }
 
+void registerRoutes(WebServer& server) {
+  server.on("/api/terminal/exec", HTTP_POST, [&server]() { handleExec(server); });
+}
 
 } // namespace ApiTerminal
