@@ -36,6 +36,7 @@
 #include "SpaceOS_Themes.h"
 #include "SpaceOS_GameCenter.h"
 #include "SpaceOS_ClockSuite.h"
+#include "SpaceOS_Settings.h"
 #include "SpaceOS_VnGfx.h"
 
 namespace TestDisplay {
@@ -180,7 +181,7 @@ namespace TestDisplay {
 
   static int s40MenuCursor = 0;       // 0..11 trên lưới 4x3
   static int s40WallpaperCursor = 0;
-  static int s40SettingsCursor = 0;
+  static int& s40SettingsCursor = SpaceOS_Settings::getCursorRef();
   static int s40GalleryIndex = 0;
   static int s40AboutPage = 0;
   static uint8_t s40QrModeTab = 0; // 0: Kết nối Wi-Fi SoftAP, 1: Mở Web Cài Đặt (http://192.168.4.1/#wifi)
@@ -223,67 +224,27 @@ namespace TestDisplay {
   static unsigned long s40ToastExpireMs = 0;
 
   // Cấu hình Độ sáng màn hình, Thời gian tắt màn hình & Always On Display (AOD)
-  static int screenBrightnessPct = 100; // 10% -> 100%
-  static int screenTimeoutIdx = 2;      // 0: Luôn sáng, 1: 15s, 2: 30s (MẶC ĐỊNH), 3: 1p, 4: 5p, 5: 10p
-  static const uint16_t TIMEOUT_SECONDS_LIST[6] = { 0, 15, 30, 60, 300, 600 };
-  static const char* TIMEOUT_LABELS[6] = { "Luôn sáng", "15 giây", "30 giây", "1 phút", "5 phút", "10 phút" };
+  // Modularized in SpaceOS_Settings
+  using SpaceOS_Settings::TIMEOUT_SECONDS_LIST;
+  using SpaceOS_Settings::TIMEOUT_LABELS;
+  static int&  screenBrightnessPct    = SpaceOS_Settings::getBrightnessPctRef();
+  static int&  screenTimeoutIdx       = SpaceOS_Settings::getTimeoutIdxRef();
+  static int&  aodClockStyle          = SpaceOS_Settings::getAodClockStyleRef();
+  static bool& alwaysOnDisplayEnabled = SpaceOS_Settings::getAlwaysOnDisplayRef();
+  static bool& keyBeepEnabled         = SpaceOS_Settings::getKeyBeepEnabledRef();
+  static int&  micSensitivityMode     = SpaceOS_Settings::getMicSensitivityRef();
+  static const int S40_SETTINGS_COUNT = SpaceOS_Settings::SETTINGS_COUNT;
   static unsigned long lastUserActivityMs = 0;
   static volatile bool isScreenSleeping = false;
   static volatile bool s_wakeUpRequested = false;
-  static bool alwaysOnDisplayEnabled = true; // true = Hiện đồng hồ mờ nền đen (AOD), false = Tắt hẳn màn hình (Sleep)
-  static int aodClockStyle = 1;              // 0: Tắt màn hình, 1: Thường (Digital), 2: Lật số (Retro Flip), 3: Đồng hồ kim (Analog)
   static int lastAodDrawnMinute = -1;
   static bool lastTtp223State = false;
   static unsigned long lastTtp223ChangeMs = 0;
-  static bool keyBeepEnabled = true;
-  static int& s40AlarmTuneIdx = SpaceOS_ClockSuite::getAlarmTuneIdxRef(); // 0: Bíp Dồn Dập, 1: Nokia Tune Cổ Điển, 2: SMS Morse, 3: Chuông 4 Nốt
-  static int micSensitivityMode = 1; // 0: Thấp, 1: Tiêu chuẩn, 2: Cao
+  static int& s40AlarmTuneIdx = SpaceOS_ClockSuite::getAlarmTuneIdxRef();
   static bool lastPcLiveState = false;
 
-  static bool s40SystemPrefsLoaded = false;
-  static void loadSystemSettingsPrefsIfNeeded() {
-    if (s40SystemPrefsLoaded) return;
-    s40SystemPrefsLoaded = true;
-    Preferences p;
-    if (p.begin("s40_sys", true)) {
-      screenBrightnessPct    = p.getInt("bright", screenBrightnessPct);
-      screenTimeoutIdx       = p.getInt("tout", 2) % 6; // Mặc định 30s tự vào AOD
-      aodClockStyle          = p.getInt("aod_sty", 1) % 4;
-      alwaysOnDisplayEnabled = (aodClockStyle > 0);
-      keyBeepEnabled         = p.getBool("kbeep", keyBeepEnabled);
-      micSensitivityMode     = p.getInt("msens", 1) % 3;
-      TestAudio::setMicSensitivityMode(micSensitivityMode);
-      int wmMod              = p.getInt("wm_mod", 0) % 5;
-      TestWindmill::setMode(wmMod);
-      int edL                = p.getInt("ed_l", TestWindmill::getEdisonLeftMode()) % TestWindmill::getEdisonModeCount();
-      int edR                = p.getInt("ed_r", TestWindmill::getEdisonRightMode()) % TestWindmill::getEdisonModeCount();
-      TestWindmill::setEdisonLeftMode(edL);
-      TestWindmill::setEdisonRightMode(edR);
-      bool fl                = p.getBool("fl_en", true);
-      int cobMod             = p.getInt("cob_mod", 1);
-      CobLeds::init(fl);
-      CobLeds::setCurrentMode(cobMod);
-      TestWindmill::setFlowingLeds(fl);
-      p.end();
-    }
-  }
-
-  static void saveSystemSettingsPrefs() {
-    Preferences p;
-    if (p.begin("s40_sys", false)) {
-      p.putInt("bright", screenBrightnessPct);
-      p.putInt("tout", screenTimeoutIdx);
-      p.putInt("aod_sty", aodClockStyle);
-      p.putBool("kbeep", keyBeepEnabled);
-      p.putInt("msens", micSensitivityMode);
-      p.putInt("wm_mod", TestWindmill::getMode());
-      p.putInt("ed_l", TestWindmill::getEdisonLeftMode());
-      p.putInt("ed_r", TestWindmill::getEdisonRightMode());
-      p.putBool("fl_en", CobLeds::isOn());
-      p.putInt("cob_mod", CobLeds::getCurrentMode());
-      p.end();
-    }
-  }
+  static inline void loadSystemSettingsPrefsIfNeeded() { SpaceOS_Settings::loadPrefsIfNeeded(); }
+  static inline void saveSystemSettingsPrefs()         { SpaceOS_Settings::savePrefs(); }
 
   // Cấu hình Màn Hình Chờ đọc từ /standby_config.json (đồng bộ 100% với Web UI)
   struct StandbyConfig {
@@ -2639,156 +2600,55 @@ namespace TestDisplay {
     }
   }
 
-  // CHẾ ĐỘ 6: APP CÀI ĐẶT HỆ THỐNG & CHỦ ĐỀ GIAO DIỆN (5 PHONG CÁCH CHÍNH THỨC)
-  static int lastDrawnSettingsCursor = -1;
-  static int lastDrawnSettingsFirstRow = -1;
-
-  static const int S40_SETTINGS_COUNT = 15;
-
-  static void drawSingleSettingsRow(int idx, int vis, bool sel) {
-    if (!tft || idx < 0 || idx >= S40_SETTINGS_COUNT || vis < 0 || vis >= 7) return;
-    int w = tft->width();
-    int ry = 30 + vis * 37;
-
-    int spkVol = TestAudio::getNotifyVolumePct();
-    const char* micSensNames[3] = { "Thấp", "Tiêu chuẩn", "Cao" };
-    const char* aodStyleLabels[4] = {
-      "Tắt (Tắt màn hình)",
-      "1. Thường (Kỹ thuật số)",
-      "2. Lật số (Retro Flip)",
-      "3. Đồng hồ kim (Analog)"
-    };
-
-    const char* labels[15] = {
-      "1. Phong cách Giao diện",
-      "2. Độ sáng màn hình",
-      "3. Thời gian tắt màn hình",
-      "4. Màn hình khóa (AOD)",
-      "5. Âm lượng thông báo",
-      "6. Âm báo phím bấm",
-      "7. Nhạc chuông báo thức",
-      "8. Độ nhạy Micro thu âm",
-      "9. Biểu cảm Trợ lý AI",
-      "10. Biểu đồ Sóng âm & Cảm biến",
-      "11. Cối xay gió L298N (G1)",
-      "12. LED Edison Trái (G47)",
-      "13. LED Edison Phải (G21)",
-      "14. LED Nước Chảy COB (G18/38)",
-      "15. Khôi phục Cài đặt Gốc"
-    };
-
-    String values[15] = {
-      String(curTheme().name),
-      String(screenBrightnessPct) + "%",
-      String(TIMEOUT_LABELS[screenTimeoutIdx % 6]),
-      String(aodStyleLabels[aodClockStyle % 4]),
-      String(spkVol) + "%",
-      keyBeepEnabled ? "Đang bật" : "Đang tắt",
-      String(TestAudio::getAlarmTuneName(s40AlarmTuneIdx)),
-      String(micSensNames[micSensitivityMode % 3]),
-      getEmojiStateName(),
-      "Bấm OK để mở ->",
-      String(TestWindmill::getModeName()),
-      String(TestWindmill::getEdisonLeftModeName()),
-      String(TestWindmill::getEdisonRightModeName()),
-      String(CobLeds::getModeName()),
-      "< Bấm OK để đặt lại >"
-    };
-
-    tft->fillRect(6, ry, w - 12, 34, C_DARK_BG);
-    drawThemedBox(6, ry, w - 12, 34, sel);
-
-    tft->setTextSize(1);
-    tft->setTextColor(sel ? C_YELLOW : C_WHITE, sel ? C_CARD_SEL : C_CARD_BG);
-    tft->setCursor(12, ry + 5);
-    tft->print(labels[idx]);
-
-    if (idx == 0) {
-      // Hiển thị tên Chủ đề + 4 ô màu mẫu (Swatch) bên góc phải
-      tft->setTextColor(C_NEON_CYAN, sel ? C_CARD_SEL : C_CARD_BG);
-      tft->setCursor(12, ry + 19);
-      tft->printf("< %s >", values[0].c_str());
-      int sx = w - 48;
-      tft->fillRect(sx,      ry + 6, 7, 7, C_DARK_BG);
-      tft->drawRect(sx,      ry + 6, 7, 7, C_WHITE);
-      tft->fillRect(sx + 9,  ry + 6, 7, 7, C_NEON_CYAN);
-      tft->fillRect(sx + 18, ry + 6, 7, 7, C_NEON_GREEN);
-      tft->fillRect(sx + 27, ry + 6, 7, 7, C_NEON_PINK);
-    } else if (idx == 1 || idx == 4) {
-      int pct = (idx == 1) ? screenBrightnessPct : spkVol;
-      uint16_t barCol = (idx == 1) ? C_NEON_AMBER : C_NEON_GREEN;
-      int bx = 12, by = ry + 19, bw = 136, bh = 10;
-      tft->drawRect(bx, by, bw, bh, barCol);
-      int fillW = ((bw - 4) * constrain(pct, 0, 100)) / 100;
-      if (fillW > 0) tft->fillRect(bx + 2, by + 2, fillW, bh - 4, barCol);
-      if (fillW < bw - 4) tft->fillRect(bx + 2 + fillW, by + 2, (bw - 4) - fillW, bh - 4, C_BLACK);
-
-      tft->setTextColor(barCol, sel ? C_CARD_SEL : C_CARD_BG);
-      tft->setCursor(156, ry + 19);
-      tft->print(values[idx]);
-    } else if (idx == 14) {
-      tft->setTextColor(sel ? C_YELLOW : C_NEON_PINK, sel ? C_CARD_SEL : C_CARD_BG);
-      tft->setCursor(16, ry + 19);
-      tft->print(values[14]);
-    } else {
-      uint16_t valCol = (idx == 3) ? (aodClockStyle > 0 ? C_NEON_GREEN : C_NEON_PINK) : (sel ? C_NEON_GREEN : C_NEON_CYAN);
-      tft->setTextColor(valCol, sel ? C_CARD_SEL : C_CARD_BG);
-      tft->setCursor(16, ry + 19);
-      tft->printf("< %s >", values[idx].c_str());
+  // ============================================================================
+  // BRIDGE DELEGATES FOR MODULARIZED SETTINGS (SpaceOS_Settings)
+  // ============================================================================
+  static void ensureSettingsBridge() {
+    static bool registered = false;
+    if (!registered) {
+      registered = true;
+      SpaceOS_Settings::ShellDelegates del;
+      del.drawChrome = [](const char* t, const char* l, const char* m, const char* r) { drawSymbianChrome(t, l, m, r); };
+      del.drawThemedBox = [](int x, int y, int w, int h, bool s) { drawThemedBox(x, y, w, h, s); };
+      del.showToast = [](const String& msg, unsigned long d) { showSymbianToast(msg, d); };
+      del.onExit = []() { currentMode = 4; refreshActiveScreen(); };
+      del.refreshScreen = []() { refreshActiveScreen(); };
+      del.setBrightness = [](int b) { setBacklightBrightness(b); };
+      del.applyTheme = [](int t) { applyS40UiTheme(t); };
+      del.switchMode = [](int m) { currentMode = m; refreshActiveScreen(); };
+      del.getEmojiName = []() { return getEmojiStateName(); };
+      del.resetConfig = []() {
+        const S40ThemeSpec& th = S40_THEMES[5];
+        stCfg.theme         = "gome_chibi";
+        stCfg.clockStyle    = "digital";
+        stCfg.clockColorHex = "#3df7f7";
+        stCfg.clockColor    = th.neonCyan;
+        stCfg.clockFormat   = "24h";
+        stCfg.showSeconds   = true;
+        stCfg.clockPos      = "center";
+        stCfg.showDate      = true;
+        stCfg.dateFormat    = "vi";
+        stCfg.showWeather   = true;
+        stCfg.temp          = 28.5f;
+        stCfg.humidity      = 65;
+        stCfg.customText    = "Tram Decor Vu Tru *";
+        stCfg.textColor     = C_WHITE;
+        stCfg.bgColor       = th.darkBg;
+        stCfg.bgMode        = "gradient-cyber";
+        stCfg.bgImage       = "";
+        stCfg.dimOverlay    = 35;
+        saveConfigToFile();
+      };
+      SpaceOS_Settings::setShellDelegates(del);
     }
   }
 
+  // ============================================================================
+  // CHẾ ĐỘ 6: APP CÀI ĐẶT HỆ THỐNG & CHỦ ĐỀ GIAO DIỆN (MODULARIZED -> SpaceOS_Settings)
+  // ============================================================================
   static void drawSettingsAppScreen(bool fullRedraw = true) {
-    if (!tft) return;
-    int w = tft->width();
-    if (fullRedraw) {
-      tft->fillRect(0, 22, w, tft->height() - 44, C_DARK_BG);
-      drawSymbianChrome("CÀI ĐẶT HỆ THỐNG", "Đổi (OK)", "< Trái / Phải >", "Quay lại");
-      lastDrawnSettingsCursor = -1;
-      lastDrawnSettingsFirstRow = -1;
-    }
-
-    int firstRow = 0;
-    if (s40SettingsCursor >= 7) firstRow = s40SettingsCursor - 6;
-
-    // Tối ưu chống quét màn hình: Nếu không đổi tầng cuộn trang -> Chỉ vẽ lại 2 ô thay đổi (< 2ms)
-    if (!fullRedraw && firstRow == lastDrawnSettingsFirstRow && lastDrawnSettingsCursor >= 0 && lastDrawnSettingsCursor != s40SettingsCursor) {
-      int oldVis = lastDrawnSettingsCursor - firstRow;
-      int newVis = s40SettingsCursor - firstRow;
-      if (oldVis >= 0 && oldVis < 7) drawSingleSettingsRow(lastDrawnSettingsCursor, oldVis, false);
-      if (newVis >= 0 && newVis < 7) drawSingleSettingsRow(s40SettingsCursor, newVis, true);
-      lastDrawnSettingsCursor = s40SettingsCursor;
-      return;
-    }
-
-    // Nếu con trỏ không đổi (ví dụ bấm Trái/Phải đổi giá trị): Chỉ vẽ lại đúng 1 hàng đang chọn!
-    if (!fullRedraw && firstRow == lastDrawnSettingsFirstRow && lastDrawnSettingsCursor == s40SettingsCursor) {
-      int curVis = s40SettingsCursor - firstRow;
-      if (curVis >= 0 && curVis < 7) drawSingleSettingsRow(s40SettingsCursor, curVis, true);
-      return;
-    }
-
-    for (int vis = 0; vis < 7; vis++) {
-      int idx = firstRow + vis;
-      if (idx >= S40_SETTINGS_COUNT) {
-        int ry = 30 + vis * 37;
-        tft->fillRect(6, ry, w - 12, 34, C_DARK_BG);
-        continue;
-      }
-      drawSingleSettingsRow(idx, vis, idx == s40SettingsCursor);
-    }
-
-    // Thanh cuộn chỉ báo vị trí danh sách cài đặt bên mép phải
-    int sbX = w - 4;
-    int sbY = 30;
-    int sbH = 7 * 37 - 3;
-    tft->drawFastVLine(sbX, sbY, sbH, 0x2124);
-    int thumbH = max(16, (sbH * 7) / S40_SETTINGS_COUNT);
-    int thumbY = sbY + ((sbH - thumbH) * s40SettingsCursor) / (S40_SETTINGS_COUNT - 1);
-    tft->fillRoundRect(sbX - 1, thumbY, 3, thumbH, 1, C_NEON_CYAN);
-
-    lastDrawnSettingsCursor = s40SettingsCursor;
-    lastDrawnSettingsFirstRow = firstRow;
+    ensureSettingsBridge();
+    SpaceOS_Settings::draw(tft, fullRedraw);
   }
 
   // Callback giải mã JPEG vào Bộ Đệm Khung Hình RAM cho App Thư Viện
@@ -6701,181 +6561,16 @@ namespace TestDisplay {
   }
 
   static void adjustSettingsAppItem(int row, int dir) {
-    if (row == 0) {
-      applyS40UiTheme(s40UiThemeIdx + dir);
-      showSymbianToast(String("GIAO DIỆN: ") + curTheme().headerTag);
-      drawSettingsAppScreen(true);
-      return;
-    } else if (row == 1) {
-      setBacklightBrightness(screenBrightnessPct + dir * 10);
-      saveSystemSettingsPrefs();
-    } else if (row == 2) {
-      screenTimeoutIdx = (screenTimeoutIdx + dir + 6) % 6;
-      saveSystemSettingsPrefs();
-    } else if (row == 3) {
-      aodClockStyle = (aodClockStyle + dir + 4) % 4;
-      alwaysOnDisplayEnabled = (aodClockStyle > 0);
-      saveSystemSettingsPrefs();
-      const char* aodStNames[4] = { "Đã TẮT màn hình khóa", "AOD: Kỹ thuật số", "AOD: Lật số cổ điển", "AOD: Đồng hồ kim" };
-      showSymbianToast(aodStNames[aodClockStyle]);
-    } else if (row == 4) {
-      TestAudio::setNotifyVolumePct(TestAudio::getNotifyVolumePct() + dir * 5);
-      TestAudio::playKeyBeep();
-      showSymbianToast(String("THÔNG BÁO: ") + TestAudio::getNotifyVolumePct() + "%");
-    } else if (row == 5) {
-      keyBeepEnabled = !keyBeepEnabled;
-      saveSystemSettingsPrefs();
-      if (keyBeepEnabled) TestAudio::playOkChime();
-      else TestAudio::playDeleteChime();
-      showSymbianToast(keyBeepEnabled ? "ĐÃ BẬT ÂM PHÍM BẤM" : "ĐÃ TẮT ÂM PHÍM BẤM");
-    } else if (row == 6) {
-      loadClockSuitePrefsIfNeeded();
-      s40AlarmTuneIdx = (s40AlarmTuneIdx + dir + 4) % 4;
-      saveClockSuitePrefs();
-      TestAudio::playAlarmTuneStep(s40AlarmTuneIdx, 0);
-      showSymbianToast(String("CHUÔNG: ") + TestAudio::getAlarmTuneName(s40AlarmTuneIdx));
-    } else if (row == 7) {
-      micSensitivityMode = (micSensitivityMode + dir + 3) % 3;
-      TestAudio::setMicSensitivityMode(micSensitivityMode);
-      saveSystemSettingsPrefs();
-      const char* mNames[3] = { "Mic: THẤP (1.8x)", "Mic: TIÊU CHUẨN (3.5x)", "Mic: CAO (5.5x)" };
-      showSymbianToast(mNames[micSensitivityMode]);
-    } else if (row == 8) {
-      eyeState = (eyeState + dir + 12) % 12;
-      lastExternalEmojiSync = millis();
-    } else if (row == 9) {
-      currentMode = 3;
-      refreshActiveScreen();
-      return;
-    } else if (row == 10) {
-      int m = (TestWindmill::getMode() + dir + 5) % 5;
-      TestWindmill::setMode(m);
-      saveSystemSettingsPrefs();
-      showSymbianToast(String("CỐI XAY: ") + TestWindmill::getModeName());
-    } else if (row == 11) {
-      int cnt = TestWindmill::getEdisonModeCount();
-      int m = (TestWindmill::getEdisonLeftMode() + dir + cnt) % cnt;
-      TestWindmill::setEdisonLeftMode(m);
-      saveSystemSettingsPrefs();
-      showSymbianToast(String("EDISON TRÁI: ") + TestWindmill::getEdisonLeftModeName());
-    } else if (row == 12) {
-      int cnt = TestWindmill::getEdisonModeCount();
-      int m = (TestWindmill::getEdisonRightMode() + dir + cnt) % cnt;
-      TestWindmill::setEdisonRightMode(m);
-      saveSystemSettingsPrefs();
-      showSymbianToast(String("EDISON PHẢI: ") + TestWindmill::getEdisonRightModeName());
-    } else if (row == 13) {
-      if (dir > 0) {
-        // Bấm Phải hoặc OK: Chuyển sang chế độ tiếp theo trên vi mạch IC
-        CobLeds::nextMode();
-      } else {
-        // Bấm Trái: Bật / Tắt nhanh nguồn LED COB
-        CobLeds::togglePower();
-      }
-      TestWindmill::setFlowingLeds(CobLeds::isOn());
-      saveSystemSettingsPrefs();
-      showSymbianToast(String("LED COB: ") + CobLeds::getModeName());
-    } else if (row == 14) {
-      performFactoryReset();
-      return;
-    }
-    drawSettingsAppScreen(false);
+    ensureSettingsBridge();
+    SpaceOS_Settings::adjustItem(row, dir, tft);
   }
 
-
   // ============================================================================
-  // KHÔI PHỤC CÀI ĐẶT BAN ĐẦU (FACTORY RESET)
-  // Đưa giao diện về mặc định MÈO GOME CHIBI (Theme 5), xóa tùy chỉnh cá nhân,
-  // khôi phục mật khẩu Web về admin/admin, khôi phục âm lượng & LED.
+  // KHÔI PHỤC CÀI ĐẶT BAN ĐẦU (FACTORY RESET) (MODULARIZED -> SpaceOS_Settings)
   // ============================================================================
   void performFactoryReset() {
-    Serial.println("[FactoryReset] === BAT DAU KHOI PHUC CAI DAT BAN DAU (MEO GOME CHIBI) ===");
-
-    // 1. Chuyen giao dien mac dinh sang MEO GOME CHIBI (Theme 5)
-    s40UiThemeIdx = 5;
-    applyS40UiTheme(5);
-
-    // 2. Thiet lap cau hinh Man Hinh Cho mac dinh voi Theme Meo Chibi
-    const S40ThemeSpec& th = S40_THEMES[5];
-    stCfg.theme         = "gome_chibi";
-    stCfg.clockStyle    = "digital";
-    stCfg.clockColorHex = "#3df7f7";
-    stCfg.clockColor    = th.neonCyan;
-    stCfg.clockFormat   = "24h";
-    stCfg.showSeconds   = true;
-    stCfg.clockPos      = "center";
-    stCfg.showDate      = true;
-    stCfg.dateFormat    = "vi";
-    stCfg.showWeather   = true;
-    stCfg.temp          = 28.5f;
-    stCfg.humidity      = 65;
-    stCfg.customText    = "Tram Decor Vu Tru *";
-    stCfg.textColor     = C_WHITE;
-    stCfg.bgColor       = th.darkBg;
-    stCfg.bgMode        = "gradient-cyber";
-    stCfg.bgImage       = "";
-    stCfg.dimOverlay    = 35;
-    saveConfigToFile();
-
-    // 3. Khoi phuc Cai Dat He Thong (s40_sys)
-    screenBrightnessPct    = 100;
-    setBacklightBrightness(100);
-    screenTimeoutIdx       = 2; // 30 giay tu tat man hinh
-    aodClockStyle          = 1; // Dong ho AOD ky thuat so
-    alwaysOnDisplayEnabled = true;
-    keyBeepEnabled         = true;
-    micSensitivityMode     = 1; // Tieu chuan (3.5x)
-    TestAudio::setMicSensitivityMode(1);
-    TestWindmill::setMode(0);
-    TestWindmill::setEdisonLeftMode(0);
-    TestWindmill::setEdisonRightMode(0);
-    CobLeds::init(true);
-    CobLeds::setCurrentMode(1);
-    TestWindmill::setFlowingLeds(true);
-    saveSystemSettingsPrefs();
-
-    // 4. Khoi phuc Am Luong Thong Bao & Loa
-    TestAudio::setNotifyVolumePct(70);
-    TestAudio::setSpeakerVolumePct(70);
-
-    // 5. Khoi phuc Bao Thuc / Hen Gio (s40_clock)
-    Preferences pClock;
-    if (pClock.begin("s40_clock", false)) {
-      pClock.clear();
-      pClock.end();
-    }
-    for (int i = 0; i < 3; i++) {
-    }
-    SpaceOS_ClockSuite::resetDefaults(); // Reset 3 báo thức, nhạc chuông, hẹn giờ 5 phút
-
-    // 6. Dat lai Diem Ky Luc Tro Choi (s40_games)
-    Preferences pGames;
-    if (pGames.begin("s40_games", false)) {
-      pGames.clear();
-      pGames.end();
-    }
-    SpaceOS_GameCenter::resetHighScores(); // Xóa kỷ lục điểm 3 game
-
-    // 7. Khoi phuc Mat Khau Quan Tri Web (admin / admin)
-    WebAuth::resetToDefault();
-
-    // 8. Dat lai anh nen active
-    ImageManager::selectActiveImage("");
-
-    // 9. Am thanh chao mung & Thong bao truc quan
-    TestAudio::playStartupChime();
-    showSymbianToast("DA KHOI PHUC CAI DAT GOC (MEO CHIBI)", 3500);
-
-    // 10. Dat lai con tro cai dat ve dong 1 va ve lai man hinh
-    s40SettingsCursor = 0;
-    lastDrawnSettingsCursor = -1;
-    lastDrawnSettingsFirstRow = -1;
-    if (currentMode == 6) {
-      drawSettingsAppScreen(true);
-    } else {
-      refreshActiveScreen();
-    }
-    Serial.println("[FactoryReset] === HOAN TAT KHOI PHUC CAI DAT BAN DAU ===");
+    ensureSettingsBridge();
+    SpaceOS_Settings::performFactoryReset();
   }
 
   // ============================================================================
@@ -7143,20 +6838,8 @@ namespace TestDisplay {
         refreshActiveScreen();
       }
     } else if (currentMode == 6) {
-      if (keyIndex == 1) {
-        s40SettingsCursor = (s40SettingsCursor + S40_SETTINGS_COUNT - 1) % S40_SETTINGS_COUNT;
-        drawSettingsAppScreen(false);
-      } else if (keyIndex == 2) {
-        s40SettingsCursor = (s40SettingsCursor + 1) % S40_SETTINGS_COUNT;
-        drawSettingsAppScreen(false);
-      } else if (keyIndex == 3) {
-        adjustSettingsAppItem(s40SettingsCursor, -1);
-      } else if (keyIndex == 4 || keyIndex == 0) {
-        adjustSettingsAppItem(s40SettingsCursor, 1);
-      } else if (keyIndex == 6) {
-        currentMode = 4;
-        refreshActiveScreen();
-      }
+      ensureSettingsBridge();
+      SpaceOS_Settings::handleKey(keyIndex, tft);
     } else if (currentMode == 7) {
       if (keyIndex == 1 || keyIndex == 3) {
         s40GalleryIndex--;
