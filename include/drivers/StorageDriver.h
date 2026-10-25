@@ -56,6 +56,10 @@ namespace StorageDriver {
   // Ngắt kết nối an toàn giải phóng tài nguyên SPI
   void unmountSafe();
 
+  // Khóa / Mở khóa Mutex bảo vệ truy cập đồng thời vào thẻ SD giữa các Core FreeRTOS
+  bool lock(TickType_t timeout = portMAX_DELAY);
+  void unlock();
+
   // Khởi tạo & Kiểm tra Shield Thẻ nhớ Micro SD (Wemos D1 Mini Shield: D5/SCK=42, D6/MISO=41, D7/MOSI=40, D8/CS=39)
   bool init();
 

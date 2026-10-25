@@ -67,6 +67,7 @@ public:
   static void flush();
 
 private:
+  friend void sdLoggerTask(void* param);
   static void flushBufferToSd();
   static void checkLogRotation();
   static void ensureLogDirExists();

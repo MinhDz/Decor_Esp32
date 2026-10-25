@@ -41,6 +41,20 @@ static bool     s_needsImmediateFlush = false;
 static unsigned long s_lastFlushMs = 0;
 static unsigned long s_lastSnapshotMs = 0;
 static LogStats s_stats = {0, 0, 0, 0, 0, 0, 0, 0, 0, false, ""};
+static TaskHandle_t s_sdLoggerTaskHandle = nullptr;
+
+void sdLoggerTask(void* param) {
+  while (true) {
+    // Chờ thông báo đánh thức (hoặc định kỳ 500ms)
+    ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(500));
+    unsigned long now = millis();
+    if (s_pendingSdBytes >= 1024 || (now - s_lastFlushMs >= LOG_FLUSH_INTERVAL_MS) || s_needsImmediateFlush) {
+      s_lastFlushMs = now;
+      s_needsImmediateFlush = false;
+      SystemLogger::flushBufferToSd();
+    }
+  }
+}
 
 // Bảng tên cấp độ log chuẩn Smartphone
 static const char* LEVEL_NAMES[] = { "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
@@ -72,6 +86,22 @@ void SystemLogger::init() {
   s_logSeqId = 0;
   s_lastFlushMs = millis();
   s_lastSnapshotMs = millis();
+
+  // Khởi chạy FreeRTOS Task trên Core 0 để xả log xuống thẻ SD độc lập (Zero UI Lag)
+  if (!s_sdLoggerTaskHandle) {
+    BaseType_t res = xTaskCreatePinnedToCore(
+      sdLoggerTask,
+      "SdLoggerTask",
+      4096,
+      nullptr,
+      1,
+      &s_sdLoggerTaskHandle,
+      0
+    );
+    if (res == pdPASS) {
+      log(LOG_LVL_INFO, "SYS", "Core 0 FreeRTOS SdLoggerTask da khoi tao thanh cong.");
+    }
+  }
 
   // Dòng nhật ký khởi động đầu tiên
   log(LOG_LVL_INFO, "SYS", "=======================================================");
@@ -175,6 +205,9 @@ void SystemLogger::logRaw(LogLevel level, const char* tag, const char* message) 
   // Nếu là lỗi nghiêm trọng, kích hoạt xả ngay xuống thẻ nhớ
   if (level >= LOG_LVL_ERROR) {
     s_needsImmediateFlush = true;
+    if (s_sdLoggerTaskHandle) {
+      xTaskNotifyGive(s_sdLoggerTaskHandle);
+    }
   }
 }
 
@@ -188,7 +221,7 @@ void SystemLogger::loop() {
   }
 
   // 2. Xả bộ đệm xuống thẻ SD nếu có dữ liệu chờ
-  if (s_pendingSdBytes >= 1024 || (now - s_lastFlushMs >= LOG_FLUSH_INTERVAL_MS) || s_needsImmediateFlush) {
+  if (!s_sdLoggerTaskHandle && (s_pendingSdBytes >= 1024 || (now - s_lastFlushMs >= LOG_FLUSH_INTERVAL_MS) || s_needsImmediateFlush)) {
     s_lastFlushMs = now;
     s_needsImmediateFlush = false;
     flushBufferToSd();
@@ -252,6 +285,8 @@ void SystemLogger::flushBufferToSd() {
     return;
   }
 
+  if (!TestSDCard::lock(pdMS_TO_TICKS(100))) return;
+
   ensureLogDirExists();
   checkLogRotation();
 
@@ -260,6 +295,7 @@ void SystemLogger::flushBufferToSd() {
   if (!f) {
     s_stats.sdLoggingActive = false;
     TestSDCard::notifyIoError(false, "SystemLogger SD.open failed");
+    TestSDCard::unlock();
     return;
   }
 
@@ -295,6 +331,7 @@ void SystemLogger::flushBufferToSd() {
     }
   }
   f.close();
+  TestSDCard::unlock();
 }
 
 void SystemLogger::flush() {
@@ -387,17 +424,21 @@ LogStats SystemLogger::getStats() {
 String SystemLogger::getRecentLogsText(size_t maxLines, LogLevel minLevel) {
   if (!s_ringBuffer || s_bufferCapacity == 0 || s_historyCount == 0) {
     if (TestSDCard::isMounted()) {
-      String p = resolveActiveLogFilePath();
-      if (SD.exists(p)) {
-        File f = SD.open(p, FILE_READ);
-        if (f) {
-          size_t sz = f.size();
-          size_t rd = (sz > 8192) ? 8192 : sz;
-          if (sz > rd) f.seek(sz - rd);
-          String content = f.readString();
-          f.close();
-          return content;
+      if (TestSDCard::lock(pdMS_TO_TICKS(100))) {
+        String p = resolveActiveLogFilePath();
+        if (SD.exists(p)) {
+          File f = SD.open(p, FILE_READ);
+          if (f) {
+            size_t sz = f.size();
+            size_t rd = (sz > 8192) ? 8192 : sz;
+            if (sz > rd) f.seek(sz - rd);
+            String content = f.readString();
+            f.close();
+            TestSDCard::unlock();
+            return content;
+          }
         }
+        TestSDCard::unlock();
       }
     }
     return "Chua co log.";
@@ -491,32 +532,35 @@ void SystemLogger::getLogsJson(JsonDocument& doc, size_t maxLines, LogLevel minL
     portEXIT_CRITICAL(&s_logMux);
   } else if (TestSDCard::isMounted()) {
     // 2. Dự phòng: nếu bộ đệm PSRAM chưa có log, đọc phần đuôi từ thẻ SD
-    String logPath = resolveActiveLogFilePath();
-    if (SD.exists(logPath)) {
-      File f = SD.open(logPath, FILE_READ);
-      if (f) {
-        size_t sz = f.size();
-        size_t readSz = (sz > 8192) ? 8192 : sz;
-        if (sz > readSz) f.seek(sz - readSz);
+    if (TestSDCard::lock(pdMS_TO_TICKS(100))) {
+      String logPath = resolveActiveLogFilePath();
+      if (SD.exists(logPath)) {
+        File f = SD.open(logPath, FILE_READ);
+        if (f) {
+          size_t sz = f.size();
+          size_t readSz = (sz > 8192) ? 8192 : sz;
+          if (sz > readSz) f.seek(sz - readSz);
 
-        while (f.available() && arr.size() < maxLines) {
-          String l = f.readStringUntil('\n');
-          l.trim();
-          if (l.length() > 0) {
-            bool keep = true;
-            if (minLevel > LOG_LVL_DEBUG) {
-              if (minLevel == LOG_LVL_INFO && l.indexOf(" [D] ") >= 0) keep = false;
-              else if (minLevel == LOG_LVL_WARN && (l.indexOf(" [D] ") >= 0 || l.indexOf(" [I] ") >= 0)) keep = false;
-              else if (minLevel >= LOG_LVL_ERROR && l.indexOf(" [E] ") < 0 && l.indexOf(" [F] ") < 0) keep = false;
-            }
-            if (keep) {
-              JsonObject item = arr.add<JsonObject>();
-              item["line"] = l;
+          while (f.available() && arr.size() < maxLines) {
+            String l = f.readStringUntil('\n');
+            l.trim();
+            if (l.length() > 0) {
+              bool keep = true;
+              if (minLevel > LOG_LVL_DEBUG) {
+                if (minLevel == LOG_LVL_INFO && l.indexOf(" [D] ") >= 0) keep = false;
+                else if (minLevel == LOG_LVL_WARN && (l.indexOf(" [D] ") >= 0 || l.indexOf(" [I] ") >= 0)) keep = false;
+                else if (minLevel >= LOG_LVL_ERROR && l.indexOf(" [E] ") < 0 && l.indexOf(" [F] ") < 0) keep = false;
+              }
+              if (keep) {
+                JsonObject item = arr.add<JsonObject>();
+                item["line"] = l;
+              }
             }
           }
+          f.close();
         }
-        f.close();
       }
+      TestSDCard::unlock();
     }
   }
 

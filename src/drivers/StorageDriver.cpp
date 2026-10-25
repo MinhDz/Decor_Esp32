@@ -28,6 +28,20 @@ namespace StorageDriver {
   };
   static unsigned long s_circuitBreakerBackoffMs = 5000;
   static const unsigned long MAX_BACKOFF_MS = 60000;
+  static SemaphoreHandle_t s_sdMutex = nullptr;
+
+  bool lock(TickType_t timeout) {
+    if (!s_sdMutex) {
+      s_sdMutex = xSemaphoreCreateMutex();
+    }
+    return xSemaphoreTake(s_sdMutex, timeout) == pdTRUE;
+  }
+
+  void unlock() {
+    if (s_sdMutex) {
+      xSemaphoreGive(s_sdMutex);
+    }
+  }
 
   // Bảng thông số điện học trực tiếp của 4 chân Shield SD
   static SdPinDiag pinDiags[4] = {
@@ -558,6 +572,7 @@ namespace StorageDriver {
 
   static bool sdInitialized = false;
   bool init() {
+    if (!s_sdMutex) s_sdMutex = xSemaphoreCreateMutex();
     if (sdInitialized) return sdMounted;
     sdInitialized = true;
     runFullElectricalAndSpiProbe();
