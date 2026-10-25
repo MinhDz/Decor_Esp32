@@ -152,6 +152,9 @@ class StreamSession:
         self.video_frames_sent = 0
         self.audio_chunks_sent = 0
         self.audio_bytes_sent = 0
+        self.audio_pts = 0.0
+        self.video_frames_decoded = 0
+        self.video_frames_dropped = 0
         self.start_time = 0
         self.last_frame_jpeg = None
         self.current_live_fps = 0.0
@@ -174,69 +177,61 @@ class StreamSession:
                 "duration": 0
             }
 
-        # 2. Sử dụng yt-dlp để trích xuất URL stream thực tế (tách biệt hoàn toàn metadata và media streams)
+        # 2. Sử dụng yt-dlp để trích xuất đồng thời Metadata và Direct Stream URLs trong 1 lượt gọi
         title = "Video Stream"
         thumbnail = ""
         duration = 0
 
-        # Bước 2A: Trích xuất Metadata (Tiêu đề, Thumbnail, Thời lượng)
-        cmd_meta = [
-            YT_DLP_EXE,
-            "--no-playlist",
-            "--no-check-certificates",
-            "--print", "%(title)s",
-            "--print", "%(thumbnail)s",
-            "--print", "%(duration)s",
-            url
-        ]
-        if NODE_EXE:
-            cmd_meta[1:1] = ["--js-runtimes", f"node:{NODE_EXE}"]
-
-        try:
-            res_meta = subprocess.run(cmd_meta, capture_output=True, text=True, timeout=20)
-            if res_meta.returncode == 0:
-                meta_lines = [l.strip() for l in res_meta.stdout.splitlines() if l.strip()]
-                if len(meta_lines) >= 1:
-                    title = meta_lines[0]
-                if len(meta_lines) >= 2 and meta_lines[1].startswith("http"):
-                    thumbnail = meta_lines[1]
-                if len(meta_lines) >= 3 and meta_lines[2].isdigit():
-                    duration = int(meta_lines[2])
-        except Exception as e:
-            logger.warning(f"Lỗi đọc metadata yt-dlp: {e}")
-
-        # Bước 2B: Trích xuất Direct Media Stream URLs (-g độc lập, chỉ lấy video & audio streams thật)
         cmd_stream = [
             YT_DLP_EXE,
             "--no-playlist",
             "--no-check-certificates",
             "-f", "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
+            "--print", "%(title)s",
+            "--print", "%(thumbnail)s",
+            "--print", "%(duration)s",
             "-g",
             url
         ]
         if NODE_EXE:
             cmd_stream[1:1] = ["--js-runtimes", f"node:{NODE_EXE}"]
 
-        logger.info(f"Đang trích xuất direct media stream qua yt-dlp: {url}")
+        logger.info(f"Đang phân tích & trích xuất direct media stream qua yt-dlp: {url}")
         res_stream = subprocess.run(cmd_stream, capture_output=True, text=True, timeout=25)
         if res_stream.returncode != 0:
             # Fallback nếu video không có DASH phân tách
-            cmd_fallback = [YT_DLP_EXE, "--no-playlist", "-f", "best", "-g", url]
+            cmd_fallback = [YT_DLP_EXE, "--no-playlist", "-f", "best", "--print", "%(title)s", "-g", url]
             res_stream = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=20)
             if res_stream.returncode != 0:
                 raise RuntimeError(f"yt-dlp không thể trích xuất stream: {res_stream.stderr[:200]}")
 
-        raw_urls = [l.strip() for l in res_stream.stdout.splitlines() if l.strip().startswith("http")]
-        if not raw_urls:
-            raise RuntimeError("yt-dlp không tìm thấy direct media stream nào")
+        lines = [l.strip() for l in res_stream.stdout.splitlines() if l.strip()]
+        http_urls = [l for l in lines if l.startswith("http")]
+        non_http = [l for l in lines if not l.startswith("http")]
 
-        # [0] là Video Stream, [1] là Audio Stream (đặc trưng YouTube DASH)
-        if len(raw_urls) >= 2:
-            v_url = raw_urls[0]
-            a_url = raw_urls[1]
+        if len(non_http) >= 1:
+            title = non_http[0]
+        if len(non_http) >= 2 and non_http[1].isdigit():
+            duration = int(non_http[1])
+
+        media_urls = []
+        for u in http_urls:
+            if any(ext in u.lower() for ext in [".jpg", ".jpeg", ".webp", ".png"]):
+                thumbnail = u
+            else:
+                media_urls.append(u)
+
+        if not media_urls:
+            media_urls = http_urls
+
+        if len(media_urls) >= 2:
+            v_url = media_urls[0]
+            a_url = media_urls[1]
+        elif len(media_urls) >= 1:
+            v_url = media_urls[0]
+            a_url = media_urls[0]
         else:
-            v_url = raw_urls[0]
-            a_url = raw_urls[0]
+            raise RuntimeError("yt-dlp không tìm thấy direct media stream nào")
 
         logger.info(f"Đã trích xuất thành công: Video URL ({len(v_url)} ký tự), Audio URL ({len(a_url)} ký tự)")
         return {
@@ -313,6 +308,9 @@ class StreamSession:
             self.video_frames_sent = 0
             self.audio_chunks_sent = 0
             self.audio_bytes_sent = 0
+            self.audio_pts = 0.0
+            self.video_frames_decoded = 0
+            self.video_frames_dropped = 0
             self.start_time = time.time()
 
             # 5. Kích hoạt chế độ Stream trên ESP32
@@ -356,8 +354,8 @@ class StreamSession:
             pass
 
         # Kích thước chunk: 512 mẫu 16-bit = 1024 bytes (~32ms âm thanh @ 16kHz)
-        # Nằm gọn trong 1 frame MTU Ethernet (1500 bytes) -> Không bao giờ bị phân mảnh mạng (Zero Fragmentation)
         CHUNK_BYTES = 1024
+        start_time = self.start_time
 
         logger.info(f"Khởi chạy luồng Audio Worker UDP (PCM 16kHz Mono -> {self.esp_ip}:{udp_port})...")
         while self.is_running:
@@ -380,10 +378,19 @@ class StreamSession:
                         samples[i] = int(samples[i] * vol_scale)
                     raw_chunk = samples.tobytes()
 
-                # Bắn trực tiếp qua UDP Port 12345 (latency < 0.2ms, không HTTP header, không TCP lag)
+                # Bắn trực tiếp qua UDP Port 12345 (latency < 0.2ms)
                 udp_sock.sendto(raw_chunk, (self.esp_ip, udp_port))
                 self.audio_chunks_sent += 1
                 self.audio_bytes_sent += len(raw_chunk)
+
+                # Cập nhật Audio PTS (Master Clock - Thời điểm âm thanh thực tế phát trên loa)
+                self.audio_pts = self.audio_bytes_sent / 32000.0
+
+                # Giữ nhịp âm thanh khớp chuẩn xác thời gian thực (32ms/chunk)
+                now = time.time()
+                elapsed = now - start_time
+                if self.audio_pts > elapsed:
+                    time.sleep(self.audio_pts - elapsed)
 
             except Exception as e:
                 logger.error(f"Lỗi trong Audio Worker UDP: {e}")
@@ -396,18 +403,34 @@ class StreamSession:
         logger.info("Kết thúc luồng Audio Worker UDP")
 
     def _video_worker(self):
-        """Bóc tách từng frame JPEG từ FFmpeg pipe và đẩy lên màn hình ST7789 của ESP32"""
+        """Bóc tách từng frame JPEG từ FFmpeg pipe và đẩy lên màn hình ST7789 của ESP32 với Audio Master-Clock Sync"""
         import requests
+        import struct
+        import socket
+
         session = requests.Session()
         target_url = f"http://{self.esp_ip}/api/stream/video_frame"
 
+        # Thử mở kết nối TCP Video tốc độ cao tới ESP32 (Port 12346)
+        tcp_video_sock = None
+        try:
+            tcp_video_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            tcp_video_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            tcp_video_sock.settimeout(2.0)
+            tcp_video_sock.connect((self.esp_ip, 12346))
+            logger.info(f"⚡ Đã kết nối luồng Video TCP tốc độ cao (Port 12346): {self.esp_ip}")
+        except Exception as e:
+            logger.warning(f"Chưa kết nối được TCP 12346 ({e}), dùng HTTP POST fallback.")
+            tcp_video_sock = None
+
         raw_stream = bytearray()
-        target_interval = 1.0 / self.fps
-        last_frame_time = time.time()
+        frame_idx = 0
+        target_fps = float(self.fps)
+        start_time = self.start_time
         fps_frame_count = 0
         fps_timer = time.time()
 
-        logger.info(f"Khởi chạy luồng Video Worker (MJPEG {self.resolution} @ {self.fps} FPS)...")
+        logger.info(f"Khởi chạy luồng Video Worker (MJPEG {self.resolution} @ {self.fps} FPS, Master-Clock Synced)...")
 
         while self.is_running:
             if self.is_paused:
@@ -435,29 +458,57 @@ class StreamSession:
                     frame_bytes = bytes(raw_stream[soi : eoi + 2])
                     del raw_stream[: eoi + 2]
 
+                    video_pts = frame_idx / target_fps
+                    frame_idx += 1
+
                     with self.frame_cond:
                         self.last_frame_jpeg = frame_bytes
                         self.frame_cond.notify_all()
 
-                    # Nhịp gửi thích ứng để giữ FPS mượt mà
+                    # ---------------- ACTIVE AUDIO-MASTER CLOCK SYNC ----------------
                     now = time.time()
-                    elapsed = now - last_frame_time
-                    if elapsed < target_interval:
-                        time.sleep(target_interval - elapsed)
+                    master_clock = self.audio_pts if self.audio_pts > 0 else (now - start_time)
+                    drift = video_pts - master_clock
 
-                    # Gửi frame JPEG lên ESP32
-                    files = {'f': ('frame.jpg', frame_bytes, 'image/jpeg')}
-                    try:
-                        resp = session.post(target_url, files=files, timeout=1.5)
-                        if resp.status_code == 200:
-                            self.video_frames_sent += 1
-                            fps_frame_count += 1
-                    except requests.RequestException:
-                        pass
+                    # Trường hợp 1: Video bị trễ hơn âm thanh > 50ms (Frame cũ)
+                    # Bỏ qua ngay lập tức trong 0.01ms để vòng lặp đọc nhanh đuổi kịp âm thanh!
+                    if drift < -0.05:
+                        self.video_frames_dropped += 1
+                        continue
 
-                    last_frame_time = time.time()
+                    # Trường hợp 2: Video chạy nhanh hơn âm thanh > 20ms -> Chờ nhịp âm thanh
+                    if drift > 0.02:
+                        time.sleep(drift)
 
-                    # Tính toán FPS thực tế
+                    # Trường hợp 3: Khớp nhịp chuẩn -> Gửi frame xuống ESP32
+                    sent_ok = False
+                    if tcp_video_sock:
+                        try:
+                            payload = struct.pack("!I", len(frame_bytes)) + frame_bytes
+                            tcp_video_sock.sendall(payload)
+                            sent_ok = True
+                        except Exception as err:
+                            logger.warning(f"Lỗi socket TCP Video ({err}), chuyển sang HTTP POST")
+                            try:
+                                tcp_video_sock.close()
+                            except Exception:
+                                pass
+                            tcp_video_sock = None
+
+                    if not sent_ok:
+                        try:
+                            files = {'f': ('frame.jpg', frame_bytes, 'image/jpeg')}
+                            resp = session.post(target_url, files=files, timeout=1.0)
+                            if resp.status_code == 200:
+                                sent_ok = True
+                        except Exception:
+                            pass
+
+                    if sent_ok:
+                        self.video_frames_sent += 1
+                        fps_frame_count += 1
+
+                    # Tính toán FPS thực tế hiển thị
                     if time.time() - fps_timer >= 1.0:
                         self.current_live_fps = round(fps_frame_count / (time.time() - fps_timer), 1)
                         fps_frame_count = 0
@@ -466,6 +517,12 @@ class StreamSession:
             except Exception as e:
                 logger.error(f"Lỗi trong Video Worker: {e}")
                 break
+
+        if tcp_video_sock:
+            try:
+                tcp_video_sock.close()
+            except Exception:
+                pass
 
         logger.info("Kết thúc luồng Video Worker")
         if self.is_running:
@@ -507,7 +564,8 @@ class StreamSession:
         # Báo cho ESP32 dừng stream
         try:
             import requests
-            requests.post(f"http://{self.esp_ip}/api/stream/stop", timeout=1.0)
+            target = self.esp_ip if (self.esp_ip and self.esp_ip != "127.0.0.1") else "192.168.1.233"
+            requests.post(f"http://{target}/api/stream/stop", timeout=1.0)
         except Exception:
             pass
 
@@ -532,6 +590,9 @@ class StreamSession:
             "resolution": self.resolution,
             "volume": self.volume,
             "frames_sent": self.video_frames_sent,
+            "video_dropped": self.video_frames_dropped,
+            "audio_pts": round(self.audio_pts, 2),
+            "video_pts": round(self.video_frames_sent / float(self.fps), 2) if self.fps > 0 else 0,
             "audio_kb_sent": round(self.audio_bytes_sent / 1024, 1),
             "elapsed_str": f"{mins:02d}:{secs:02d}",
             "has_preview": self.last_frame_jpeg is not None
@@ -755,7 +816,13 @@ HTML_DASHBOARD = """
     }
 
     async function stopStream() {
-      await fetch('/api/stop', { method: 'POST' });
+      try {
+        await fetch('/api/stop', { method: 'POST' });
+      } catch(e) {}
+      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.233';
+      try {
+        await fetch('http://' + esp_ip + '/api/stream/stop', { method: 'POST', mode: 'no-cors' });
+      } catch(e) {}
     }
 
     async function changeVolume(val) {
@@ -962,25 +1029,30 @@ HTML_DASHBOARD = """
 </html>
 """
 
+def _make_cors_headers():
+    origin = request.headers.get("Origin") or "*"
+    req_hdrs = request.headers.get("Access-Control-Request-Headers", "Content-Type, Authorization, *")
+    return {
+        "Access-Control-Allow-Origin": origin,
+        "Access-Control-Allow-Methods": "GET, POST, OPTIONS, PUT, DELETE",
+        "Access-Control-Allow-Headers": req_hdrs,
+        "Access-Control-Allow-Private-Network": "true",
+        "Access-Control-Allow-Credentials": "true",
+        "Access-Control-Max-Age": "86400"
+    }
+
 @app.after_request
 def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    for k, v in _make_cors_headers().items():
+        response.headers[k] = v
     return response
 
-@app.route("/api/start", methods=["OPTIONS"])
-@app.route("/api/stop", methods=["OPTIONS"])
-@app.route("/api/pause", methods=["OPTIONS"])
-@app.route("/api/volume", methods=["OPTIONS"])
-@app.route("/api/status", methods=["OPTIONS"])
-def api_options():
+@app.route("/<path:dummy>", methods=["OPTIONS"])
+@app.route("/", methods=["OPTIONS"])
+def api_options(dummy=""):
     resp = Response("", status=204)
-    resp.headers["Access-Control-Allow-Origin"] = "*"
-    resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    resp.headers["Access-Control-Allow-Private-Network"] = "true"
+    for k, v in _make_cors_headers().items():
+        resp.headers[k] = v
     return resp
 
 @app.route("/")
@@ -1020,23 +1092,10 @@ def api_stream_mjpg():
                 break
     return Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
 
-@app.after_request
-def add_cors_headers(response):
-    response.headers["Access-Control-Allow-Origin"] = "*"
-    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-    response.headers["Access-Control-Allow-Private-Network"] = "true"
-    return response
-
 @app.route("/api/start", methods=["POST", "OPTIONS"])
 def api_start():
     if request.method == "OPTIONS":
-        resp = Response("", 204)
-        resp.headers["Access-Control-Allow-Origin"] = "*"
-        resp.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
-        resp.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization"
-        resp.headers["Access-Control-Allow-Private-Network"] = "true"
-        return resp
+        return "", 204
     data = request.get_json() or {}
     url = data.get("url", "").strip()
     esp_ip = data.get("esp_ip", "192.168.4.1").strip()

@@ -11,6 +11,8 @@
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <SD.h>
+#include <WiFi.h>
+#include <HTTPClient.h>
 
 namespace ApiMedia {
 
@@ -557,6 +559,78 @@ namespace ApiMedia {
     server.send(200, "application/json", out);
   }
 
+  void handleStreamProxyStart(WebServer& server) {
+    if (!server.hasArg("plain")) {
+      server.send(400, "application/json", "{\"error\":\"Missing body\"}");
+      return;
+    }
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (err) {
+      server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+      return;
+    }
+    String url = doc["url"] | "";
+    String pcHost = doc["host"] | "";
+    if (pcHost.length() == 0 || pcHost == "localhost" || pcHost == "127.0.0.1") {
+      pcHost = server.client().remoteIP().toString();
+    }
+    int fps = doc["fps"] | 15;
+    String resolution = doc["resolution"] | "240x240";
+    int volume = doc["volume"] | 100;
+
+    Serial.printf("⚡ [PROXY START] Chuyển tiếp yêu cầu stream tới PC Transcoder: %s:5050 (url: %s)\n",
+                  pcHost.c_str(), url.c_str());
+
+    HTTPClient http;
+    String targetUrl = "http://" + pcHost + ":5050/api/start";
+    http.begin(targetUrl);
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(18000);
+
+    JsonDocument postDoc;
+    postDoc["url"] = url;
+    postDoc["esp_ip"] = (WiFi.status() == WL_CONNECTED) ? WiFi.localIP().toString() : "192.168.4.1";
+    postDoc["fps"] = fps;
+    postDoc["resolution"] = resolution;
+    postDoc["volume"] = volume;
+    String body;
+    serializeJson(postDoc, body);
+
+    int code = http.POST(body);
+    if (code == 200) {
+      String resp = http.getString();
+      http.end();
+      server.send(200, "application/json", resp);
+    } else {
+      http.end();
+      Serial.printf("❌ [PROXY START] Kết nối PC Transcoder thất bại: mã %d\n", code);
+      server.send(code > 0 ? code : 500, "application/json",
+                  "{\"status\":\"error\",\"error\":\"Khong the ket noi toi PC Transcoder (" + targetUrl + ")\"}");
+    }
+  }
+
+  void handleStreamProxyStop(WebServer& server) {
+    String pcHost = "";
+    if (server.hasArg("plain")) {
+      JsonDocument doc;
+      deserializeJson(doc, server.arg("plain"));
+      pcHost = doc["host"] | "";
+    }
+    if (pcHost.length() == 0 || pcHost == "localhost" || pcHost == "127.0.0.1") {
+      pcHost = server.client().remoteIP().toString();
+    }
+    HTTPClient http;
+    String targetUrl = "http://" + pcHost + ":5050/api/stop";
+    http.begin(targetUrl);
+    http.setTimeout(3000);
+    http.POST("");
+    http.end();
+
+    WebStreamManager::stopAll();
+    server.send(200, "application/json", "{\"status\":\"ok\"}");
+  }
+
   // ================================================================
   //                    ĐĂNG KÝ ROUTE TỔNG HỢP
   // ================================================================
@@ -585,6 +659,8 @@ namespace ApiMedia {
     server.on("/api/stream/start_url", HTTP_POST, [&server]() { handleStreamStartUrl(server); });
     server.on("/api/stream/stop", HTTP_POST, [&server]() { handleStreamStop(server); });
     server.on("/api/stream/status", HTTP_GET, [&server]() { handleStreamStatus(server); });
+    server.on("/api/stream/proxy_start", HTTP_POST, [&server]() { handleStreamProxyStart(server); });
+    server.on("/api/stream/proxy_stop", HTTP_POST, [&server]() { handleStreamProxyStop(server); });
   }
 
 } // namespace ApiMedia

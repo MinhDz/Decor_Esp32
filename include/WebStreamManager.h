@@ -16,6 +16,7 @@ public:
   // 2. Nhận & Nạp Âm Thanh PCM 16-bit Mono (16,000 Hz) vào Ring Buffer PSRAM (Core 0 phát I2S - Không bao giờ drop)
   static void playAudioPcmChunk(const int16_t* pcmSamples, size_t sampleCount);
   static void startAudioUdpListener();
+  static void startVideoTcpListener();
 
   // 3. Khởi chạy / Dừng Stream từ URL Mạng Trực Tiếp (MP3 Web Radio hoặc MJPEG Camera)
   static bool startUrlStream(const String& type, const String& url);

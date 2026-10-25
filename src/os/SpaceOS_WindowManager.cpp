@@ -5165,7 +5165,7 @@ namespace TestDisplay {
           if (f) {
             size_t sz = f.size();
             if (sz > 0 && sz <= 65536) {
-              uint8_t* jBuf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
+              uint8_t* jBuf = (sz <= 32768) ? (uint8_t*)malloc(sz) : nullptr;
               if (jBuf && f.read(jBuf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, jBuf, sz) == JDR_OK && jw > 0 && jh > 0) {
                 uint8_t scale = 1;
                 if (jw >= 256 || jh >= 256) scale = 4;
@@ -5990,7 +5990,6 @@ namespace TestDisplay {
     lastStreamFrameMs = 0;
     if (currentMode == 17) {
       currentMode = 0;
-      tft->fillRect(0, 0, 240, 320, C_BLACK);
       refreshActiveScreen();
     }
   }

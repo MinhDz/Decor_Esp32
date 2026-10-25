@@ -195,7 +195,7 @@ namespace KeypadDriver {
       BaseType_t res = xTaskCreatePinnedToCore(
         keypadTask,
         "KeypadTask",
-        2560,
+        4096,
         NULL,
         3,
         &s_keypadTaskHandle,

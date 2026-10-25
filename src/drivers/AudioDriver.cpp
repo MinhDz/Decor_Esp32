@@ -933,177 +933,11 @@ namespace AudioDriver {
     return true;
   }
 
-    // --- BỘ ĐỆM ĐÔI DOUBLE-BUFFERING CHO TRÌNH PHÁT NHẠC (MP3/WAV TỪ THẺ SD TRÊN CORE 0) ---
-  static int16_t* s_mediaPcmRingBuf = nullptr;
-  static const size_t MEDIA_RING_MAX_SAMPLES = 65536; // 65,536 cặp mẫu stereo = 131,072 mẫu int16_t = 256KB PSRAM
-  static size_t s_mediaRingCapacity = MEDIA_RING_MAX_SAMPLES;
-  static size_t s_mediaRingHead = 0; // Vị trí đọc của Consumer (mediaPumpTask)
-  static size_t s_mediaRingTail = 0; // Vị trí ghi của Producer (audioPwmTask)
-  static size_t s_mediaRingCount = 0; // Số cặp mẫu stereo hiện có trong hàng đợi
-  static portMUX_TYPE s_mediaRingMux = portMUX_INITIALIZER_UNLOCKED;
-  static TaskHandle_t s_mediaPumpTaskHandle = nullptr;
-  static volatile bool s_mediaPumpRunning = false;
-  static volatile bool s_mediaEof = false;
-  static volatile uint32_t s_mediaSampleRate = 44100;
-
+    // --- TÁC VỤ PHÁT NHẠC ĐƠN TUYẾN TRỰC TIẾP I2S DMA (FREERTOS TASK TRÊN CORE 0) ---
   static TaskHandle_t audioTaskHandle = NULL;
   static volatile uint32_t audioPlayCurSample = 0;
   static String asyncSdFilePath = "";
 
-  static bool ensureMediaRingBufAllocated() {
-    if (s_mediaPcmRingBuf) return true;
-    if (psramFound()) {
-      s_mediaPcmRingBuf = (int16_t*)ps_malloc(MEDIA_RING_MAX_SAMPLES * 2 * sizeof(int16_t));
-      if (s_mediaPcmRingBuf) {
-        s_mediaRingCapacity = MEDIA_RING_MAX_SAMPLES;
-      }
-    }
-    if (!s_mediaPcmRingBuf) {
-      // Dự phòng SRAM khi không có PSRAM: 8,192 cặp stereo = 32KB
-      s_mediaRingCapacity = 8192;
-      s_mediaPcmRingBuf = (int16_t*)malloc(s_mediaRingCapacity * 2 * sizeof(int16_t));
-    }
-    s_mediaRingHead = 0;
-    s_mediaRingTail = 0;
-    s_mediaRingCount = 0;
-    return (s_mediaPcmRingBuf != nullptr);
-  }
-
-  static size_t pushMediaRingChunk(const int16_t* stereoSamples, size_t stereoPairs) {
-    if (!s_mediaPcmRingBuf || stereoPairs == 0) return 0;
-
-    taskENTER_CRITICAL(&s_mediaRingMux);
-    size_t freeSpace = (s_mediaRingCapacity > s_mediaRingCount) ? (s_mediaRingCapacity - s_mediaRingCount) : 0;
-    if (stereoPairs > freeSpace) {
-      stereoPairs = freeSpace;
-    }
-    if (stereoPairs == 0) {
-      taskEXIT_CRITICAL(&s_mediaRingMux);
-      return 0;
-    }
-    size_t tail = s_mediaRingTail;
-    taskEXIT_CRITICAL(&s_mediaRingMux);
-
-    if (tail + stereoPairs <= s_mediaRingCapacity) {
-      memcpy(&s_mediaPcmRingBuf[tail * 2], stereoSamples, stereoPairs * 2 * sizeof(int16_t));
-    } else {
-      size_t firstPart = s_mediaRingCapacity - tail;
-      memcpy(&s_mediaPcmRingBuf[tail * 2], stereoSamples, firstPart * 2 * sizeof(int16_t));
-      memcpy(&s_mediaPcmRingBuf[0], stereoSamples + firstPart * 2, (stereoPairs - firstPart) * 2 * sizeof(int16_t));
-    }
-
-    taskENTER_CRITICAL(&s_mediaRingMux);
-    s_mediaRingTail = (tail + stereoPairs) % s_mediaRingCapacity;
-    s_mediaRingCount += stereoPairs;
-    taskEXIT_CRITICAL(&s_mediaRingMux);
-
-    return stereoPairs;
-  }
-
-  static size_t popMediaRingChunk(int16_t* outStereoSamples, size_t maxStereoPairs) {
-    if (!s_mediaPcmRingBuf || maxStereoPairs == 0) return 0;
-
-    taskENTER_CRITICAL(&s_mediaRingMux);
-    size_t avail = s_mediaRingCount;
-    if (avail == 0) {
-      taskEXIT_CRITICAL(&s_mediaRingMux);
-      return 0;
-    }
-    size_t toRead = (avail > maxStereoPairs) ? maxStereoPairs : avail;
-    size_t head = s_mediaRingHead;
-    taskEXIT_CRITICAL(&s_mediaRingMux);
-
-    if (head + toRead <= s_mediaRingCapacity) {
-      memcpy(outStereoSamples, &s_mediaPcmRingBuf[head * 2], toRead * 2 * sizeof(int16_t));
-    } else {
-      size_t firstPart = s_mediaRingCapacity - head;
-      memcpy(outStereoSamples, &s_mediaPcmRingBuf[head * 2], firstPart * 2 * sizeof(int16_t));
-      memcpy(outStereoSamples + firstPart * 2, &s_mediaPcmRingBuf[0], (toRead - firstPart) * 2 * sizeof(int16_t));
-    }
-
-    taskENTER_CRITICAL(&s_mediaRingMux);
-    s_mediaRingHead = (head + toRead) % s_mediaRingCapacity;
-    s_mediaRingCount -= toRead;
-    taskEXIT_CRITICAL(&s_mediaRingMux);
-
-    return toRead;
-  }
-
-  // --- TÁC VỤ TIÊU THỤ: BƠM PCM TỪ RINGBUFFER RA I2S DMA (PRIORITY 4 TRÊN CORE 0) ---
-  static void mediaPumpTask(void* param) {
-    s_mediaPumpRunning = true;
-    const size_t CHUNK = 256;
-    int16_t stereoChunk[CHUNK * 2];
-    uint32_t currentSampleRate = 0;
-
-    // 1. Giai đoạn Pre-buffering (~12,000 mẫu ~0.27s @ 44.1kHz hoặc đến khi EOF)
-    size_t prebufferTarget = min((size_t)12000, s_mediaRingCapacity / 4);
-    unsigned long waitStart = millis();
-    while (audioPlayRunning && !s_mediaEof && s_mediaRingCount < prebufferTarget && (millis() - waitStart < 350)) {
-      vTaskDelay(pdMS_TO_TICKS(10));
-    }
-
-    // 2. Vòng lặp phát nhạc liên tục ra I2S DMA
-    while (audioPlayRunning && s_mediaPumpRunning) {
-      size_t count = 0;
-      taskENTER_CRITICAL(&s_mediaRingMux);
-      count = s_mediaRingCount;
-      taskEXIT_CRITICAL(&s_mediaRingMux);
-
-      if (count == 0) {
-        if (s_mediaEof) {
-          // Toàn bộ bài hát đã được phát hết
-          break;
-        }
-        // Chờ producer nạp thêm dữ liệu (tối đa 25ms)
-        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(25));
-        continue;
-      }
-
-      size_t toPlay = popMediaRingChunk(stereoChunk, CHUNK);
-      if (toPlay == 0) continue;
-
-      if (!spkDriverInstalled) {
-        if (!installSpeakerTx(s_mediaSampleRate)) {
-          vTaskDelay(pdMS_TO_TICKS(10));
-          continue;
-        }
-        currentSampleRate = s_mediaSampleRate;
-      } else if (currentSampleRate != s_mediaSampleRate) {
-        i2s_set_sample_rates(I2S_PORT_SPK, s_mediaSampleRate);
-        currentSampleRate = s_mediaSampleRate;
-      }
-
-      size_t written = 0;
-      i2s_write(I2S_PORT_SPK, stereoChunk, toPlay * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(50));
-      audioPlayCurSample += toPlay;
-
-      // Cập nhật 16 cột phổ âm thanh cho màn hình ST7789
-      if (toPlay >= 16) {
-        uint8_t specBands[16] = {0};
-        int maxLv = 0;
-        for (int b = 0; b < 16; b++) {
-          int sIdx = (b * toPlay) / 16;
-          int32_t val = abs((int32_t)stereoChunk[sIdx * 2]) / 300;
-          specBands[b] = (uint8_t)constrain(val, 2, 98);
-          if (specBands[b] > maxLv) maxLv = specBands[b];
-        }
-        TestAudio::setExternalAudioSpectrum(specBands, maxLv);
-      }
-    }
-
-    // Xả sạch DMA và trả về sample rate 16kHz
-    if (spkDriverInstalled) {
-      i2s_zero_dma_buffer(I2S_PORT_SPK);
-      i2s_set_sample_rates(I2S_PORT_SPK, 16000);
-    }
-
-    s_mediaPumpRunning = false;
-    s_mediaPumpTaskHandle = nullptr;
-    vTaskDelete(NULL);
-  }
-
-  // --- TÁC VỤ SẢN XUẤT: GIẢI MÃ MP3/WAV/SYNTH ĐƯA VÀO RINGBUFFER (PRIORITY 2 TRÊN CORE 0) ---
   static void audioPwmTask(void* arg) {
     uint8_t pin = (uint8_t)(uintptr_t)arg;
     bool playFromSd = false;
@@ -1117,16 +951,11 @@ namespace AudioDriver {
     uint32_t wavSampleRate = 16000;
     uint16_t wavChannels = 1;
 
-    TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
-    if (idle0 != NULL) {
-      esp_task_wdt_delete(idle0);
-    }
-
     bool isWav = false;
     bool isMp3 = false;
 
     if (playFromSd && (asyncSdFilePath.indexOf("rec_latest") < 0 || pcmRecSampleCount == 0)) {
-      if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
+      if (StorageDriver::lock(pdMS_TO_TICKS(150))) {
         f = SD.open(asyncSdFilePath, FILE_READ);
         if (f && f.size() > 128) {
           uint8_t h[44];
@@ -1138,7 +967,7 @@ namespace AudioDriver {
             if (wavSampleRate < 8000 || wavSampleRate > 48000) wavSampleRate = 16000;
             if (wavChannels != 1 && wavChannels != 2) wavChannels = 1;
           } else {
-            // File MP3 tren the nho SD -> Giai ma bang bo minimp3
+            // File MP3 trên thẻ nhớ SD -> Giải mã bằng bộ minimp3
             isMp3 = true;
             f.seek(0);
           }
@@ -1156,42 +985,23 @@ namespace AudioDriver {
     bool isSynthMode = asyncSdFilePath.startsWith("SYNTH:") || (!playFromSd && pcmRecSampleCount == 0 && asyncSdFilePath.length() > 0);
 
     if (!playFromSd && pcmRecSampleCount == 0 && !isSynthMode) {
-      if (idle0 != NULL) {
-        esp_task_wdt_add(idle0);
-      }
       audioPlayRunning = false;
       audioTaskHandle = NULL;
       vTaskDelete(NULL);
       return;
     }
 
-    s_mediaSampleRate = isWav ? wavSampleRate : 44100;
-    installSpeakerTx(s_mediaSampleRate);
-    ensureMediaRingBufAllocated();
-
-    s_mediaEof = false;
+    uint32_t currentSampleRate = isWav ? wavSampleRate : 44100;
+    installSpeakerTx(currentSampleRate);
+    i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
     audioPlayCurSample = 0;
-
-    // Khởi tạo Media Pump Task (Consumer, Priority 4 trên Core 0)
-    if (!s_mediaPumpTaskHandle) {
-      s_mediaPumpRunning = true;
-      xTaskCreatePinnedToCore(
-        mediaPumpTask,
-        "mediaPump",
-        6144,
-        nullptr,
-        4,
-        &s_mediaPumpTaskHandle,
-        0
-      );
-    }
 
     Serial.printf("🔊 [ASYNC I2S PLAY] Bắt đầu phát qua Loa MAX98357A I2S DAC (Nguồn: %s, Vol: %d%%)...\n",
                   isMp3 ? "Bộ Giải Mã MP3 (minimp3)" : (isWav ? "WAV PCM File" : (isSynthMode ? "Retro Synth Engine" : "RAM pcmRecBuffer")),
                   musicVolumePct);
 
     if (isSynthMode) {
-      s_mediaSampleRate = 16000;
+      i2s_set_sample_rates(I2S_PORT_SPK, 16000);
       int trackStyle = 0;
       String lowerPath = asyncSdFilePath;
       lowerPath.toLowerCase();
@@ -1224,12 +1034,7 @@ namespace AudioDriver {
       const size_t CHUNK = 128;
       int16_t stereoChunk[CHUNK * 2];
 
-      while (audioPlayRunning && !s_mediaEof) {
-        if (s_mediaRingCount >= (s_mediaRingCapacity * 85) / 100) {
-          vTaskDelay(pdMS_TO_TICKS(15));
-          continue;
-        }
-
+      while (audioPlayRunning) {
         float volScale = (musicVolumePct > 0) ? ((float)musicVolumePct / 100.0f) : 0.0f;
         for (size_t c = 0; c < CHUNK && audioPlayRunning; c++) {
           uint32_t stepIdx = (sampleIdx / stepSamples) % 16;
@@ -1274,14 +1079,25 @@ namespace AudioDriver {
           sampleIdx++;
         }
 
-        pushMediaRingChunk(stereoChunk, CHUNK);
-        if (s_mediaPumpTaskHandle) {
-          xTaskNotifyGive(s_mediaPumpTaskHandle);
+        size_t written = 0;
+        i2s_write(I2S_PORT_SPK, stereoChunk, CHUNK * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(50));
+        audioPlayCurSample += CHUNK;
+
+        // Cập nhật 16 cột phổ âm thanh cho màn hình ST7789
+        uint8_t specBands[16] = {0};
+        int maxLv = 0;
+        for (int b = 0; b < 16; b++) {
+          int sIdx = (b * CHUNK) / 16;
+          int32_t val = abs((int32_t)stereoChunk[sIdx * 2]) / 300;
+          specBands[b] = (uint8_t)constrain(val, 2, 98);
+          if (specBands[b] > maxLv) maxLv = specBands[b];
         }
-        taskYIELD();
+        TestAudio::setExternalAudioSpectrum(specBands, maxLv);
+
+        vTaskDelay(pdMS_TO_TICKS(1));
       }
     } else if (!playFromSd) {
-      s_mediaSampleRate = 16000;
+      i2s_set_sample_rates(I2S_PORT_SPK, 16000);
       int32_t peak = 0;
       for (size_t i = 0; i < pcmRecSampleCount; i++) {
         int32_t a = abs(pcmRecBuffer[i]);
@@ -1296,12 +1112,7 @@ namespace AudioDriver {
       const size_t CHUNK = 128;
       int16_t stereoChunk[CHUNK * 2];
       size_t i = 0;
-      while (i < pcmRecSampleCount && audioPlayRunning && !s_mediaEof) {
-        if (s_mediaRingCount >= (s_mediaRingCapacity * 85) / 100) {
-          vTaskDelay(pdMS_TO_TICKS(15));
-          continue;
-        }
-
+      while (i < pcmRecSampleCount && audioPlayRunning) {
         float volScale = (musicVolumePct > 0) ? ((float)musicVolumePct / 100.0f) : 0.0f;
         size_t n = min(CHUNK, pcmRecSampleCount - i);
         for (size_t j = 0; j < n; j++) {
@@ -1311,54 +1122,56 @@ namespace AudioDriver {
           stereoChunk[j * 2]     = (int16_t)s;
           stereoChunk[j * 2 + 1] = (int16_t)s;
         }
-        pushMediaRingChunk(stereoChunk, n);
+        size_t written = 0;
+        i2s_write(I2S_PORT_SPK, stereoChunk, n * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(50));
+        audioPlayCurSample += n;
         i += n;
 
-        if (s_mediaPumpTaskHandle) {
-          xTaskNotifyGive(s_mediaPumpTaskHandle);
+        uint8_t specBands[16] = {0};
+        int maxLv = 0;
+        for (int b = 0; b < 16; b++) {
+          int sIdx = (b * n) / 16;
+          int32_t val = abs((int32_t)stereoChunk[sIdx * 2]) / 300;
+          specBands[b] = (uint8_t)constrain(val, 2, 98);
+          if (specBands[b] > maxLv) maxLv = specBands[b];
         }
-        taskYIELD();
+        TestAudio::setExternalAudioSpectrum(specBands, maxLv);
+
+        vTaskDelay(pdMS_TO_TICKS(1));
       }
     } else if (isMp3) {
       Serial.printf("🎵 [MP3 DECODER] Bắt đầu giải mã & phát MP3: %s (%u bytes)...\n",
                     asyncSdFilePath.c_str(), (unsigned)f.size());
 
-      mp3dec_t* mp3d = (mp3dec_t*)(psramFound() ? ps_malloc(sizeof(mp3dec_t)) : malloc(sizeof(mp3dec_t)));
-      const int MP3_BUF_SIZE = 32768; // 32KB đệm PSRAM đọc SD một lần
-      uint8_t* mp3Buf = (uint8_t*)(psramFound() ? ps_malloc(MP3_BUF_SIZE) : malloc(MP3_BUF_SIZE));
-      mp3d_sample_t* pcmOut = (mp3d_sample_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)));
-      int16_t* stereoPcm = (int16_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)));
-      mp3dec_scratch_t* scratch = (mp3dec_scratch_t*)(psramFound() ? ps_malloc(sizeof(mp3dec_scratch_t)) : malloc(sizeof(mp3dec_scratch_t)));
+      // Cấp phát trong DRAM nội bộ (SRAM) để tránh 100% lỗi DMA và căn lề bộ nhớ của Octal PSRAM
+      mp3dec_t* mp3d = (mp3dec_t*)malloc(sizeof(mp3dec_t));
+      const int MP3_BUF_SIZE = 8192; // 8KB đệm DRAM an toàn tuyệt đối
+      uint8_t* mp3Buf = (uint8_t*)malloc(MP3_BUF_SIZE);
+      mp3d_sample_t* pcmOut = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
+      int16_t* stereoPcm = (int16_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t));
 
-      if (mp3d && mp3Buf && pcmOut && stereoPcm && scratch) {
+      if (mp3d && mp3Buf && pcmOut && stereoPcm) {
         mp3dec_init(mp3d);
         int bufValid = 0;
+        currentSampleRate = 44100;
+        i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
 
-        while (audioPlayRunning && !s_mediaEof) {
-          if (s_mediaRingCount >= (s_mediaRingCapacity * 85) / 100) {
-            vTaskDelay(pdMS_TO_TICKS(15));
-            continue;
-          }
-
-          if (bufValid < (MP3_BUF_SIZE - 4096)) {
-            bool hasMore = false;
-            if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
-              hasMore = (f && f.available() > 0);
-              if (hasMore) {
-                size_t toRead = MP3_BUF_SIZE - bufValid;
-                size_t nRead = f.read(mp3Buf + bufValid, toRead);
-                bufValid += nRead;
-              }
+        while (audioPlayRunning && (f.available() || bufValid > 0)) {
+          if (bufValid < (MP3_BUF_SIZE - 2048) && f.available()) {
+            if (StorageDriver::lock(pdMS_TO_TICKS(120))) {
+              size_t toRead = MP3_BUF_SIZE - bufValid;
+              size_t nRead = f.read(mp3Buf + bufValid, toRead);
+              bufValid += nRead;
               StorageDriver::unlock();
             } else {
-              vTaskDelay(pdMS_TO_TICKS(5));
+              vTaskDelay(pdMS_TO_TICKS(3));
             }
           }
 
           if (bufValid <= 0) break;
 
           mp3dec_frame_info_t info;
-          int samplesPerChannel = mp3dec_decode_frame_scratch(mp3d, mp3Buf, bufValid, pcmOut, &info, scratch);
+          int samplesPerChannel = mp3dec_decode_frame(mp3d, mp3Buf, bufValid, pcmOut, &info);
 
           if (info.frame_bytes > 0) {
             bufValid -= info.frame_bytes;
@@ -1373,8 +1186,9 @@ namespace AudioDriver {
           }
 
           if (samplesPerChannel > 0) {
-            if (info.hz > 0 && (uint32_t)info.hz != s_mediaSampleRate) {
-              s_mediaSampleRate = info.hz;
+            if (info.hz > 0 && (uint32_t)info.hz != currentSampleRate) {
+              currentSampleRate = info.hz;
+              i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
               Serial.printf("🎧 [MP3 FORMAT] %d Hz | %s | %d kbps\n",
                             info.hz, info.channels == 2 ? "Stereo" : "Mono", info.bitrate_kbps);
             }
@@ -1394,17 +1208,28 @@ namespace AudioDriver {
               }
             }
 
-            pushMediaRingChunk(stereoPcm, samplesPerChannel);
+            size_t written = 0;
+            i2s_write(I2S_PORT_SPK, stereoPcm, samplesPerChannel * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(100));
+            audioPlayCurSample += samplesPerChannel;
 
-            if (s_mediaPumpTaskHandle) {
-              xTaskNotifyGive(s_mediaPumpTaskHandle);
+            // Cập nhật phổ âm thanh cho ST7789
+            if (samplesPerChannel >= 16) {
+              uint8_t specBands[16] = {0};
+              int maxLv = 0;
+              for (int b = 0; b < 16; b++) {
+                int sIdx = (b * samplesPerChannel) / 16;
+                int32_t val = abs((int32_t)stereoPcm[sIdx * 2]) / 300;
+                specBands[b] = (uint8_t)constrain(val, 2, 98);
+                if (specBands[b] > maxLv) maxLv = specBands[b];
+              }
+              TestAudio::setExternalAudioSpectrum(specBands, maxLv);
             }
-
-            taskYIELD();
           }
+
+          // Nhường CPU cho IDLE task trên Core 0 để nuôi Task Watchdog Timer
+          vTaskDelay(pdMS_TO_TICKS(1));
         }
       }
-      if (scratch) free(scratch);
       if (stereoPcm) free(stereoPcm);
       if (mp3Buf) free(mp3Buf);
       if (pcmOut) free(pcmOut);
@@ -1415,20 +1240,16 @@ namespace AudioDriver {
         StorageDriver::unlock();
       }
     } else {
-      s_mediaSampleRate = wavSampleRate;
-      const size_t WAV_CHUNK = 1024;
-      int16_t* chunk = (int16_t*)(psramFound() ? ps_malloc(WAV_CHUNK * sizeof(int16_t)) : malloc(WAV_CHUNK * sizeof(int16_t)));
-      int16_t* stereoChunk = (int16_t*)(psramFound() ? ps_malloc(WAV_CHUNK * 2 * sizeof(int16_t)) : malloc(WAV_CHUNK * 2 * sizeof(int16_t)));
+      currentSampleRate = wavSampleRate;
+      i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
+      const size_t WAV_CHUNK = 512;
+      int16_t* chunk = (int16_t*)malloc(WAV_CHUNK * sizeof(int16_t));
+      int16_t* stereoChunk = (int16_t*)malloc(WAV_CHUNK * 2 * sizeof(int16_t));
       size_t totalBytes = (f.size() > 44) ? (f.size() - 44) : 0;
       size_t bytesRead = 0;
 
       if (chunk && stereoChunk) {
-        while (audioPlayRunning && bytesRead < totalBytes && !s_mediaEof) {
-          if (s_mediaRingCount >= (s_mediaRingCapacity * 85) / 100) {
-            vTaskDelay(pdMS_TO_TICKS(15));
-            continue;
-          }
-
+        while (audioPlayRunning && bytesRead < totalBytes && f.available()) {
           size_t nReadBytes = 0;
           if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
             if (f.available()) {
@@ -1436,7 +1257,7 @@ namespace AudioDriver {
             }
             StorageDriver::unlock();
           } else {
-            vTaskDelay(pdMS_TO_TICKS(5));
+            vTaskDelay(pdMS_TO_TICKS(3));
             continue;
           }
 
@@ -1453,7 +1274,9 @@ namespace AudioDriver {
               stereoChunk[j * 2]     = (int16_t)constrain(l, -31500, 31500);
               stereoChunk[j * 2 + 1] = (int16_t)constrain(r, -31500, 31500);
             }
-            pushMediaRingChunk(stereoChunk, nPairs);
+            size_t written = 0;
+            i2s_write(I2S_PORT_SPK, stereoChunk, nPairs * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(100));
+            audioPlayCurSample += nPairs;
           } else {
             size_t nSamples = nReadBytes / sizeof(int16_t);
             for (size_t j = 0; j < nSamples; j++) {
@@ -1463,14 +1286,22 @@ namespace AudioDriver {
               stereoChunk[j * 2]     = (int16_t)s;
               stereoChunk[j * 2 + 1] = (int16_t)s;
             }
-            pushMediaRingChunk(stereoChunk, nSamples);
+            size_t written = 0;
+            i2s_write(I2S_PORT_SPK, stereoChunk, nSamples * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(100));
+            audioPlayCurSample += nSamples;
           }
 
-          if (s_mediaPumpTaskHandle) {
-            xTaskNotifyGive(s_mediaPumpTaskHandle);
+          uint8_t specBands[16] = {0};
+          int maxLv = 0;
+          for (int b = 0; b < 16; b++) {
+            int sIdx = (b * (nReadBytes / sizeof(int16_t))) / 16;
+            int32_t val = abs((int32_t)stereoChunk[sIdx * 2]) / 300;
+            specBands[b] = (uint8_t)constrain(val, 2, 98);
+            if (specBands[b] > maxLv) maxLv = specBands[b];
           }
+          TestAudio::setExternalAudioSpectrum(specBands, maxLv);
 
-          taskYIELD();
+          vTaskDelay(pdMS_TO_TICKS(1));
         }
       }
       if (chunk) free(chunk);
@@ -1482,20 +1313,9 @@ namespace AudioDriver {
       }
     }
 
-    // Producer hoàn tất giải mã toàn bộ bài nhạc
-    s_mediaEof = true;
-    if (s_mediaPumpTaskHandle) {
-      xTaskNotifyGive(s_mediaPumpTaskHandle);
-    }
-
-    // Đợi Consumer xả hết các mẫu còn lại trong RingBuffer
-    while (audioPlayRunning && s_mediaPumpRunning && s_mediaRingCount > 0) {
-      vTaskDelay(pdMS_TO_TICKS(20));
-    }
-    vTaskDelay(pdMS_TO_TICKS(50));
-
-    if (idle0 != NULL) {
-      esp_task_wdt_add(idle0);
+    if (spkDriverInstalled) {
+      i2s_zero_dma_buffer(I2S_PORT_SPK);
+      i2s_set_sample_rates(I2S_PORT_SPK, 16000);
     }
 
     audioPlayRunning = false;
@@ -1787,39 +1607,14 @@ namespace AudioDriver {
 
   void stopVoicePlaybackAsync() {
     audioPlayRunning = false;
-    s_mediaEof = true;
-    s_mediaPumpRunning = false;
-
-    taskENTER_CRITICAL(&s_mediaRingMux);
-    s_mediaRingCount = 0;
-    s_mediaRingHead = 0;
-    s_mediaRingTail = 0;
-    taskEXIT_CRITICAL(&s_mediaRingMux);
-
-    if (s_mediaPumpTaskHandle) {
-      xTaskNotifyGive(s_mediaPumpTaskHandle);
-    }
-    if (audioTaskHandle) {
-      xTaskNotifyGive(audioTaskHandle);
-    }
-
-    unsigned long startWait = millis();
-    while ((audioTaskHandle != NULL || s_mediaPumpTaskHandle != NULL) && millis() - startWait < 500) {
-      vTaskDelay(pdMS_TO_TICKS(10));
-    }
-
     if (audioTaskHandle != NULL) {
-      vTaskDelete(audioTaskHandle);
-      audioTaskHandle = NULL;
-    }
-    if (s_mediaPumpTaskHandle != NULL) {
-      vTaskDelete(s_mediaPumpTaskHandle);
-      s_mediaPumpTaskHandle = NULL;
-    }
-
-    TaskHandle_t idle0 = xTaskGetIdleTaskHandleForCPU(0);
-    if (idle0 != NULL) {
-      esp_task_wdt_add(idle0);
+      unsigned long startWait = millis();
+      while (audioTaskHandle != NULL && millis() - startWait < 300) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+      }
+      if (audioTaskHandle != NULL) {
+        audioTaskHandle = NULL;
+      }
     }
 
     if (spkDriverInstalled) {
@@ -1829,7 +1624,7 @@ namespace AudioDriver {
   }
 
   bool isVoicePlaybackAsyncRunning() {
-    return audioPlayRunning || s_mediaPumpRunning;
+    return audioPlayRunning;
   }
 
   uint32_t getVoicePlaybackCurrentSample() {
@@ -1838,7 +1633,7 @@ namespace AudioDriver {
 
   // --- THU HỒI BỘ NHỚ AN TOÀN (MEMORY SCAVENGER / STRICT MODE) ---
   bool hasAllocatedRecBuffer() {
-    return (pcmRecBuffer != nullptr || s_mediaPcmRingBuf != nullptr || s_asyncStreamRingBuf != nullptr);
+    return (pcmRecBuffer != nullptr || s_asyncStreamRingBuf != nullptr);
   }
 
   size_t trimMemory() {
@@ -1869,19 +1664,7 @@ namespace AudioDriver {
       Serial.printf("🧹 [TRIM AUDIO] Đã giải phóng bộ đệm stream RingBuffer (%u KB)\n", (unsigned int)(freedStream / 1024));
     }
 
-    // 3. Giải phóng bộ đệm Double-Buffering RingBuffer của Trình phát nhạc khi không phát
-    if (!isVoicePlaybackAsyncRunning() && s_mediaPcmRingBuf != nullptr) {
-      taskENTER_CRITICAL(&s_mediaRingMux);
-      free(s_mediaPcmRingBuf);
-      s_mediaPcmRingBuf = nullptr;
-      s_mediaRingHead = 0;
-      s_mediaRingTail = 0;
-      s_mediaRingCount = 0;
-      taskEXIT_CRITICAL(&s_mediaRingMux);
-      size_t freedMedia = s_mediaRingCapacity * 2 * sizeof(int16_t);
-      totalFreed += freedMedia;
-      Serial.printf("🧹 [TRIM AUDIO] Đã giải phóng bộ đệm Media RingBuffer (%u KB)\n", (unsigned int)(freedMedia / 1024));
-    }
+    
 
     return totalFreed;
   }

@@ -65,8 +65,9 @@ void setup() {
   // 3. Khởi tạo Wi-Fi (SoftAP cứu hộ & Tự động kết nối Smart Wi-Fi)
   WifiManager::begin();
 
-  // 3B. Khởi động bộ thu Audio UDP Port 12345 (sau khi Wi-Fi đã bắt đầu)
+  // 3B. Khởi động bộ thu Audio UDP Port 12345 & Video TCP Port 12346 (sau khi Wi-Fi đã bắt đầu)
   WebStreamManager::startAudioUdpListener();
+  WebStreamManager::startVideoTcpListener();
 
   // 4. Khởi tạo Web Server & Toàn bộ REST APIs đồng bộ thời gian thực với Web UI
   WebRoutes::begin();

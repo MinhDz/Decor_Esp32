@@ -3452,7 +3452,7 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
             <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
               <span style="font-size:0.72rem;color:#94a3b8;white-space:nowrap;">IP Máy Tính (Transcoder):</span>
-              <input type="text" id="pc-transcoder-host-input" class="stream-input" style="margin-bottom:0;padding:4px 8px;font-size:0.72rem;" value="localhost" placeholder="localhost hoặc 192.168.1.xxx" onchange="localStorage.setItem('pc_transcoder_host', this.value.trim());">
+              <input type="text" id="pc-transcoder-host-input" class="stream-input" style="margin-bottom:0;padding:4px 8px;font-size:0.72rem;" value="localhost" placeholder="localhost (hoặc 192.168.1.xxx)" onchange="localStorage.setItem('pc_transcoder_host', this.value.trim());">
             </div>
 
             <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;">
@@ -4184,14 +4184,18 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
   // ---------------- TRẠM CHUYỂN MÃ PC (PC TRANSCODER) ----------------
   window.startPcTranscoderStream = async function() {
-    const input = document.getElementById('transcoder-url-input');
+    const input = document.getElementById('transcoder-url-input') || document.getElementById('stream-url-input');
     const url = (input ? input.value : '').trim();
     if (!url) return alert("Vui lòng dán link YouTube hoặc video cần chuyển mã!");
 
     const hostInput = document.getElementById('pc-transcoder-host-input');
     let host = (hostInput ? hostInput.value.trim() : '') || localStorage.getItem('pc_transcoder_host') || 'localhost';
+    if (!host) host = 'localhost';
     localStorage.setItem('pc_transcoder_host', host);
+    if (hostInput) hostInput.value = host;
+
     const transcoderBase = 'http://' + host + ':5050';
+    const esp_ip = window.location.hostname || '192.168.1.233';
 
     const btn = document.getElementById('btn-pc-transcode');
     if (btn) {
@@ -4199,26 +4203,55 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       btn.innerHTML = '⏳ Đang phân tích link & nạp luồng...';
     }
 
-    const esp_ip = window.location.hostname || '192.168.1.233';
-
     const statusTxt = document.getElementById('transcoder-status-txt');
     if (statusTxt) {
-      statusTxt.innerText = "⏳ Đang kết nối tới PC Transcoder (" + transcoderBase + ")...";
+      statusTxt.innerText = "⏳ Đang kết nối Trạm Chuyển Mã PC (" + transcoderBase + ")...";
       statusTxt.style.color = "#f59e0b";
     }
 
     try {
-      const res = await fetch(transcoderBase + '/api/start', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url: url, esp_ip: esp_ip, fps: 15, resolution: '240x240', volume: 100 })
-      });
-      const data = await res.json();
-      if (data.status === 'ok') {
+      let data = null;
+      let startOk = false;
+
+      // 1. Gửi trực tiếp từ Trình duyệt tới Transcoder (Ưu tiên số 1: chạy trực tiếp loopback localhost, 0ms proxy, không tải ESP32, không bị tường lửa Windows chặn)
+      try {
+        const res = await fetch(transcoderBase + '/api/start', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: url, esp_ip: esp_ip, fps: 15, resolution: '240x240', volume: 100 })
+        });
+        if (res.ok) {
+          data = await res.json();
+          if (data && data.status === 'ok') {
+            startOk = true;
+          }
+        }
+      } catch(eDirect) {
+        console.warn("Direct fetch to transcoder failed:", eDirect);
+      }
+
+      // 2. Nếu gọi trực tiếp chưa thành công (ví dụ mở web từ điện thoại), thử fallback qua ESP32 proxy
+      if (!startOk) {
+        try {
+          const pRes = await fetch('/api/stream/proxy_start', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ url: url, host: host, fps: 15, resolution: '240x240', volume: 100 })
+          });
+          if (pRes.ok) {
+            data = await pRes.json();
+            if (data && data.status === 'ok') {
+              startOk = true;
+            }
+          }
+        } catch(eProxy) {
+          console.warn("Proxy start failed:", eProxy);
+        }
+      }
+
+      if (startOk && data) {
         if (typeof showToast === 'function') {
           showToast("✅ Đang stream: " + (data.title || "Video"), false);
-        } else {
-          alert("✅ Đã bắt đầu chuyển mã & stream: " + (data.title || "Video"));
         }
         if (statusTxt) {
           statusTxt.innerText = "🟢 Đang stream: " + (data.title || url);
@@ -4235,46 +4268,47 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           cvEl.style.display = 'none';
         }
 
-        // Cập nhật thống kê FPS và số frames gửi từ PC Transcoder
         if (window.s_transcoderStatInterval) clearInterval(window.s_transcoderStatInterval);
         window.s_transcoderStatInterval = setInterval(async () => {
           try {
-            const sres = await fetch(transcoderBase + '/api/status');
-            const st = await sres.json();
-            if (!st.running) {
+            let st = null;
+            try {
+              const sres = await fetch(transcoderBase + '/api/status');
+              if (sres.ok) st = await sres.json();
+            } catch(e) {}
+            if (!st) {
+              const sres2 = await fetch('/api/stream/status');
+              if (sres2.ok) st = await sres2.json();
+            }
+            if (!st || (!st.session_active && !st.running)) {
               window.stopPcTranscoderStream();
               return;
             }
             const fpsEl = document.getElementById('st-stat-fps');
             if (fpsEl) fpsEl.innerText = (st.live_fps || '15.0') + ' FPS';
             const fEl = document.getElementById('st-stat-frames');
-            if (fEl) fEl.innerText = (st.frames_sent || '0') + ' frames';
+            if (fEl) fEl.innerText = (st.video_frames || st.frames_sent || '0') + ' frames';
             const aEl = document.getElementById('st-stat-audio');
-            if (aEl) { aEl.innerText = (st.audio_kb_sent || '0') + ' KB (UDP)'; aEl.style.color = '#10b981'; }
+            if (aEl) { aEl.innerText = (st.audio_chunks || st.chunks_sent || '0') + ' KB (UDP)'; aEl.style.color = '#10b981'; }
             const rttEl = document.getElementById('st-stat-rtt');
             if (rttEl) rttEl.innerText = '< 2ms (UDP)';
           } catch(e) {}
         }, 1000);
       } else {
-        alert("Lỗi Transcoder: " + (data.error || "Thất bại"));
+        const errMsg = (data && data.error) ? data.error : ("Không thể kết nối tới " + transcoderBase);
+        alert("⚠️ Không thể kết nối tới Trạm Chuyển Mã (" + transcoderBase + ")!\n\n" +
+              "1. Kiểm tra bạn đã bật file 'start_transcoder.bat' trên máy tính chưa.\n" +
+              "2. Nếu mở web từ điện thoại, vui lòng nhập IP máy tính thay vì localhost.\n\nChi tiết lỗi: " + errMsg);
         if (statusTxt) {
-          statusTxt.innerText = "🔴 Lỗi: " + (data.error || "Thất bại");
+          statusTxt.innerText = "🔴 " + errMsg;
           statusTxt.style.color = "#ef4444";
         }
       }
     } catch(err) {
-      let promptMsg = "⚠️ Không thể kết nối tới Trạm Chuyển Mã (" + transcoderBase + ")!\n\n" +
-                      "Nếu bạn đang mở web từ điện thoại, vui lòng nhập địa chỉ IP của máy tính (ví dụ: 192.168.1.238):\n" +
-                      "(Nếu chưa bật, hãy mở tệp 'start_transcoder.bat' trên máy tính, hoặc bấm 'Phát Tab YouTube' ở thẻ trên để phát trực tiếp không cần cài đặt)";
-      let newHost = prompt(promptMsg, host);
-      if (newHost && newHost.trim()) {
-        localStorage.setItem('pc_transcoder_host', newHost.trim());
-        if (hostInput) hostInput.value = newHost.trim();
-        window.startPcTranscoderStream();
-        return;
-      }
+      console.error("Transcoder error:", err);
+      alert("⚠️ Không thể kết nối tới Trạm Chuyển Mã (" + transcoderBase + ")!\n\nHãy kiểm tra xem bạn đã chạy tệp 'start_transcoder.bat' trên máy tính chưa.");
       if (statusTxt) {
-        statusTxt.innerText = "🔴 Chưa chạy start_transcoder.bat hoặc sai IP PC";
+        statusTxt.innerText = "🔴 Chưa bật start_transcoder.bat hoặc sai IP";
         statusTxt.style.color = "#ef4444";
       }
     } finally {
@@ -4298,9 +4332,17 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       cvEl.style.display = 'block';
       drawIdlePreviewScreen();
     }
-    let host = localStorage.getItem('pc_transcoder_host') || 'localhost';
+    const hostInput = document.getElementById('pc-transcoder-host-input');
+    let host = (hostInput ? hostInput.value.trim() : '') || localStorage.getItem('pc_transcoder_host') || 'localhost';
     try {
-      await fetch('http://' + host + ':5050/api/stop', { method: 'POST' });
+      await fetch('http://' + host + ':5050/api/stop', { method: 'POST', mode: 'cors' });
+    } catch(e) {}
+    try {
+      await fetch('/api/stream/proxy_stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ host: host })
+      });
     } catch(e) {}
     try {
       await fetch('/api/stream/stop', { method: 'POST' });

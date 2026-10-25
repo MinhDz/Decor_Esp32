@@ -619,6 +619,135 @@ void WebStreamManager::startAudioUdpListener() {
   }
 }
 
+// ---------------- TCP VIDEO STREAM RECEIVER TASK (Core 0, Port 12346) ----------------
+static const uint16_t VIDEO_TCP_PORT      = 12346;
+static TaskHandle_t s_videoTcpTaskHandle  = nullptr;
+static volatile bool s_videoTcpRunning    = false;
+static int s_videoTcpServerSock           = -1;
+
+static void videoTcpTask(void* param) {
+  Serial.println("🎬 [TCP VIDEO] Task lắng nghe Video TCP đã khởi tạo trên Core 0...");
+
+  while (s_videoTcpRunning) {
+    if (WiFi.status() != WL_CONNECTED && WiFi.softAPIP() == IPAddress(0, 0, 0, 0)) {
+      vTaskDelay(pdMS_TO_TICKS(500));
+      continue;
+    }
+    vTaskDelay(pdMS_TO_TICKS(200));
+
+    int serverSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (serverSock < 0) {
+      vTaskDelay(pdMS_TO_TICKS(2000));
+      continue;
+    }
+
+    int enable = 1;
+    setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
+
+    struct sockaddr_in serv_addr;
+    memset(&serv_addr, 0, sizeof(serv_addr));
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    serv_addr.sin_port = htons(VIDEO_TCP_PORT);
+
+    if (bind(serverSock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+      close(serverSock);
+      vTaskDelay(pdMS_TO_TICKS(2000));
+      continue;
+    }
+
+    if (listen(serverSock, 2) < 0) {
+      close(serverSock);
+      vTaskDelay(pdMS_TO_TICKS(2000));
+      continue;
+    }
+
+    s_videoTcpServerSock = serverSock;
+    Serial.printf("🎬 [TCP VIDEO] Đang lắng nghe cổng Video TCP %u trên Core 0 (sẵn sàng nhận JPEG)...\n", VIDEO_TCP_PORT);
+
+    uint8_t* tcpFrameBuf = (uint8_t*)(psramFound() ? ps_malloc(MAX_STREAM_JPG_SIZE) : malloc(MAX_STREAM_JPG_SIZE));
+    if (!tcpFrameBuf) {
+      Serial.println("❌ [TCP VIDEO] Không đủ bộ nhớ cấp phát tcpFrameBuf!");
+      close(serverSock);
+      s_videoTcpServerSock = -1;
+      vTaskDelay(pdMS_TO_TICKS(2000));
+      continue;
+    }
+
+    while (s_videoTcpRunning && (WiFi.status() == WL_CONNECTED || WiFi.softAPIP() != IPAddress(0, 0, 0, 0))) {
+      struct sockaddr_in client_addr;
+      socklen_t client_len = sizeof(client_addr);
+      int clientSock = accept(serverSock, (struct sockaddr*)&client_addr, &client_len);
+      if (clientSock < 0) {
+        if (!s_videoTcpRunning) break;
+        vTaskDelay(pdMS_TO_TICKS(100));
+        continue;
+      }
+
+      int nodelay = 1;
+      setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+      struct timeval tv;
+      tv.tv_sec = 4;
+      tv.tv_usec = 0;
+      setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+      int rcvbuf = 65536;
+      setsockopt(clientSock, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+
+      Serial.println("⚡ [TCP VIDEO] Transcoder đã kết nối luồng Video trực tiếp tốc độ cao!");
+
+      while (s_videoTcpRunning) {
+        uint32_t netLen = 0;
+        int r = recv(clientSock, (char*)&netLen, 4, MSG_WAITALL);
+        if (r != 4) break;
+
+        uint32_t frameLen = ntohl(netLen);
+        if (frameLen == 0 || frameLen > MAX_STREAM_JPG_SIZE) {
+          break;
+        }
+
+        size_t totalReceived = 0;
+        bool ok = true;
+        while (totalReceived < frameLen && s_videoTcpRunning) {
+          int n = recv(clientSock, (char*)(tcpFrameBuf + totalReceived), frameLen - totalReceived, 0);
+          if (n <= 0) { ok = false; break; }
+          totalReceived += n;
+        }
+
+        if (!ok) break;
+
+        WebStreamManager::queueVideoFrame(tcpFrameBuf, frameLen);
+      }
+
+      close(clientSock);
+      Serial.println("⚪ [TCP VIDEO] Transcoder đã ngắt luồng Video.");
+    }
+
+    if (tcpFrameBuf) free(tcpFrameBuf);
+    close(serverSock);
+    s_videoTcpServerSock = -1;
+    vTaskDelay(pdMS_TO_TICKS(500));
+  }
+
+  s_videoTcpTaskHandle = nullptr;
+  Serial.println("🛑 [TCP VIDEO] Task Video TCP đã dừng.");
+  vTaskDelete(NULL);
+}
+
+void WebStreamManager::startVideoTcpListener() {
+  if (!s_videoTcpTaskHandle) {
+    s_videoTcpRunning = true;
+    xTaskCreatePinnedToCore(
+      videoTcpTask,
+      "videoTcpTask",
+      4096,
+      nullptr,
+      3,
+      &s_videoTcpTaskHandle,
+      0
+    );
+  }
+}
+
 void WebStreamManager::playAudioPcmChunk(const int16_t* pcmSamples, size_t sampleCount) {
   if (!pcmSamples || sampleCount == 0) return;
   s_lastAudioPcmMs = millis();

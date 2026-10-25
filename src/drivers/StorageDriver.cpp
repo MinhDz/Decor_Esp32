@@ -32,14 +32,14 @@ namespace StorageDriver {
 
   bool lock(TickType_t timeout) {
     if (!s_sdMutex) {
-      s_sdMutex = xSemaphoreCreateMutex();
+      s_sdMutex = xSemaphoreCreateRecursiveMutex();
     }
-    return xSemaphoreTake(s_sdMutex, timeout) == pdTRUE;
+    return xSemaphoreTakeRecursive(s_sdMutex, timeout) == pdTRUE;
   }
 
   void unlock() {
     if (s_sdMutex) {
-      xSemaphoreGive(s_sdMutex);
+      xSemaphoreGiveRecursive(s_sdMutex);
     }
   }
 
