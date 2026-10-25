@@ -155,3 +155,70 @@ Dựa trên quá trình vận hành thực tế, các hạng mục kiến trúc 
 2. **Mở rộng Hệ sinh thái Trợ lý AI XiaoZhi**:
    - Nâng cấp độ nhạy thu âm mic INMP441 và thuật toán lọc nhiễu nền khi loa phát công suất lớn.
    - Thêm các kịch bản phản hồi nhà thông minh (Smart Home IoT Control) từ câu lệnh giọng nói.
+
+
+---
+
+## 7. Dự Án Hệ Sinh Thái Tương Lai: Robot Đồng Hành XiaoZhi 2 Bánh (Companion Robot)
+
+### 7.1 Tầm Nhìn & Ý Tưởng Cốt Lõi (Ecosystem Concept)
+Mở rộng từ một "Trạm Decor tĩnh" để bàn thành một **Hệ sinh thái công nghệ viễn tưởng sống động**:
+- **Trạm Mẹ (Space Station Decor)**: Đóng vai trò là Căn Cứ Chỉ Huy (Mother Base / Command Station), trạm sạc & cổng giám sát trung tâm với màn hình ST7789 2.4", web dashboard và hệ thống telemetry.
+- **Robot Đồng Hành (XiaoZhi AI Rover / Robot Dây Đồng)**: Robot mini 2 bánh cơ động di chuyển tự do trên mặt bàn, sở hữu "tâm hồn" AI XiaoZhi, đôi mắt biểu cảm OLED 0.96", khung vỏ dây đồng Cyberpunk handmade đồng điệu và khả năng nhận biết thế giới xung quanh qua cảm biến gia tốc và laser.
+
+```mermaid
+flowchart LR
+    subgraph StationBase["🛰️ TRẠM MẸ SPACE STATION (ESP32-S3)"]
+        S_Screen["Màn hình ST7789 2.4\" (Radar / Trạng thái Robot)"]
+        S_Web["Web UI Dashboard (Virtual Joystick / Điều khiển xa)"]
+        S_Led["Cụm LED Edison / COB (Dẫn đường / Báo động)"]
+    end
+
+    subgraph RobotRover["🤖 ROBOT TIỂU TRÍ 2 BÁNH (ESP32-S3)"]
+        R_Eyes["OLED 0.96\" SSD1306 (RoboEyes Biểu Cảm Động)"]
+        R_Motors["2 Động cơ N20 + Cầu H (Di chuyển vi sai)"]
+        R_MPU["MPU-6050 (Gia tốc 6 trục / Xúc giác cơ thể)"]
+        R_Laser["VL53L0X ToF (Laser chống rơi mép bàn)"]
+        R_Audio["INMP441 Mic + MAX98357A Loa (XiaoZhi AI Voice)"]
+    end
+
+    StationBase <=== "ESP-NOW (Độ trễ <3ms, Không cần Router Wi-Fi)" ===> RobotRover
+    StationBase -. "Wi-Fi Internet" .-> CloudAI["☁️ XiaoZhi Cloud Server"]
+    RobotRover -. "Wi-Fi Internet (Cùng kênh với ESP-NOW)" .-> CloudAI
+```
+
+---
+
+### 7.2 Thông Số Kỹ Thuật & Cảm Biến Của Robot
+
+| Thành Phần Phần Cứng | Linh Kiện Dự Kiến | Chức Năng & Kịch Bản Phản Hồi Thông Minh |
+| :--- | :--- | :--- |
+| **Vi điều khiển Chính** | ESP32-S3 N16R8 (16MB Flash, 8MB Octal PSRAM) | Sức mạnh xử lý song song: Core 0 chạy Audio I2S Opus + ESP-NOW; Core 1 xử lý Sensor Fusion, Motor FSM và vẽ mắt OLED 60 FPS. |
+| **Màn hình Biểu Cảm** | 0.96" I2C OLED (SSD1306 128x64) | Hệ thống mắt tương tác sinh động (**RoboEyes**): Chớp mắt ngẫu nhiên, mắt tò mò liếc nhìn, mắt hình cung vui vẻ khi trò chuyện, mắt xoay vòng chóng mặt (Dizzy), mắt sợ hãi. |
+| **Cảm biến Gia tốc 6 Trục** | MPU-6050 (Gyroscope + Accelerometer) | **Xúc giác & Cảm nhận tư thế cơ thể**: <br>• *Rơi tự do ($a \approx 0$)*: Mắt trợn tròn, còi la hét thất thanh, tắt motor khẩn cấp.<br>• *Bị nhấc bổng*: Mắt ngước nhìn xuống, 2 bánh lắc nhẹ ngơ ngác.<br>• *Lật ngửa ($a_z < 0$)*: Cắt motor chống kẹt cháy, mắt hoa mắt cầu cứu "Cứu tớ với!".<br>• *Va chạm đâm sầm ($a_{peak} > 2.5g$)*: Lùi lại 2cm, lắc đầu, mắt nhíu mày nhăn nhó. |
+| **Cảm biến Khoảng cách Laser** | VL53L0X ToF (Time-of-Flight I2C) | **Mắt thần chống rơi bàn (Cliff Detection)**: Chiếu xiên $45^\circ$ xuống mặt bàn (khoảng cách bình thường $30..45\,\text{mm}$). Khi mép bàn xuất hiện, khoảng cách vọt lên $>80\,\text{mm}$ -> Phanh khẩn cấp trong $5\,\text{ms}$, lùi lại và quay $90^\circ$ tránh rơi. |
+| **Hệ thống Truyền động** | 2 Động cơ giảm tốc N20 + Cầu H (DRV8833 / MX1508) | Truyền động vi sai 2 bánh răng lớn, điều tốc mượt mà bằng PWM LEDC, di chuyển tiến/lùi, xoay tròn tại chỗ, nhảy múa theo nhạc. |
+| **Trợ lý Giọng nói AI** | Mic INMP441 + DAC I2S MAX98357A / NS4168 + Loa 1-2W | Đàm thoại 2 chiều với XiaoZhi, phát âm thanh biểu cảm phong cách R2-D2 và Wall-E. |
+| **Nguồn điện** | 1 Pin Li-ion 18650 3.7V + Mạch sạc TP4056 + Step-up 5V | Bố trí viên pin trên lưng khung đồng, trọng tâm cân bằng giữa 2 trục bánh xe. |
+
+---
+
+### 7.3 Giao Thức Liên Lạc ESP-NOW Giữa Trạm & Robot
+
+- **Không phụ thuộc Router Wi-Fi**: Kết nối trực tiếp giữa 2 vi điều khiển ESP32-S3, độ trễ cực thấp ($< 3\,\text{ms}$), hoạt động tức thì ngay cả khi mang đi dã ngoại hay nơi không có internet.
+- **Hoạt động song song**: Cả Trạm và Robot cùng cài đặt chung kênh Wi-Fi (ví dụ Channel 6) để vừa kết nối Router vào mạng XiaoZhi AI, vừa gửi nhận gói tin ESP-NOW liên tục.
+- **Tính năng Độc Bản**:
+  1. **Radar & Telemetry Trạm Mẹ**: Màn hình ST7789 của Trạm hiển thị widget pin, tâm trạng và hành trình của Robot.
+  2. **Báo động Bắt cóc / Ngã lật**: Khi Robot bị nhấc bổng hoặc té ngã, gói tin SOS gửi về Trạm -> Trạm nhấp nháy đèn LED COB đỏ và hú còi cảnh báo.
+  3. **Web Remote Controller**: Giao diện Web của Trạm (`/api/robot/control`) cung cấp Joystick ảo / D-Pad trên điện thoại để lái Robot di chuyển từ xa không độ trễ.
+  4. **Triệu hồi & Về Tổ (Docking Command)**: Bấm nút trên Trạm hoặc Web để gọi Robot tự động quay về gần Trạm.
+
+---
+
+### 7.4 Kế Hoạch Cấu Trúc Monorepo (`platformio.ini`)
+
+Khi linh kiện về, dự án sẽ được mở rộng theo cấu trúc đa môi trường:
+- `station/`: Giữ nguyên 100% mã nguồn Trạm Decor SpaceOS hiện tại.
+- `robot/`: Mã nguồn Robot OS (RoboEyes, Sensor Fusion MPU-6050, Cliff Detection VL53L0X, Motor Driver).
+- `shared/`: Giao thức gói tin `EspNowProtocol.h` và Client XiaoZhi dùng chung.
+- Quản lý qua PlatformIO với 2 môi trường: `[env:station]` và `[env:robot]`.
