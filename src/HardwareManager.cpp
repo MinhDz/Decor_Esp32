@@ -82,13 +82,13 @@ void HardwareManager::heartbeat() {
   }
 }
 
-#include "tests/ModuleTestRunner.h"
+#include "SystemCoordinator.h"
 #include "MemoryScavenger.h"
 
 void HardwareManager::handleSerialCommands() {
   if (Serial.available()) {
     char c = Serial.read();
-    if (ModuleTestRunner::handleSerial(c)) {
+    if (SystemCoordinator::handleSerial(c)) {
       return;
     }
     if (c == 'r' || c == 'R') {
@@ -108,7 +108,7 @@ void HardwareManager::handleSerialCommands() {
       Serial.println("👉 Bấm phím 'r' rồi Enter: Gọi kiểm tra XiaoZhi OTA ngay.");
       Serial.println("👉 Bấm phím 'c' rồi Enter: Thu hồi bộ nhớ RAM & PSRAM khẩn cấp.");
       Serial.println("=======================================================");
-      ModuleTestRunner::printAllHelp();
+      SystemCoordinator::printAllHelp();
     }
   }
 }

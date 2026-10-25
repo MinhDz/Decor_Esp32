@@ -6,7 +6,7 @@
 #include "ImageManager.h"
 #include "WebRoutes.h"
 #include "OtaManager.h"
-#include "tests/ModuleTestRunner.h"
+#include "SystemCoordinator.h"
 #include "tests/TestSpeakerMAX98357A.h"
 #include "drivers/CobLedDriver.h"
 #include "WebStreamManager.h"
@@ -60,7 +60,7 @@ void setup() {
   MemoryScavenger::init();
 
   // 2. Khởi chạy Hệ thống 4 Màn hình ST7789 + Mic INMP441 + Cảm biến SHT31 + 7 Phím Bấm DIO
-  ModuleTestRunner::init();
+  SystemCoordinator::init();
 
   // 3. Khởi tạo Wi-Fi (SoftAP cứu hộ & Tự động kết nối Smart Wi-Fi)
   WifiManager::begin();
@@ -88,7 +88,7 @@ void loop() {
 
   // 1. Vòng lặp cập nhật 4 Màn hình ST7789, Mic INMP441, Cảm biến SHT31 & 7 Phím DIO
   TaskProfiler::start(PROF_MODULES);
-  ModuleTestRunner::loop();
+  SystemCoordinator::loop();
   TaskProfiler::stop(PROF_MODULES);
 
   // 1A. Cập nhật chu trình xung đổi chế độ non-blocking cho 2 Thanh LED COB
