@@ -8,7 +8,7 @@
 #include "OtaManager.h"
 #include "tests/ModuleTestRunner.h"
 #include "tests/TestSpeakerMAX98357A.h"
-#include "CobLedController.h"
+#include "drivers/CobLedDriver.h"
 #include "WebStreamManager.h"
 #include "WeatherManager.h"
 #include "TelemetryManager.h"

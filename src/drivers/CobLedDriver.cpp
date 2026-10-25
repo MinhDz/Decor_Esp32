@@ -1,4 +1,4 @@
-#include "CobLedController.h"
+#include "drivers/CobLedDriver.h"
 #include "driver/gpio.h"
 
 // Khởi tạo 2 đối tượng điều khiển độc lập cho 2 thanh LED mặt lưng
@@ -187,3 +187,4 @@ namespace CobLeds {
   }
 
 } // namespace CobLeds
+

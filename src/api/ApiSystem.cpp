@@ -11,7 +11,7 @@
 #include "tests/TestAudio.h"
 #include "tests/TestSDCard.h"
 #include "tests/TestWindmill.h"
-#include "CobLedController.h"
+#include "drivers/CobLedDriver.h"
 #include "OtaManager.h"
 #include "TelemetryManager.h"
 #include "TaskProfiler.h"

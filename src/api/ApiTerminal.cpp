@@ -5,7 +5,7 @@
 #include "WebAuth.h"
 #include "SystemLogger.h"
 #include "MemoryScavenger.h"
-#include "CobLedController.h"
+#include "drivers/CobLedDriver.h"
 #include "TelemetryManager.h"
 #include "OtaManager.h"
 #include "drivers/MotorDriver.h"

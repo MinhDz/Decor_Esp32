@@ -5,7 +5,7 @@
 #include "tests/TestButtons.h"
 #include "tests/TestSDCard.h"
 #include "tests/TestWindmill.h"
-#include "CobLedController.h"
+#include "drivers/CobLedDriver.h"
 #include "Config.h"
 #include "WifiManager.h"
 #include "PcStatsManager.h"

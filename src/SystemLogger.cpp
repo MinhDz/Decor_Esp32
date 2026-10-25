@@ -4,7 +4,7 @@
 #include "tests/TestSensors.h"
 #include "tests/TestAudio.h"
 #include "tests/TestWindmill.h"
-#include "CobLedController.h"
+#include "drivers/CobLedDriver.h"
 #include "HardwareManager.h"
 #include "WifiManager.h"
 #include "WeatherManager.h"

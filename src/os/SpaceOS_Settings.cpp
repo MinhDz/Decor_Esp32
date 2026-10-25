@@ -4,7 +4,7 @@
 #include "SpaceOS_GameCenter.h"
 #include "drivers/AudioDriver.h"
 #include "drivers/MotorDriver.h"
-#include "CobLedController.h"
+#include "drivers/CobLedDriver.h"
 #include "WebAuth.h"
 #include "ImageManager.h"
 #include <Preferences.h>

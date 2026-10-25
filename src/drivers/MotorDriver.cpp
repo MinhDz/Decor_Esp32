@@ -2,7 +2,7 @@
 #include "tests/TestDisplay.h"
 #include "tests/TestSensors.h"
 #include "tests/TestAudio.h"
-#include "CobLedController.h"
+#include "drivers/CobLedDriver.h"
 #include "Config.h"
 #include "PcStatsManager.h"
 #include <Preferences.h>
