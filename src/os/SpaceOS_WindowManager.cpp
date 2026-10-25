@@ -139,6 +139,7 @@ namespace TestDisplay {
   static volatile bool& isScreenSleeping = DisplayDriver::getSleepingRef();
   static volatile bool& s_wakeUpRequested = DisplayDriver::getWakeUpRequestedRef();
   static int lastAodDrawnMinute = -1;
+  static int s_lastStandbyDrawnDay = -1;
   static bool lastTtp223State = false;
   static unsigned long lastTtp223ChangeMs = 0;
   static int& s40AlarmTuneIdx = SpaceOS_ClockSuite::getAlarmTuneIdxRef();
@@ -531,9 +532,9 @@ namespace TestDisplay {
     second = totalSec % 60;
     minute = (totalSec / 60) % 60;
     hour   = (totalSec / 3600) % 24;
-    wday   = 5; // Thứ Sáu
-    day    = 25;
-    month  = 9;
+    wday   = 1; // Thứ Hai
+    day    = 26;
+    month  = 10;
     year   = 2026;
   }
 
@@ -1024,11 +1025,22 @@ namespace TestDisplay {
   }
 
   // Cập nhật Đồng hồ số nổi trong suốt trên nền ảnh JPEG / Gradient (Không vẽ hộp đen che ảnh & không nháy hình)
+  static void drawStandbyScreenFull();
+
+  // Cập nhật Đồng hồ số nổi trong suốt trên nền ảnh JPEG / Gradient
   static void updateStandbyClockDigits(bool forceFullClock) {
     if (!tft || isScreenSleeping || currentMode != 0 || !clockCanvas) return;
 
     int hour, minute, second, wday, day, month, year;
     getCurrentDateTime(hour, minute, second, wday, day, month, year);
+
+    // Tự động phát hiện đổi ngày (qua nửa đêm 00:00:00 hoặc khi vừa đồng bộ xong NTP)
+    if (s_lastStandbyDrawnDay != -1 && s_lastStandbyDrawnDay != day) {
+      s_lastStandbyDrawnDay = day;
+      drawStandbyScreenFull();
+      return;
+    }
+    s_lastStandbyDrawnDay = day;
 
     bool is12h = (stCfg.clockFormat == "12h");
     bool isPM = (hour >= 12);
@@ -1173,6 +1185,7 @@ namespace TestDisplay {
     if (stCfg.showDate) {
       int hour, minute, second, wday, day, month, year;
       getCurrentDateTime(hour, minute, second, wday, day, month, year);
+      s_lastStandbyDrawnDay = day;
       char dateBuf[48];
       const char* viDays[] = { "Chủ Nhật", "Thứ Hai", "Thứ Ba", "Thứ Tư", "Thứ Năm", "Thứ Sáu", "Thứ Bảy" };
       const char* enDays[] = { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" };
@@ -8479,7 +8492,7 @@ namespace TestDisplay {
     if (s_standbyNeedsRedraw) {
       s_standbyNeedsRedraw = false;
       if (currentMode == 0 && !isScreenSleeping) {
-        drawStandbyWeatherPillOnly();
+        drawStandbyScreenFull();
       }
     }
 
