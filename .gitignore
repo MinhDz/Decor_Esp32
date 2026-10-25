@@ -40,3 +40,7 @@ sample/musics/*.mp4
 assets/drive_sync/*
 !assets/drive_sync/.gitkeep
 
+# Local logs
+log/
+
+

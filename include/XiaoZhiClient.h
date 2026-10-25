@@ -39,6 +39,14 @@ public:
   static bool sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleCount, uint32_t sampleRate,
                                 String& outUserText, String& outAiReply, String& outEmotion,
                                 XiaoZhiProgressCallback onProgress = nullptr);
+
+  // --- ĐÀM THOẠI BẤT ĐỒNG BỘ FREERTOS TRÊN CORE 0 (ZERO-FREEZE UI) ---
+  static bool startAudioConversationAsync(const int16_t* pcmSamples, size_t sampleCount, uint32_t sampleRate);
+  static bool isConversationActive();
+  static bool hasNewTurnResult();
+  static void getLatestTurnResult(String& outUserText, String& outAiReply, String& outEmotion);
+  static void abortConversation();
+
   static String getLastSttText();
   static String getLastLlmReply();
   static String getLastEmotion();

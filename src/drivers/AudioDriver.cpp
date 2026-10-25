@@ -1241,8 +1241,163 @@ namespace AudioDriver {
     vTaskDelete(NULL);
   }
 
+  // --- BỘ ĐỆM BẤT ĐỒNG BỘ STREAM (XIAOZHI TTS / WEB STREAM) TRÊN CORE 0 ---
+  static int16_t* s_asyncStreamRingBuf = nullptr;
+  static const size_t ASYNC_STREAM_RING_CAPACITY = 64000; // 128KB PSRAM (~4 giây Mono 16kHz)
+  static size_t s_asyncStreamHead = 0;
+  static size_t s_asyncStreamTail = 0;
+  static size_t s_asyncStreamCount = 0;
+  static portMUX_TYPE s_asyncStreamMux = portMUX_INITIALIZER_UNLOCKED;
+  static TaskHandle_t s_asyncStreamPumpHandle = nullptr;
+  static volatile bool s_asyncStreamPumpRunning = false;
+
+  static void asyncStreamPumpTask(void* param) {
+    const size_t CHUNK = 256;
+    int16_t stereoChunk[CHUNK * 2];
+    int16_t monoChunk[CHUNK];
+
+    while (s_asyncStreamPumpRunning) {
+      size_t count = 0;
+      taskENTER_CRITICAL(&s_asyncStreamMux);
+      count = s_asyncStreamCount;
+      taskEXIT_CRITICAL(&s_asyncStreamMux);
+
+      if (count == 0) {
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
+        continue;
+      }
+
+      size_t toRead = (count > CHUNK) ? CHUNK : count;
+      taskENTER_CRITICAL(&s_asyncStreamMux);
+      for (size_t i = 0; i < toRead; i++) {
+        monoChunk[i] = s_asyncStreamRingBuf[s_asyncStreamHead];
+        s_asyncStreamHead = (s_asyncStreamHead + 1) % ASYNC_STREAM_RING_CAPACITY;
+      }
+      s_asyncStreamCount -= toRead;
+      taskEXIT_CRITICAL(&s_asyncStreamMux);
+
+      s_lastStreamPcmMs = millis();
+
+      if (!spkDriverInstalled) {
+        if (!installSpeakerTx(16000)) {
+          vTaskDelay(pdMS_TO_TICKS(10));
+          continue;
+        }
+      }
+
+      int64_t sumAmp = 0;
+      for (size_t k = 0; k < toRead; k += 8) {
+        int32_t val = monoChunk[k];
+        if (val < 0) val = -val;
+        sumAmp += val;
+      }
+      int avgAmp = (toRead > 0) ? (int)(sumAmp / (toRead / 8 + 1)) : 0;
+      s_streamVoiceEnergy = (uint8_t)constrain(avgAmp / 110, 0, 100);
+
+      int vol = max(musicVolumePct, xiaozhiVolumePct);
+      float volScale = (vol > 0) ? ((float)vol / 100.0f) : 0.0f;
+      for (size_t j = 0; j < toRead; j++) {
+        int32_t s = (int32_t)(monoChunk[j] * volScale);
+        if (s > 31500) s = 31500;
+        else if (s < -31500) s = -31500;
+        stereoChunk[j * 2]     = (int16_t)s;
+        stereoChunk[j * 2 + 1] = (int16_t)s;
+      }
+
+      size_t written = 0;
+      i2s_write(I2S_PORT_SPK, stereoChunk, toRead * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(50));
+
+      if (toRead >= 16) {
+        uint8_t specBands[16] = {0};
+        int maxLv = 0;
+        for (int b = 0; b < 16; b++) {
+          int sIdx = (b * toRead) / 16;
+          int val = abs((int)monoChunk[sIdx]) / 280;
+          specBands[b] = (uint8_t)constrain(val, 2, 98);
+          if (specBands[b] > maxLv) maxLv = specBands[b];
+        }
+        TestAudio::setExternalAudioSpectrum(specBands, maxLv);
+      }
+    }
+
+    s_asyncStreamPumpHandle = nullptr;
+    vTaskDelete(NULL);
+  }
+
+  void playStreamPcmAsync(const int16_t* samples, size_t sampleCount) {
+    if (!samples || sampleCount == 0) return;
+
+    if (!s_asyncStreamRingBuf) {
+      if (psramFound()) {
+        s_asyncStreamRingBuf = (int16_t*)ps_malloc(ASYNC_STREAM_RING_CAPACITY * sizeof(int16_t));
+      }
+      if (!s_asyncStreamRingBuf) {
+        s_asyncStreamRingBuf = (int16_t*)malloc(8000 * sizeof(int16_t));
+      }
+      s_asyncStreamHead = 0;
+      s_asyncStreamTail = 0;
+      s_asyncStreamCount = 0;
+    }
+    if (!s_asyncStreamRingBuf) return;
+
+    size_t cap = psramFound() ? ASYNC_STREAM_RING_CAPACITY : 8000;
+
+    if (!s_asyncStreamPumpHandle) {
+      s_asyncStreamPumpRunning = true;
+      xTaskCreatePinnedToCore(
+        asyncStreamPumpTask,
+        "asyncStreamPump",
+        4096,
+        nullptr,
+        4,
+        &s_asyncStreamPumpHandle,
+        0
+      );
+    }
+
+    taskENTER_CRITICAL(&s_asyncStreamMux);
+    for (size_t i = 0; i < sampleCount; i++) {
+      if (s_asyncStreamCount < cap) {
+        s_asyncStreamRingBuf[s_asyncStreamTail] = samples[i];
+        s_asyncStreamTail = (s_asyncStreamTail + 1) % cap;
+        s_asyncStreamCount++;
+      } else {
+        s_asyncStreamHead = (s_asyncStreamHead + 1) % cap;
+        s_asyncStreamRingBuf[s_asyncStreamTail] = samples[i];
+        s_asyncStreamTail = (s_asyncStreamTail + 1) % cap;
+      }
+    }
+    taskEXIT_CRITICAL(&s_asyncStreamMux);
+
+    if (s_asyncStreamPumpHandle) {
+      xTaskNotifyGive(s_asyncStreamPumpHandle);
+    }
+  }
+
+  void stopStreamPcmAsync() {
+    taskENTER_CRITICAL(&s_asyncStreamMux);
+    s_asyncStreamHead = 0;
+    s_asyncStreamTail = 0;
+    s_asyncStreamCount = 0;
+    taskEXIT_CRITICAL(&s_asyncStreamMux);
+    s_lastStreamPcmMs = 0;
+    s_streamVoiceEnergy = 0;
+    if (spkDriverInstalled) {
+      i2s_zero_dma_buffer(I2S_PORT_SPK);
+    }
+  }
+
+  bool isStreamPcmAsyncPlaying() {
+    bool hasData = false;
+    taskENTER_CRITICAL(&s_asyncStreamMux);
+    hasData = (s_asyncStreamCount > 0);
+    taskEXIT_CRITICAL(&s_asyncStreamMux);
+    return hasData || isVoiceStreamActive();
+  }
+
   // --- PHÁT DỮ LIỆU ÂM THANH THEO LUỒNG THỜI GIAN THỰC (TTS XIAOZHI) ---
   void resetStreamPcm() {
+    stopStreamPcmAsync();
     s_lastStreamPcmMs = 0;
     s_streamVoiceEnergy = 0;
     if (spkDriverInstalled) {
@@ -1399,18 +1554,34 @@ namespace AudioDriver {
   }
 
   size_t trimMemory() {
-    // Chỉ giải phóng khi không đang thu âm và không đang phát lại
-    if (voiceRecordingActive || audioPlayRunning) return 0;
-    if (pcmRecBuffer == nullptr) return 0;
+    size_t totalFreed = 0;
+    // 1. Giải phóng bộ đệm thu âm khi không dùng
+    if (!voiceRecordingActive && !audioPlayRunning && pcmRecBuffer != nullptr) {
+      size_t freedBytes = pcmRecAllocatedSamples * sizeof(int16_t);
+      free(pcmRecBuffer);
+      pcmRecBuffer = nullptr;
+      pcmRecAllocatedSamples = 0;
+      pcmRecSampleCount = 0;
+      totalFreed += freedBytes;
+      Serial.printf("🧹 [TRIM AUDIO] Đã giải phóng bộ đệm thu âm (%u bytes / %u KB)\n",
+                    (unsigned int)freedBytes, (unsigned int)(freedBytes / 1024));
+    }
 
-    size_t freedBytes = pcmRecAllocatedSamples * sizeof(int16_t);
-    free(pcmRecBuffer);
-    pcmRecBuffer = nullptr;
-    pcmRecAllocatedSamples = 0;
-    pcmRecSampleCount = 0;
-    Serial.printf("🧹 [TRIM AUDIO] Đã giải phóng bộ đệm thu âm (%u bytes / %u KB)\n",
-                  (unsigned int)freedBytes, (unsigned int)(freedBytes / 1024));
-    return freedBytes;
+    // 2. Giải phóng bộ đệm stream bất đồng bộ khi không phát
+    if (!isStreamPcmAsyncPlaying() && s_asyncStreamRingBuf != nullptr) {
+      taskENTER_CRITICAL(&s_asyncStreamMux);
+      free(s_asyncStreamRingBuf);
+      s_asyncStreamRingBuf = nullptr;
+      s_asyncStreamHead = 0;
+      s_asyncStreamTail = 0;
+      s_asyncStreamCount = 0;
+      taskEXIT_CRITICAL(&s_asyncStreamMux);
+      size_t freedStream = ASYNC_STREAM_RING_CAPACITY * sizeof(int16_t);
+      totalFreed += freedStream;
+      Serial.printf("🧹 [TRIM AUDIO] Đã giải phóng bộ đệm stream RingBuffer (%u KB)\n", (unsigned int)(freedStream / 1024));
+    }
+
+    return totalFreed;
   }
 
   bool handleSerial(char cmd) {

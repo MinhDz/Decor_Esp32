@@ -71,6 +71,9 @@ namespace AudioDriver {
   // --- PHÁT ÂM THANH QUA I2S DAC MAX98357A (DIN=15, BCLK=16, LRC=17 TRÊN I2S_NUM_1) ---
   void playRecordedVoice(uint8_t volumePct = 65);
   void playStreamPcm(const int16_t* samples, size_t sampleCount);
+  void playStreamPcmAsync(const int16_t* samples, size_t sampleCount);
+  void stopStreamPcmAsync();
+  bool isStreamPcmAsyncPlaying();
   void resetStreamPcm();
 
   // --- HÀM TƯƠNG THÍCH NGƯỢC (TỰ ĐỘNG CHUYỂN SANG I2S DAC MAX98357A) ---

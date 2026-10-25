@@ -767,7 +767,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 Serial.printf("🔊 [XIAOZHI OPUS RX] Frame #%u | Opus: %d bytes -> Giải mã %d mẫu PCM 16kHz -> MAX98357A\n",
                               s_binFrames, data->data_len, decodedSamples);
               }
-              TestAudio::playStreamPcm(s_pcmDecodeBuf, (size_t)decodedSamples);
+              TestAudio::playStreamPcmAsync(s_pcmDecodeBuf, (size_t)decodedSamples);
             } else {
               // Fallback dự phòng nếu khung nhị phân là PCM 16-bit thô
               size_t sampleCount = data->data_len / sizeof(int16_t);
@@ -775,7 +775,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 Serial.printf("🔊 [XIAOZHI PCM RX] Frame #%u | %d bytes (Opus err=%d) -> %u mẫu PCM -> MAX98357A\n",
                               s_binFrames, data->data_len, decodedSamples, (unsigned)sampleCount);
               }
-              TestAudio::playStreamPcm((const int16_t*)data->data_ptr, sampleCount);
+              TestAudio::playStreamPcmAsync((const int16_t*)data->data_ptr, sampleCount);
             }
           }
         }
@@ -1116,19 +1116,153 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
   return (outUserText.length() > 0 || outAiReply.length() > 0);
 }
 
+// --- TÁC VỤ ĐÀM THOẠI BẤT ĐỒNG BỘ FREERTOS (CORE 0) ---
+static int16_t* s_asyncConvPcm = nullptr;
+static size_t s_asyncConvMaxCapacity = 160000; // 320 KB PSRAM (~10s âm thanh Mono 16kHz)
+static size_t s_asyncConvSampleCount = 0;
+static uint32_t s_asyncConvSampleRate = 16000;
+static TaskHandle_t s_asyncConvTaskHandle = nullptr;
+static volatile bool s_asyncConvRunning = false;
+static volatile bool s_asyncConvHasResult = false;
+static String s_asyncResultUserText = "";
+static String s_asyncResultAiReply = "";
+static String s_asyncResultEmotion = "happy";
+static portMUX_TYPE s_asyncConvMux = portMUX_INITIALIZER_UNLOCKED;
+
+static void asyncConversationTask(void* param) {
+  Serial.println("🤖 [XIAOZHI CONV TASK] Bắt đầu tác vụ đàm thoại bất đồng bộ trên Core 0...");
+  String userText = "";
+  String aiReply = "";
+  String emotion = "happy";
+
+  bool ok = XiaoZhiClient::sendAudioToXiaoZhi(
+    s_asyncConvPcm,
+    s_asyncConvSampleCount,
+    s_asyncConvSampleRate,
+    userText,
+    aiReply,
+    emotion,
+    nullptr
+  );
+
+  taskENTER_CRITICAL(&s_asyncConvMux);
+  s_asyncResultUserText = userText;
+  s_asyncResultAiReply = aiReply;
+  s_asyncResultEmotion = emotion;
+  s_asyncConvHasResult = ok;
+  s_asyncConvRunning = false;
+  taskEXIT_CRITICAL(&s_asyncConvMux);
+
+  Serial.printf("🤖 [XIAOZHI CONV TASK] Hoàn tất đàm thoại (ok=%d). Giải phóng task Core 0.\n", ok);
+  s_asyncConvTaskHandle = nullptr;
+  vTaskDelete(NULL);
+}
+
+bool XiaoZhiClient::startAudioConversationAsync(const int16_t* pcmSamples, size_t sampleCount, uint32_t sampleRate) {
+  if (!pcmSamples || sampleCount < 800) {
+    Serial.println("⚠️ [XIAOZHI ASYNC] Dữ liệu PCM quá ngắn, bỏ qua.");
+    return false;
+  }
+
+  abortConversation();
+
+  if (!s_asyncConvPcm) {
+    if (psramFound()) {
+      s_asyncConvPcm = (int16_t*)ps_malloc(s_asyncConvMaxCapacity * sizeof(int16_t));
+    }
+    if (!s_asyncConvPcm) {
+      s_asyncConvPcm = (int16_t*)malloc(16000 * sizeof(int16_t)); // Fallback 32KB SRAM (~1s)
+      s_asyncConvMaxCapacity = 16000;
+    }
+  }
+
+  if (!s_asyncConvPcm) {
+    Serial.println("❌ [XIAOZHI ASYNC] Không thể cấp phát bộ đệm PCM!");
+    return false;
+  }
+
+  size_t toCopy = (sampleCount < s_asyncConvMaxCapacity) ? sampleCount : s_asyncConvMaxCapacity;
+  memcpy(s_asyncConvPcm, pcmSamples, toCopy * sizeof(int16_t));
+  s_asyncConvSampleCount = toCopy;
+  s_asyncConvSampleRate = sampleRate;
+
+  taskENTER_CRITICAL(&s_asyncConvMux);
+  s_asyncConvRunning = true;
+  s_asyncConvHasResult = false;
+  s_asyncResultUserText = "";
+  s_asyncResultAiReply = "";
+  s_asyncResultEmotion = "happy";
+  taskEXIT_CRITICAL(&s_asyncConvMux);
+
+  BaseType_t res = xTaskCreatePinnedToCore(
+    asyncConversationTask,
+    "XiaoZhiConvTask",
+    8192,
+    nullptr,
+    2, // Priority 2 trên Core 0 (không nghẽn Core 1 UI)
+    &s_asyncConvTaskHandle,
+    0  // Pin to Core 0
+  );
+
+  return (res == pdPASS);
+}
+
+bool XiaoZhiClient::isConversationActive() {
+  bool active = false;
+  taskENTER_CRITICAL(&s_asyncConvMux);
+  active = s_asyncConvRunning;
+  taskEXIT_CRITICAL(&s_asyncConvMux);
+  return active;
+}
+
+bool XiaoZhiClient::hasNewTurnResult() {
+  bool hasRes = false;
+  taskENTER_CRITICAL(&s_asyncConvMux);
+  hasRes = s_asyncConvHasResult;
+  taskEXIT_CRITICAL(&s_asyncConvMux);
+  return hasRes;
+}
+
+void XiaoZhiClient::getLatestTurnResult(String& outUserText, String& outAiReply, String& outEmotion) {
+  taskENTER_CRITICAL(&s_asyncConvMux);
+  outUserText = s_asyncResultUserText;
+  outAiReply = s_asyncResultAiReply;
+  outEmotion = s_asyncResultEmotion;
+  s_asyncConvHasResult = false;
+  taskEXIT_CRITICAL(&s_asyncConvMux);
+}
+
+void XiaoZhiClient::abortConversation() {
+  if (s_asyncConvTaskHandle != nullptr) {
+    vTaskDelete(s_asyncConvTaskHandle);
+    s_asyncConvTaskHandle = nullptr;
+  }
+  taskENTER_CRITICAL(&s_asyncConvMux);
+  s_asyncConvRunning = false;
+  s_asyncConvHasResult = false;
+  taskEXIT_CRITICAL(&s_asyncConvMux);
+}
+
 bool XiaoZhiClient::hasAllocatedDecoder() {
   return (s_opusDecoder != nullptr);
 }
 
 size_t XiaoZhiClient::trimMemory() {
-  if (s_opusDecoder == nullptr) return 0;
-  // Nếu AI đang phát âm thanh (luồng âm thanh đang phát), không thu hồi
-  if (TestAudio::isVoiceStreamActive()) return 0;
+  size_t totalFreed = 0;
+  if (!isConversationActive() && s_asyncConvPcm != nullptr) {
+    free(s_asyncConvPcm);
+    s_asyncConvPcm = nullptr;
+    totalFreed += s_asyncConvMaxCapacity * sizeof(int16_t);
+    Serial.println("🧹 [TRIM XIAOZHI] Đã giải phóng bộ đệm async PCM (320 KB PSRAM)");
+  }
 
-  opus_decoder_destroy(s_opusDecoder);
-  s_opusDecoder = nullptr;
-  Serial.println("🧹 [TRIM XIAOZHI] Đã giải phóng Opus Decoder (~25 KB)");
-  return 25 * 1024;
+  if (s_opusDecoder != nullptr && !TestAudio::isVoiceStreamActive()) {
+    opus_decoder_destroy(s_opusDecoder);
+    s_opusDecoder = nullptr;
+    Serial.println("🧹 [TRIM XIAOZHI] Đã giải phóng Opus Decoder (~25 KB)");
+    totalFreed += 25 * 1024;
+  }
+  return totalFreed;
 }
 
 

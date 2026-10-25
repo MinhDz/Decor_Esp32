@@ -3679,107 +3679,18 @@ namespace TestDisplay {
     drawXiaoZhiConversationBoxOnly();
     drawSymbianSoftkeys("Cho...", "Dang nghi...", "Thoat");
 
-    // 3. Gửi trực tiếp âm thanh thuần PCM 16-bit 16,000Hz lên XiaoZhi Hub WebSocket (Loại bỏ hoàn toàn Google STT)
-    String recognizedUserText = "";
-    String aiReplyText = "";
-    String emotionTag = "happy";
-
-    auto onProgressCb = [](const String& sttText, const String& partialReply, const String& emotion, bool isFinal) {
-      bool needRedraw = false;
-      bool stateChangedToReplying = false;
-      if (sttText.length() > 0) {
-        String cleanStt = XiaoZhiClient::stripVietnameseToAscii(sttText);
-        if (cleanStt != s40AiUserSpeechText) {
-          s40AiUserSpeechText = cleanStt;
-          s40AiSttPhaseMsg = ">> XiaoZhi dang suy nghi tra loi...";
-          needRedraw = true;
-        }
-      }
-
-      // ĐỒNG BỘ BIỂU CẢM THỜI GIAN THỰC TỪ XIAOZHI CLOUD
-      String resolvedEmotion = emotion;
-      if (resolvedEmotion.length() == 0 && partialReply.length() > 0) {
-        resolvedEmotion = XiaoZhiClient::detectEmotionFromText(partialReply);
-      }
-      if (resolvedEmotion.length() > 0 && resolvedEmotion != s40AiEmotionTag) {
-        s40AiEmotionTag = resolvedEmotion;
-        uint8_t targetEye = mapAiEmotionToEyeState(s40AiEmotionTag, partialReply);
-        if (targetEye != eyeState) {
-          eyeState = targetEye;
-          lastExternalEmojiSync = millis();
-          needRedraw = true;
-        }
-      }
-
-      if (partialReply.length() > 0) {
-        String replyAscii = XiaoZhiClient::stripVietnameseToAscii(partialReply);
-        String newReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;
-        if (newReplyText != s40AiReplyText) {
-          s40AiReplyText = newReplyText;
-          s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
-          s40AiScrollLine = 0;
-          s40AiAutoScroll = true;
-          s40AiLastScrollMs = millis();
-          if (s40AiState != AI_STATE_REPLYING) {
-            s40AiState = AI_STATE_REPLYING;
-            stateChangedToReplying = true;
-          }
-          uint8_t targetEye = mapAiEmotionToEyeState(s40AiEmotionTag, replyAscii);
-          if (targetEye != eyeState) {
-            eyeState = targetEye;
-            lastExternalEmojiSync = millis();
-          }
-          needRedraw = true;
-        }
-      }
-
-      if (needRedraw && tft) {
-        drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
-        drawXiaoZhiAssistantStatusStrip();
-        drawXiaoZhiConversationBoxOnly();
-        if (stateChangedToReplying) {
-          drawSymbianSoftkeys("Noi tiep(OK)", "Am luong", "Thoat");
-        }
-      }
-    };
-
-    bool wsOk = XiaoZhiClient::sendAudioToXiaoZhi(pcm, sampleCount, TestAudio::getRecordSampleRate(),
-                                                  recognizedUserText, aiReplyText, emotionTag, onProgressCb);
-
+    // 3. Khởi chạy đàm thoại bất đồng bộ FreeRTOS trên Core 0 (Zero-Freeze UI)
+    bool wsOk = XiaoZhiClient::startAudioConversationAsync(pcm, sampleCount, TestAudio::getRecordSampleRate());
     if (wsOk) {
-      String userAscii = XiaoZhiClient::stripVietnameseToAscii(recognizedUserText);
-      String replyAscii = XiaoZhiClient::stripVietnameseToAscii(aiReplyText);
-
-      s40AiUserSpeechText = (userAscii.length() > 0) ? userAscii : "(Da nhan am thanh)";
-
-      // Dự phòng thông minh nếu máy chủ chưa gửi kịp text TTS
-      if (replyAscii.length() == 0 && userAscii.length() > 0) {
-        replyAscii = XiaoZhiClient::askXiaoZhiAI(userAscii, emotionTag);
-      }
-
-      s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;
-      String finalEmotion = emotionTag;
-      if (finalEmotion.length() == 0) finalEmotion = XiaoZhiClient::getLastEmotion();
-      if (finalEmotion.length() == 0) finalEmotion = XiaoZhiClient::detectEmotionFromText(replyAscii);
-      if (finalEmotion.length() == 0) finalEmotion = "happy";
-      s40AiEmotionTag = finalEmotion;
-      eyeState = mapAiEmotionToEyeState(s40AiEmotionTag, replyAscii);
-      lastExternalEmojiSync = millis();
-
-      s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
-      s40AiScrollLine = 0;
-      s40AiAutoScroll = true;
-      s40AiLastScrollMs = millis();
-      s40AiState = AI_STATE_REPLYING;
-      drawXiaoZhiAssistantScreen(true);
+      Serial.println("🚀 [XIAOZHI UI] Đã giao tác vụ đàm thoại cho Core 0. Core 1 tiếp tục vẽ 60 FPS!");
       return;
     }
 
-    // Nếu truyền qua XiaoZhi Hub chưa nhận được kết quả tức thì
+    // Nếu không thể khởi chạy task đàm thoại (ví dụ chưa nối Wi-Fi)
     s40AiEmotionTag = "CONFUSED";
     eyeState = 8;
     if (XiaoZhiClient::isWebSocketConnected()) {
-      s40AiReplyText = "XiaoZhi dang xu ly cau hoi, ban cho trong giay lat nhe!";
+      s40AiReplyText = "XiaoZhi dang ban xu ly, ban thu lai nhe!";
     } else {
       s40AiReplyText = "Chua the ket noi toi XiaoZhi Hub.\nVui long kiem tra lai ket noi Wi-Fi!";
     }
@@ -3788,7 +3699,6 @@ namespace TestDisplay {
     s40AiAutoScroll = true;
     s40AiLastScrollMs = millis();
     s40AiState = AI_STATE_REPLYING;
-
     drawXiaoZhiAssistantScreen(true);
   }
 
@@ -8751,6 +8661,59 @@ namespace TestDisplay {
           eyeState = thinkSeq[thinkIdx % 4];
           thinkIdx++;
           drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        }
+
+        // Kiểm tra phản hồi thời gian thực từ tác vụ Core 0:
+        String liveStt = XiaoZhiClient::getLastSttText();
+        if (liveStt.length() > 0) {
+          String cleanStt = XiaoZhiClient::stripVietnameseToAscii(liveStt);
+          if (cleanStt != s40AiUserSpeechText) {
+            s40AiUserSpeechText = cleanStt;
+            s40AiSttPhaseMsg = ">> XiaoZhi dang suy nghi tra loi...";
+            drawXiaoZhiAssistantStatusStrip();
+            drawXiaoZhiConversationBoxOnly();
+          }
+        }
+
+        String liveReply = XiaoZhiClient::getLastLlmReply();
+        bool convDone = XiaoZhiClient::hasNewTurnResult();
+        if (liveReply.length() > 0 || convDone) {
+          String recognizedUserText = "";
+          String aiReplyText = "";
+          String emotionTag = "happy";
+          if (convDone) {
+            XiaoZhiClient::getLatestTurnResult(recognizedUserText, aiReplyText, emotionTag);
+          } else {
+            aiReplyText = liveReply;
+            emotionTag = XiaoZhiClient::getLastEmotion();
+          }
+
+          if (recognizedUserText.length() > 0) {
+            s40AiUserSpeechText = XiaoZhiClient::stripVietnameseToAscii(recognizedUserText);
+          }
+          String replyAscii = XiaoZhiClient::stripVietnameseToAscii(aiReplyText);
+          s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;
+          if (emotionTag.length() > 0) s40AiEmotionTag = emotionTag;
+          eyeState = mapAiEmotionToEyeState(s40AiEmotionTag, replyAscii);
+          lastExternalEmojiSync = now;
+
+          s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+          s40AiScrollLine = 0;
+          s40AiAutoScroll = true;
+          s40AiLastScrollMs = now;
+          s40AiState = AI_STATE_REPLYING;
+          drawXiaoZhiAssistantScreen(true);
+        } else if (!XiaoZhiClient::isConversationActive() && (now - s40AiStateChangeMs > 3000)) {
+          // Task kết thúc mà không có kết quả (lỗi kết nối hoặc timeout)
+          s40AiEmotionTag = "CONFUSED";
+          eyeState = 8;
+          s40AiReplyText = "Chua the ket noi toi XiaoZhi Hub.\nVui long kiem tra lai ket noi Wi-Fi!";
+          s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+          s40AiScrollLine = 0;
+          s40AiAutoScroll = true;
+          s40AiLastScrollMs = now;
+          s40AiState = AI_STATE_REPLYING;
+          drawXiaoZhiAssistantScreen(true);
         }
       } else if (s40AiState == AI_STATE_REPLYING) {
         // 1. Cập nhật câu thoại thời gian thực nếu XiaoZhi Cloud gửi thêm câu mới (streaming nhiều câu)
