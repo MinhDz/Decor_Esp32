@@ -4818,70 +4818,73 @@ namespace TestDisplay {
     s40MediaTrackCount = 0;
     // 0. Quét thư mục /recording trên Thẻ nhớ SD (Chứa các bản ghi âm từ Mic INMP441)
     if (TestSDCard::isMounted()) {
-      if (!SD.exists("/recording")) {
-        SD.mkdir("/recording");
-      }
-      File rDir = SD.open("/recording");
-      if (rDir && rDir.isDirectory()) {
-        File f = rDir.openNextFile();
-        while (f && s40MediaTrackCount < 18) {
-          if (!f.isDirectory()) {
-            String fn = String(f.name());
-            int sl = fn.lastIndexOf('/');
-            if (sl >= 0) fn = fn.substring(sl + 1);
-            String low = fn;
-            low.toLowerCase();
-            if (low.endsWith(".wav") || low.endsWith(".mp3")) {
-              size_t fsz = f.size();
-              s40MediaTracks[s40MediaTrackCount] = fn;
-              s40MediaFileSizes[s40MediaTrackCount] = fsz;
-              uint16_t estSec = (fsz > 44) ? max((size_t)3, (fsz - 44) / 32000) : 10;
-              s40MediaDurations[s40MediaTrackCount] = estSec;
-              s40MediaFromSd[s40MediaTrackCount] = true;
-              s40MediaTrackCount++;
-            }
-          }
-          f.close();
-          f = rDir.openNextFile();
+      if (StorageDriver::lock(pdMS_TO_TICKS(150))) {
+        if (!SD.exists("/recording")) {
+          SD.mkdir("/recording");
         }
-        rDir.close();
-      }
-
-      // 1. Quét tiếp thư mục /Musics tồn tại trên Thẻ nhớ MicroSD
-      if (!SD.exists("/Musics")) {
-        SD.mkdir("/Musics");
-      }
-      File mDir = SD.open("/Musics");
-      if (mDir && mDir.isDirectory()) {
-        File f = mDir.openNextFile();
-        while (f && s40MediaTrackCount < 18) {
-          if (!f.isDirectory()) {
-            String fn = String(f.name());
-            int sl = fn.lastIndexOf('/');
-            if (sl >= 0) fn = fn.substring(sl + 1);
-            String low = fn;
-            low.toLowerCase();
-            if (low.endsWith(".mp3") || low.endsWith(".wav") || low.endsWith(".flac") || low.endsWith(".ogg")) {
-              size_t fsz = f.size();
-              s40MediaTracks[s40MediaTrackCount] = fn;
-              s40MediaFileSizes[s40MediaTrackCount] = fsz;
-              // Ước tính thời lượng thực từ dung lượng file (.mp3 ~ 16KB/s @128kbps, .wav ~ 88KB/s hoặc 32KB/s)
-              uint16_t estSec = 180;
-              if (low.endsWith(".wav")) {
-                estSec = (fsz > 44) ? max((size_t)5, (fsz - 44) / 32000) : 120;
-              } else {
-                estSec = (fsz > 1024) ? max((size_t)5, fsz / 16000) : 180;
+        File rDir = SD.open("/recording");
+        if (rDir && rDir.isDirectory()) {
+          File f = rDir.openNextFile();
+          while (f && s40MediaTrackCount < 18) {
+            if (!f.isDirectory()) {
+              String fn = String(f.name());
+              int sl = fn.lastIndexOf('/');
+              if (sl >= 0) fn = fn.substring(sl + 1);
+              String low = fn;
+              low.toLowerCase();
+              if (low.endsWith(".wav") || low.endsWith(".mp3")) {
+                size_t fsz = f.size();
+                s40MediaTracks[s40MediaTrackCount] = fn;
+                s40MediaFileSizes[s40MediaTrackCount] = fsz;
+                uint16_t estSec = (fsz > 44) ? max((size_t)3, (fsz - 44) / 32000) : 10;
+                s40MediaDurations[s40MediaTrackCount] = estSec;
+                s40MediaFromSd[s40MediaTrackCount] = true;
+                s40MediaTrackCount++;
               }
-              if (estSec > 1800) estSec = 240;
-              s40MediaDurations[s40MediaTrackCount] = estSec;
-              s40MediaFromSd[s40MediaTrackCount] = true;
-              s40MediaTrackCount++;
             }
+            f.close();
+            f = rDir.openNextFile();
           }
-          f.close();
-          f = mDir.openNextFile();
+          rDir.close();
         }
-        mDir.close();
+
+        // 1. Quét tiếp thư mục /Musics tồn tại trên Thẻ nhớ MicroSD
+        if (!SD.exists("/Musics")) {
+          SD.mkdir("/Musics");
+        }
+        File mDir = SD.open("/Musics");
+        if (mDir && mDir.isDirectory()) {
+          File f = mDir.openNextFile();
+          while (f && s40MediaTrackCount < 18) {
+            if (!f.isDirectory()) {
+              String fn = String(f.name());
+              int sl = fn.lastIndexOf('/');
+              if (sl >= 0) fn = fn.substring(sl + 1);
+              String low = fn;
+              low.toLowerCase();
+              if (low.endsWith(".mp3") || low.endsWith(".wav") || low.endsWith(".flac") || low.endsWith(".ogg")) {
+                size_t fsz = f.size();
+                s40MediaTracks[s40MediaTrackCount] = fn;
+                s40MediaFileSizes[s40MediaTrackCount] = fsz;
+                // Ước tính thời lượng thực từ dung lượng file (.mp3 ~ 16KB/s @128kbps, .wav ~ 88KB/s hoặc 32KB/s)
+                uint16_t estSec = 180;
+                if (low.endsWith(".wav")) {
+                  estSec = (fsz > 44) ? max((size_t)5, (fsz - 44) / 32000) : 120;
+                } else {
+                  estSec = (fsz > 1024) ? max((size_t)5, fsz / 16000) : 180;
+                }
+                if (estSec > 1800) estSec = 240;
+                s40MediaDurations[s40MediaTrackCount] = estSec;
+                s40MediaFromSd[s40MediaTrackCount] = true;
+                s40MediaTrackCount++;
+              }
+            }
+            f.close();
+            f = mDir.openNextFile();
+          }
+          mDir.close();
+        }
+        StorageDriver::unlock();
       }
 
       // 2. Quét thêm thư mục gốc / của Thẻ nhớ SD (nếu người dùng chép ở ngoài /Musics)
@@ -4948,9 +4951,14 @@ namespace TestDisplay {
     String p1 = "/Musics/" + trackName;
     String p2 = "/" + trackName;
     bool removed = false;
-    if (SD.exists(p0)) removed = SD.remove(p0);
-    else if (SD.exists(p1)) removed = SD.remove(p1);
-    if (!removed && SD.exists(p2)) removed = SD.remove(p2);
+    if (TestSDCard::isMounted()) {
+      if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
+        if (SD.exists(p0)) removed = SD.remove(p0);
+        else if (SD.exists(p1)) removed = SD.remove(p1);
+        if (!removed && SD.exists(p2)) removed = SD.remove(p2);
+        StorageDriver::unlock();
+      }
+    }
     if (removed) {
       refreshMediaPlaylist();
       if (s40MediaTrackIdx >= s40MediaTrackCount) {
@@ -4999,37 +5007,41 @@ namespace TestDisplay {
     low.toLowerCase();
     if (!low.endsWith(".wav")) return;
 
-    String fullPath = "/recording/" + fn;
-    if (!SD.exists(fullPath)) fullPath = "/Musics/" + fn;
-    if (!SD.exists(fullPath)) fullPath = "/" + fn;
-    if (!SD.exists(fullPath)) return;
-
-    File wf = SD.open(fullPath, FILE_READ);
-    if (!wf) return;
-    size_t fsz = wf.size();
-    uint16_t totSec = max((uint16_t)1, s40MediaDurations[s40MediaTrackIdx]);
-    if (fsz > 128) {
-      size_t offset = 44 + (size_t)(((uint64_t)(fsz - 108) * (s40MediaCurSec % totSec)) / totSec);
-      offset = (offset / 2) * 2; // Căn chẵn 16-bit PCM
-      if (wf.seek(offset)) {
-        int16_t pcm[32];
-        size_t nRead = wf.read((uint8_t*)pcm, sizeof(pcm));
-        if (nRead == sizeof(pcm)) {
-          uint8_t wavBands[16];
-          int maxLv = 0;
-          for (int b = 0; b < 16; b++) {
-            int s0 = abs((int)pcm[b * 2]);
-            int s1 = abs((int)pcm[b * 2 + 1]);
-            int diff = abs((int)pcm[b * 2 + 1] - (int)pcm[b * 2]);
-            int val = ((s0 + s1) / 360) + (diff / 280);
-            wavBands[b] = (uint8_t)constrain(val, 4, 98);
-            if (wavBands[b] > maxLv) maxLv = wavBands[b];
+    if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
+      String fullPath = "/recording/" + fn;
+      if (!SD.exists(fullPath)) fullPath = "/Musics/" + fn;
+      if (!SD.exists(fullPath)) fullPath = "/" + fn;
+      if (SD.exists(fullPath)) {
+        File wf = SD.open(fullPath, FILE_READ);
+        if (wf) {
+          size_t fsz = wf.size();
+          uint16_t totSec = max((uint16_t)1, s40MediaDurations[s40MediaTrackIdx]);
+          if (fsz > 128) {
+            size_t offset = 44 + (size_t)(((uint64_t)(fsz - 108) * (s40MediaCurSec % totSec)) / totSec);
+            offset = (offset / 2) * 2; // Căn chẵn 16-bit PCM
+            if (wf.seek(offset)) {
+              int16_t pcm[32];
+              size_t nRead = wf.read((uint8_t*)pcm, sizeof(pcm));
+              if (nRead == sizeof(pcm)) {
+                uint8_t wavBands[16];
+                int maxLv = 0;
+                for (int b = 0; b < 16; b++) {
+                  int s0 = abs((int)pcm[b * 2]);
+                  int s1 = abs((int)pcm[b * 2 + 1]);
+                  int diff = abs((int)pcm[b * 2 + 1] - (int)pcm[b * 2]);
+                  int val = ((s0 + s1) / 360) + (diff / 280);
+                  wavBands[b] = (uint8_t)constrain(val, 4, 98);
+                  if (wavBands[b] > maxLv) maxLv = wavBands[b];
+                }
+                TestAudio::setExternalAudioSpectrum(wavBands, maxLv);
+              }
+            }
           }
-          TestAudio::setExternalAudioSpectrum(wavBands, maxLv);
+          wf.close();
         }
       }
+      StorageDriver::unlock();
     }
-    wf.close();
   }
 
   // Bắt đầu / Dừng phát âm thanh thật ra Loa PWM GPIO 15 trong Trình Phát Nhạc
@@ -5043,18 +5055,36 @@ namespace TestDisplay {
       if (TestAudio::getRecordedSampleCount() > 0) {
         TestAudio::startVoicePlaybackAsync(PIN_I2S_SPK_DIN);
         return;
-      } else if (TestSDCard::isMounted() && SD.exists("/recording/rec_latest.wav")) {
-        TestAudio::playSdFileAsync("/recording/rec_latest.wav", PIN_I2S_SPK_DIN);
-        return;
+      } else if (TestSDCard::isMounted()) {
+        bool recFound = false;
+        if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
+          recFound = SD.exists("/recording/rec_latest.wav");
+          StorageDriver::unlock();
+        }
+        if (recFound) {
+          TestAudio::playSdFileAsync("/recording/rec_latest.wav", PIN_I2S_SPK_DIN);
+          return;
+        }
       }
     }
 
     // Nếu là file trên thẻ nhớ SD (trong /recording/ hoặc /Musics/ hoặc /)
     if (TestSDCard::isMounted() && s40MediaFromSd[s40MediaTrackIdx]) {
-      String path = "/recording/" + fn;
-      if (!SD.exists(path)) path = "/Musics/" + fn;
-      if (!SD.exists(path)) path = "/" + fn;
-      if (SD.exists(path)) {
+      String path = "";
+      if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
+        String p = "/recording/" + fn;
+        if (SD.exists(p)) path = p;
+        else {
+          p = "/Musics/" + fn;
+          if (SD.exists(p)) path = p;
+          else {
+            p = "/" + fn;
+            if (SD.exists(p)) path = p;
+          }
+        }
+        StorageDriver::unlock();
+      }
+      if (path.length() > 0) {
         TestAudio::playSdFileAsync(path, PIN_I2S_SPK_DIN);
         return;
       }
@@ -5078,13 +5108,18 @@ namespace TestDisplay {
     String baseName = (dotIdx > 0) ? trackName.substring(0, dotIdx) : trackName;
 
     if (TestSDCard::isMounted()) {
-      if (SD.exists("/Musics/" + baseName + ".jpg")) return "/Musics/" + baseName + ".jpg";
-      if (SD.exists("/Musics/" + baseName + ".png")) return "/Musics/" + baseName + ".png";
-      if (SD.exists("/recording/" + baseName + ".jpg")) return "/recording/" + baseName + ".jpg";
-      if (SD.exists("/Musics/cover.jpg")) return "/Musics/cover.jpg";
-      if (SD.exists("/Musics/folder.jpg")) return "/Musics/folder.jpg";
-      if (SD.exists("/Musics/album.jpg")) return "/Musics/album.jpg";
-      if (SD.exists("/cover.jpg")) return "/cover.jpg";
+      if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
+        String res = "";
+        if (SD.exists("/Musics/" + baseName + ".jpg")) res = "/Musics/" + baseName + ".jpg";
+        else if (SD.exists("/Musics/" + baseName + ".png")) res = "/Musics/" + baseName + ".png";
+        else if (SD.exists("/recording/" + baseName + ".jpg")) res = "/recording/" + baseName + ".jpg";
+        else if (SD.exists("/Musics/cover.jpg")) res = "/Musics/cover.jpg";
+        else if (SD.exists("/Musics/folder.jpg")) res = "/Musics/folder.jpg";
+        else if (SD.exists("/Musics/album.jpg")) res = "/Musics/album.jpg";
+        else if (SD.exists("/cover.jpg")) res = "/cover.jpg";
+        StorageDriver::unlock();
+        if (res.length() > 0) return res;
+      }
     }
     if (LittleFS.exists("/cover.jpg")) return "/cover.jpg";
     return "";
@@ -5138,36 +5173,39 @@ namespace TestDisplay {
           uint16_t jw = 0, jh = 0;
           bool isSd = !coverPath.startsWith("[FS]");
           if (isSd && TestSDCard::isMounted()) {
-            File f = SD.open(coverPath, FILE_READ);
-            if (f) {
-              size_t sz = f.size();
-              if (sz > 0 && sz <= 65536) {
-                uint8_t* jBuf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
-                if (jBuf && f.read(jBuf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, jBuf, sz) == JDR_OK && jw > 0 && jh > 0) {
-                  uint8_t scale = 1;
-                  if (jw >= 256 || jh >= 256) scale = 4;
-                  else if (jw >= 128 || jh >= 128) scale = 2;
-                  TJpgDec.setJpgScale(scale);
-                  int ox = cbX + 2 + max(0, (64 - (int)(jw / scale)) / 2);
-                  int oy = cbY + 2 + max(0, (64 - (int)(jh / scale)) / 2);
-                  TJpgDec.setCallback([](int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) -> bool {
-                    if (!mediaVisCanvas) return false;
-                    for (uint16_t r = 0; r < h; r++) {
-                      int py = y + r;
-                      if (py < 9 || py >= 73) continue;
-                      for (uint16_t c = 0; c < w; c++) {
-                        int px = x + c;
-                        if (px < 16 || px >= 80) continue;
-                        mediaVisCanvas->drawPixel(px, py, bitmap[r * w + c]);
+            if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
+              File f = SD.open(coverPath, FILE_READ);
+              if (f) {
+                size_t sz = f.size();
+                if (sz > 0 && sz <= 65536) {
+                  uint8_t* jBuf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
+                  if (jBuf && f.read(jBuf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, jBuf, sz) == JDR_OK && jw > 0 && jh > 0) {
+                    uint8_t scale = 1;
+                    if (jw >= 256 || jh >= 256) scale = 4;
+                    else if (jw >= 128 || jh >= 128) scale = 2;
+                    TJpgDec.setJpgScale(scale);
+                    int ox = cbX + 2 + max(0, (64 - (int)(jw / scale)) / 2);
+                    int oy = cbY + 2 + max(0, (64 - (int)(jh / scale)) / 2);
+                    TJpgDec.setCallback([](int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) -> bool {
+                      if (!mediaVisCanvas) return false;
+                      for (uint16_t r = 0; r < h; r++) {
+                        int py = y + r;
+                        if (py < 9 || py >= 73) continue;
+                        for (uint16_t c = 0; c < w; c++) {
+                          int px = x + c;
+                          if (px < 16 || px >= 80) continue;
+                          mediaVisCanvas->drawPixel(px, py, bitmap[r * w + c]);
+                        }
                       }
-                    }
-                    return true;
-                  });
-                  if (TJpgDec.drawJpg(ox, oy, jBuf, sz) == JDR_OK) drawnCover = true;
+                      return true;
+                    });
+                    if (TJpgDec.drawJpg(ox, oy, jBuf, sz) == JDR_OK) drawnCover = true;
+                  }
+                  if (jBuf) free(jBuf);
                 }
-                if (jBuf) free(jBuf);
+                f.close();
               }
-              f.close();
+              StorageDriver::unlock();
             }
           }
         }
@@ -5509,9 +5547,12 @@ namespace TestDisplay {
         if (vnStrLen(dispName) > 30) dispName = vnSubstr(dispName, 0, 30);
         String dispPath = "Bộ nhớ ROM (Nhạc mẫu)";
         if (fromSd) {
-          if (SD.exists("/recording/" + sName)) dispPath = "/recording/" + sName;
-          else if (SD.exists("/Musics/" + sName)) dispPath = "/Musics/" + sName;
-          else dispPath = "/" + sName;
+          if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
+            if (SD.exists("/recording/" + sName)) dispPath = "/recording/" + sName;
+            else if (SD.exists("/Musics/" + sName)) dispPath = "/Musics/" + sName;
+            else dispPath = "/" + sName;
+            StorageDriver::unlock();
+          }
         }
         if (vnStrLen(dispPath) > 30) dispPath = vnSubstr(dispPath, 0, 30);
 

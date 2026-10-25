@@ -1178,7 +1178,7 @@ namespace AudioDriver {
       xTaskCreatePinnedToCore(
         mediaPumpTask,
         "mediaPump",
-        4096,
+        6144,
         nullptr,
         4,
         &s_mediaPumpTaskHandle,
@@ -1328,8 +1328,9 @@ namespace AudioDriver {
       uint8_t* mp3Buf = (uint8_t*)(psramFound() ? ps_malloc(MP3_BUF_SIZE) : malloc(MP3_BUF_SIZE));
       mp3d_sample_t* pcmOut = (mp3d_sample_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)));
       int16_t* stereoPcm = (int16_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)));
+      mp3dec_scratch_t* scratch = (mp3dec_scratch_t*)(psramFound() ? ps_malloc(sizeof(mp3dec_scratch_t)) : malloc(sizeof(mp3dec_scratch_t)));
 
-      if (mp3d && mp3Buf && pcmOut && stereoPcm) {
+      if (mp3d && mp3Buf && pcmOut && stereoPcm && scratch) {
         mp3dec_init(mp3d);
         int bufValid = 0;
 
@@ -1357,7 +1358,7 @@ namespace AudioDriver {
           if (bufValid <= 0) break;
 
           mp3dec_frame_info_t info;
-          int samplesPerChannel = mp3dec_decode_frame(mp3d, mp3Buf, bufValid, pcmOut, &info);
+          int samplesPerChannel = mp3dec_decode_frame_scratch(mp3d, mp3Buf, bufValid, pcmOut, &info, scratch);
 
           if (info.frame_bytes > 0) {
             bufValid -= info.frame_bytes;
@@ -1403,6 +1404,7 @@ namespace AudioDriver {
           }
         }
       }
+      if (scratch) free(scratch);
       if (stereoPcm) free(stereoPcm);
       if (mp3Buf) free(mp3Buf);
       if (pcmOut) free(pcmOut);
@@ -1745,7 +1747,7 @@ namespace AudioDriver {
     xTaskCreatePinnedToCore(
       audioPwmTask,
       "AudioPwmTask",
-      8192,
+      16384,
       (void*)(uintptr_t)pin,
       2,
       &audioTaskHandle,
@@ -1760,7 +1762,7 @@ namespace AudioDriver {
     xTaskCreatePinnedToCore(
       audioPwmTask,
       "AudioPwmTask",
-      8192,
+      16384,
       (void*)(uintptr_t)pin,
       2,
       &audioTaskHandle,
@@ -1775,7 +1777,7 @@ namespace AudioDriver {
     xTaskCreatePinnedToCore(
       audioPwmTask,
       "AudioPwmTask",
-      8192,
+      16384,
       (void*)(uintptr_t)pin,
       2,
       &audioTaskHandle,
@@ -1802,7 +1804,7 @@ namespace AudioDriver {
     }
 
     unsigned long startWait = millis();
-    while ((audioTaskHandle != NULL || s_mediaPumpTaskHandle != NULL) && millis() - startWait < 300) {
+    while ((audioTaskHandle != NULL || s_mediaPumpTaskHandle != NULL) && millis() - startWait < 500) {
       vTaskDelay(pdMS_TO_TICKS(10));
     }
 
