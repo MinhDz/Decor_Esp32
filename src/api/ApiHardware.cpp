@@ -1,4 +1,5 @@
 #include "api/ApiHardware.h"
+#include "BuiltinEmojis.h"
 #include "Config.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestSensors.h"
@@ -407,6 +408,25 @@ namespace ApiHardware {
 
     server.on("/api/pc/metrics", HTTP_GET, [&server]() { handlePcMetricsGet(server); });
     server.on("/api/pc/metrics", HTTP_POST, [&server]() { handlePcMetricsPost(server); });
+
+    server.on("/api/emoji_preview", HTTP_GET, [&server]() {
+      int style = server.hasArg("style") ? server.arg("style").toInt() : 1;
+      String name = server.hasArg("name") ? server.arg("name") : "happy";
+      size_t len = 0;
+      const uint8_t* data = nullptr;
+      if (style == 1) {
+        data = BuiltinEmojis::getCuteGirlJpg(name, len);
+      } else {
+        data = BuiltinEmojis::getDoiMatJpg(name, len);
+      }
+      if (data && len > 0) {
+        server.sendHeader("Content-Type", "image/jpeg");
+        server.sendHeader("Cache-Control", "public, max-age=86400");
+        server.send_P(200, "image/jpeg", (const char*)data, len);
+      } else {
+        server.send(404, "text/plain", "Not found");
+      }
+    });
   }
 
 } // namespace ApiHardware

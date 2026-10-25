@@ -38,6 +38,7 @@
 #include "SpaceOS_GameCenter.h"
 #include "SpaceOS_ClockSuite.h"
 #include "SpaceOS_Settings.h"
+#include "BuiltinEmojis.h"
 #include "drivers/DisplayDriver.h"
 #include "SpaceOS_VnGfx.h"
 
@@ -1011,92 +1012,78 @@ namespace TestDisplay {
     return false;
   }
 
-  // Anh xa trang thai cam xuc sang ten tap tin anh JPEG
-  static String getEmojiFilename(uint8_t style, uint8_t state, const String& emoTag) {
+  // Chuan hoa moi ten cam xuc (Anh, Viet, XiaoZhi Cloud tag, hoac eyeState) sang 8 Canonical Emotions
+  static String mapToCanonicalEmotion(uint8_t state, const String& emoTag) {
     String e = emoTag;
     e.toLowerCase();
     e.trim();
 
-    if (style == 1) { // 1. Cute Girl Chibi (128x128)
-      if (e == "happy" || e == "pleased") return "happy.jpg";
-      if (e == "laughing") return "laughing.jpg";
-      if (e == "funny") return "funny.jpg";
-      if (e == "loving") return "loving.jpg";
-      if (e == "delicious") return "delicious.jpg";
-      if (e == "confident") return "confident.jpg";
-      if (e == "kissy") return "kissy.jpg";
-      if (e == "wink" || e == "winking" || e == "wink-left" || e == "wink-right" || e == "playful") return "winking.jpg";
-      if (e == "cool") return "cool.jpg";
-      if (e == "relaxed" || e == "chill") return "relaxed.jpg";
-      if (e == "neutral" || e == "idle" || e == "normal") return "neutral.jpg";
-      if (e == "thinking" || e == "pondering" || e == "curious") return "thinking.jpg";
-      if (e == "confused" || e == "puzzled") return "confused.jpg";
-      if (e == "surprised") return "surprised.jpg";
-      if (e == "shocked") return "shocked.jpg";
-      if (e == "silly") return "silly.jpg";
-      if (e == "sad") return "sad.jpg";
-      if (e == "crying") return "crying.jpg";
-      if (e == "embarrassed" || e == "shy") return "embarrassed.jpg";
-      if (e == "angry" || e == "mad" || e == "furious") return "angry.jpg";
-      if (e == "sleepy" || e == "tired" || e == "bored") return "sleepy.jpg";
+    // 1. Tuc gian / Angry
+    if (e.indexOf("angry") >= 0 || e.indexOf("mad") >= 0 || e.indexOf("furious") >= 0 ||
+        e.indexOf("tuc") >= 0 || e.indexOf("gian") >= 0) return "angry";
 
-      // Fallback theo eyeState
-      switch (state) {
-        case 0: return "neutral.jpg";
-        case 1: return "winking.jpg";
-        case 2: return "happy.jpg";
-        case 3:
-        case 4:
-        case 5: return "thinking.jpg";
-        case 6: return "sad.jpg";
-        case 7: return "angry.jpg";
-        case 8: return "confused.jpg";
-        case 9:
-        case 10: return "winking.jpg";
-        case 11: return "sleepy.jpg";
-        default: return "neutral.jpg";
-      }
-    } else if (style == 2) { // 2. Doi Mat Robot Animated (240x240)
-      String base = "1macdinh";
-      if (e == "happy" || e == "pleased") base = "vuive";
-      else if (e == "laughing" || e == "funny") base = "cuoito";
-      else if (e == "loving" || e == "delicious" || e == "excited") base = "vuimung";
-      else if (e == "confident" || e == "cool") base = "nheomat";
-      else if (e == "kissy" || e == "wink" || e == "winking" || e == "wink-left" || e == "wink-right" || e == "playful") base = "nhaymat";
-      else if (e == "relaxed" || e == "chill" || e == "neutral" || e == "normal") base = "binhthuong";
-      else if (e == "idle") base = "1macdinh";
-      else if (e == "thinking" || e == "pondering" || e == "curious") base = "suynghi2";
-      else if (e == "confused" || e == "puzzled") base = "chamhoi";
-      else if (e == "surprised") base = "ngacnhien2";
-      else if (e == "shocked") base = "doxet";
-      else if (e == "silly") base = "hoamat";
-      else if (e == "crying") base = "buon2";
-      else if (e == "sad") base = "buon";
-      else if (e == "embarrassed" || e == "shy") base = "domohoi";
-      else if (e == "angry" || e == "mad") base = "tucgian";
-      else if (e == "furious") base = "tucgian2";
-      else if (e == "sleepy" || e == "tired" || e == "bored") base = "buonngu";
-      else if (e == "left" || e == "look-left" || e == "right" || e == "look-right" || e == "up" || e == "down") base = "duamat";
-      else {
-        switch (state) {
-          case 0: base = "1macdinh"; break;
-          case 1: base = "nhaymat"; break;
-          case 2: base = "vuive"; break;
-          case 3:
-          case 4: base = "duamat"; break;
-          case 5: base = "suynghi2"; break;
-          case 6: base = "buon"; break;
-          case 7: base = "tucgian"; break;
-          case 8: base = "chamhoi"; break;
-          case 9: base = "nhaymat"; break;
-          case 10: base = "nheomat"; break;
-          case 11: base = "buonngu"; break;
-          default: base = "1macdinh"; break;
-        }
-      }
-      return base;
+    // 2. Vui ve / Happy
+    if (e.indexOf("happy") >= 0 || e.indexOf("laugh") >= 0 || e.indexOf("funny") >= 0 ||
+        e.indexOf("loving") >= 0 || e.indexOf("delicious") >= 0 || e.indexOf("confident") >= 0 ||
+        e.indexOf("excited") >= 0 || e.indexOf("pleased") >= 0 ||
+        e.indexOf("vui") >= 0 || e.indexOf("cuoi") >= 0) return "happy";
+
+    // 3. Suy nghi / Lang nghe / Thinking
+    if (e.indexOf("thinking") >= 0 || e.indexOf("pondering") >= 0 || e.indexOf("curious") >= 0 ||
+        e.indexOf("listen") >= 0 || e.indexOf("suy_nghi") >= 0 || e.indexOf("suynghi") >= 0 ||
+        e.indexOf("nghe") >= 0) return "thinking";
+
+    // 4. Nhay mat / Chop mat / Winking
+    if (e.indexOf("wink") >= 0 || e.indexOf("blink") >= 0 || e.indexOf("kissy") >= 0 ||
+        e.indexOf("playful") >= 0 || e.indexOf("nhay") >= 0 || e.indexOf("chop") >= 0) return "winking";
+
+    // 5. Buon ba / Khoc / Sad
+    if (e.indexOf("sad") >= 0 || e.indexOf("crying") >= 0 || e.indexOf("embarrassed") >= 0 ||
+        e.indexOf("shy") >= 0 || e.indexOf("buon") >= 0 || e.indexOf("khoc") >= 0) return "sad";
+
+    // 6. Boi roi / Hoa mat / Confused
+    if (e.indexOf("confused") >= 0 || e.indexOf("puzzled") >= 0 || e.indexOf("surprised") >= 0 ||
+        e.indexOf("shocked") >= 0 || e.indexOf("silly") >= 0 ||
+        e.indexOf("boi_roi") >= 0 || e.indexOf("boiroi") >= 0 || e.indexOf("hoa_mat") >= 0 ||
+        e.indexOf("hoamat") >= 0 || e.indexOf("cham_hoi") >= 0 || e.indexOf("chamhoi") >= 0) return "confused";
+
+    // 7. Buon ngu / Sleepy
+    if (e.indexOf("sleep") >= 0 || e.indexOf("tired") >= 0 || e.indexOf("bored") >= 0 ||
+        e.indexOf("ngu") >= 0) return "sleepy";
+
+    // 8. Binh thuong / Neutral
+    if (e.indexOf("neutral") >= 0 || e.indexOf("idle") >= 0 || e.indexOf("normal") >= 0 ||
+        e.indexOf("cool") >= 0 || e.indexOf("relaxed") >= 0 || e.indexOf("chill") >= 0 ||
+        e.indexOf("binh_thuong") >= 0 || e.indexOf("binhthuong") >= 0) return "neutral";
+
+    // Fallback theo eyeState
+    switch (state) {
+      case 0: return "neutral";
+      case 1: return "winking";
+      case 2: return "happy";
+      case 3:
+      case 4:
+      case 5: return "thinking";
+      case 6: return "sad";
+      case 7: return "angry";
+      case 8: return "confused";
+      case 9:
+      case 10: return "winking";
+      case 11: return "sleepy";
+      default: return "neutral";
     }
-    return "";
+  }
+
+  // Helper tim va ve anh JPG voi cac ten file bien the (aliases) linh hoat
+  static bool drawEmojiWithAliases(int16_t x, int16_t y, const String& folder, const String& n1, const String& n2 = "", const String& n3 = "", int animFrame = -1) {
+    if (animFrame >= 0) {
+      if (drawEmojiJpg(x, y, folder + n1 + "_" + String(animFrame) + ".jpg")) return true;
+      if (n2.length() > 0 && drawEmojiJpg(x, y, folder + n2 + "_" + String(animFrame) + ".jpg")) return true;
+    }
+    if (drawEmojiJpg(x, y, folder + n1 + ".jpg")) return true;
+    if (n2.length() > 0 && drawEmojiJpg(x, y, folder + n2 + ".jpg")) return true;
+    if (n3.length() > 0 && drawEmojiJpg(x, y, folder + n3 + ".jpg")) return true;
+    return false;
   }
 
   // Ve doi mat vector Neon Cyberpunk goc (Style 0 mac dinh)
@@ -1219,10 +1206,10 @@ namespace TestDisplay {
     }
 
     bool rendered = false;
-    String baseName = getEmojiFilename(s_emojiStyle, state, s40AiEmotionTag);
+    String canonical = mapToCanonicalEmotion(state, s40AiEmotionTag);
 
-    if (s_emojiStyle == 1 && baseName.length() > 0) {
-      // 1. Cute Girl: 128x128 JPEG can giua trong hop
+    if (s_emojiStyle == 1) {
+      // 1. Cute Girl: 128x128 JPEG can giua co dinh (Center Anchor - Khong bi lech tam)
       int imgX = boxX + (boxW - 128) / 2;
       int imgY = boxY + (boxH - 128) / 2;
 
@@ -1235,10 +1222,30 @@ namespace TestDisplay {
         s_emojiClipX = boxX + 2; s_emojiClipY = boxY + 2; s_emojiClipW = boxW - 4; s_emojiClipH = boxH - 4;
       }
 
-      String path = "/emojis/cute_girl/" + baseName;
-      rendered = drawEmojiJpg(imgX, imgY, path);
-    } else if (s_emojiStyle == 2 && baseName.length() > 0) {
-      // 2. Doi Mat: 240x240 JPEG can giua theo truc doc tam mat (y=98)
+      String fld = "/emojis/cute_girl/";
+      if (canonical == "neutral") rendered = drawEmojiWithAliases(imgX, imgY, fld, "neutral", "binhthuong", "binh_thuong");
+      else if (canonical == "happy") rendered = drawEmojiWithAliases(imgX, imgY, fld, "happy", "vuive", "vui_ve");
+      else if (canonical == "angry") rendered = drawEmojiWithAliases(imgX, imgY, fld, "angry", "tucgian", "tuc_gian");
+      else if (canonical == "sad") rendered = drawEmojiWithAliases(imgX, imgY, fld, "sad", "buon", "crying");
+      else if (canonical == "thinking") rendered = drawEmojiWithAliases(imgX, imgY, fld, "thinking", "suynghi", "suy_nghi");
+      else if (canonical == "confused") rendered = drawEmojiWithAliases(imgX, imgY, fld, "confused", "chamhoi", "hoamat");
+      else if (canonical == "winking") rendered = drawEmojiWithAliases(imgX, imgY, fld, "winking", "nhaymat", "wink");
+      else if (canonical == "sleepy") rendered = drawEmojiWithAliases(imgX, imgY, fld, "sleepy", "buonngu", "buon_ngu");
+      else rendered = drawEmojiWithAliases(imgX, imgY, fld, canonical);
+
+      if (!rendered) {
+        // Nap tu Flash PROGMEM tich hop san neu chua co file tren LittleFS/SD
+        size_t bLen = 0;
+        const uint8_t* bData = BuiltinEmojis::getCuteGirlJpg(canonical, bLen);
+        if (bData && bLen > 0) {
+          TJpgDec.setCallback(jpgEmojiClipRenderCallback);
+          TJpgDec.setSwapBytes(false);
+          TJpgDec.setJpgScale(1);
+          rendered = (TJpgDec.drawJpg(imgX, imgY, bData, bLen) == JDR_OK);
+        }
+      }
+    } else if (s_emojiStyle == 2) {
+      // 2. Doi Mat Robot: 240x240 JPEG can giua theo truc doc tam mat (y=98, Center Anchor)
       int cy = boxY + boxH / 2;
       int imgX = boxX + (boxW - 240) / 2;
       int imgY = cy - 98;
@@ -1252,15 +1259,32 @@ namespace TestDisplay {
         s_emojiClipX = boxX + 2; s_emojiClipY = boxY + 2; s_emojiClipW = boxW - 4; s_emojiClipH = boxH - 4;
       }
 
-      String animPath = "/emojis/doi_mat/" + baseName + "_" + String(s_doiMatFrameIdx) + ".jpg";
-      rendered = drawEmojiJpg(imgX, imgY, animPath);
+      String fld = "/emojis/doi_mat/";
+      int aFrm = (int)s_doiMatFrameIdx;
+      if (canonical == "neutral") rendered = drawEmojiWithAliases(imgX, imgY, fld, "1macdinh", "binhthuong", "neutral", aFrm);
+      else if (canonical == "happy") rendered = drawEmojiWithAliases(imgX, imgY, fld, "vuive", "cuoito", "happy", aFrm);
+      else if (canonical == "angry") rendered = drawEmojiWithAliases(imgX, imgY, fld, "tucgian", "tucgian2", "angry", aFrm);
+      else if (canonical == "sad") rendered = drawEmojiWithAliases(imgX, imgY, fld, "buon", "buon2", "sad", aFrm);
+      else if (canonical == "thinking") rendered = drawEmojiWithAliases(imgX, imgY, fld, "suynghi2", "thinking", "suynghi", aFrm);
+      else if (canonical == "confused") rendered = drawEmojiWithAliases(imgX, imgY, fld, "chamhoi", "hoamat", "confused", aFrm);
+      else if (canonical == "winking") rendered = drawEmojiWithAliases(imgX, imgY, fld, "nhaymat", "winking", "wink", aFrm);
+      else if (canonical == "sleepy") rendered = drawEmojiWithAliases(imgX, imgY, fld, "buonngu", "sleepy", "buon_ngu", aFrm);
+      else rendered = drawEmojiWithAliases(imgX, imgY, fld, canonical, "", "", aFrm);
+
       if (!rendered) {
-        String staticPath = "/emojis/doi_mat/" + baseName + ".jpg";
-        rendered = drawEmojiJpg(imgX, imgY, staticPath);
+        // Nap tu Flash PROGMEM tich hop san neu chua co file tren LittleFS/SD
+        size_t bLen = 0;
+        const uint8_t* bData = BuiltinEmojis::getDoiMatJpg(canonical, bLen);
+        if (bData && bLen > 0) {
+          TJpgDec.setCallback(jpgEmojiClipRenderCallback);
+          TJpgDec.setSwapBytes(false);
+          TJpgDec.setJpgScale(1);
+          rendered = (TJpgDec.drawJpg(imgX, imgY, bData, bLen) == JDR_OK);
+        }
       }
     }
 
-    // Tu dong Fallback ve Mat Neon mac dinh neu khong co file tren SD/LittleFS
+    // Tu dong Fallback ve Mat Neon mac dinh neu that bai hoan toan
     if (!rendered) {
       drawNeonVectorEyes(boxX, boxY, boxW, boxH, state, scaleMode);
     }
@@ -8584,18 +8608,19 @@ namespace TestDisplay {
 
   void setEmojiState(const String& state, const String& subtitle) {
     uint8_t newState = eyeState;
-    if (state == "idle") newState = 0;
-    else if (state == "blink") newState = 1;
-    else if (state == "happy") newState = 2;
+    if (state == "idle" || state == "neutral" || state == "binhthuong") newState = 0;
+    else if (state == "blink" || state == "winking" || state == "nhaymat") newState = 1;
+    else if (state == "happy" || state == "vuive") newState = 2;
     else if (state == "left") newState = 3;
     else if (state == "right") newState = 4;
-    else if (state == "up") newState = 5;
-    else if (state == "down") newState = 6;
-    else if (state == "angry") newState = 7;
-    else if (state == "confused") newState = 8;
+    else if (state == "up" || state == "thinking" || state == "suynghi") newState = 5;
+    else if (state == "down" || state == "sad" || state == "buon") newState = 6;
+    else if (state == "angry" || state == "tucgian") newState = 7;
+    else if (state == "confused" || state == "silly" || state == "hoamat" || state == "chamhoi") newState = 8;
     else if (state == "wink-left") newState = 9;
     else if (state == "wink-right") newState = 10;
-    else if (state == "sleepy") newState = 11;
+    else if (state == "sleepy" || state == "buonngu") newState = 11;
+    s40AiEmotionTag = state;
 
     bool stateChanged = (newState != eyeState);
     eyeState = newState;

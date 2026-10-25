@@ -826,8 +826,11 @@
 
     /* Emoji quick buttons */
     .emoji-bar { display: flex; gap: 6px; margin-top: 8px; justify-content: center; flex-wrap: wrap; }
-    .emoji-pill { background: #0f172a; border: 1px solid #334155; color: #cbd5e1; padding: 4px 10px; border-radius: 14px; font-size: 0.74rem; cursor: pointer; }
+    .emoji-pill { background: #0f172a; border: 1px solid #334155; color: #cbd5e1; padding: 4px 10px; border-radius: 14px; font-size: 0.74rem; cursor: pointer; transition: all 0.2s; }
     .emoji-pill.active { background: #0284c7; color: white; border-color: #38bdf8; }
+    .emoji-style-bar { display: flex; gap: 6px; margin-top: 6px; margin-bottom: 6px; justify-content: center; flex-wrap: wrap; }
+    .emoji-style-pill { background: #1e1b4b; border: 1px solid #4338ca; color: #c7d2fe; padding: 4px 12px; border-radius: 14px; font-size: 0.76rem; font-weight: 600; cursor: pointer; transition: all 0.2s; }
+    .emoji-style-pill.active { background: #6366f1; color: white; border-color: #a5b4fc; box-shadow: 0 0 10px rgba(99, 102, 241, 0.4); }
 
     /* =================== DESIGNER CONTROL PANEL =================== */
     .designer-panel { background: #0f172a; border: 1px solid #1e293b; border-radius: 12px; padding: 16px; margin-top: 10px; }
@@ -1689,6 +1692,7 @@
                 <div class="emoji-eye left"></div>
                 <div class="emoji-eye right"></div>
               </div>
+              <img class="emoji-avatar-img" id="emoji-avatar-1" style="display:none; width: 130px; height: 130px; border-radius: 12px; object-fit: contain; box-shadow: 0 0 20px rgba(0, 229, 255, 0.35);" />
             </div>
             <!-- Subtitle Box (Phụ đề phản hồi 2-3 dòng từ XiaoZhi) -->
             <div class="emoji-subtitle-box">
@@ -1995,17 +1999,23 @@
         <button class="hud-style-pill" onclick="setHudStyle('matrix', true)">⚡ Ma Trận Số</button>
       </div>
 
+      <!-- AI Emoji Style Selector -->
+      <div class="emoji-style-bar" id="emoji-style-controls" style="display: none;">
+        <button class="emoji-style-pill active" onclick="setEmojiStyle(0, true)">⚡ Mắt Neon</button>
+        <button class="emoji-style-pill" onclick="setEmojiStyle(1, true)">👧 Cô Bé Chibi</button>
+        <button class="emoji-style-pill" onclick="setEmojiStyle(2, true)">🤖 Đôi Mắt Robot</button>
+      </div>
+
       <!-- Emoji Sub-selector -->
       <div class="emoji-bar" id="emoji-subcontrols" style="display: none;">
-        <button class="emoji-pill active" onclick="setEmojiState('idle', true, true)">Bình Thường</button>
-        <button class="emoji-pill" onclick="setEmojiState('happy', true, true)">Vui Vẻ</button>
-        <button class="emoji-pill" onclick="setEmojiState('blink', true, true)">Nháy Mắt</button>
-        <button class="emoji-pill" onclick="setEmojiState('left', true, true)">Liếc Trái</button>
-        <button class="emoji-pill" onclick="setEmojiState('right', true, true)">Liếc Phải</button>
-        <button class="emoji-pill" onclick="setEmojiState('up', true, true)">Nhìn Lên</button>
-        <button class="emoji-pill" onclick="setEmojiState('down', true, true)">Nhìn Xuống</button>
-        <button class="emoji-pill" onclick="setEmojiState('angry', true, true)">Giận</button>
-        <button class="emoji-pill" onclick="setEmojiState('confused', true, true)">Bối Rối (@@)</button>
+        <button class="emoji-pill active" onclick="setEmojiState('neutral', true, true)">😊 Bình Thường</button>
+        <button class="emoji-pill" onclick="setEmojiState('happy', true, true)">😄 Vui Vẻ</button>
+        <button class="emoji-pill" onclick="setEmojiState('angry', true, true)">😡 Tức Giận</button>
+        <button class="emoji-pill" onclick="setEmojiState('sad', true, true)">😢 Buồn Bã</button>
+        <button class="emoji-pill" onclick="setEmojiState('thinking', true, true)">🤔 Suy Nghĩ</button>
+        <button class="emoji-pill" onclick="setEmojiState('confused', true, true)">😵 Bối Rối</button>
+        <button class="emoji-pill" onclick="setEmojiState('winking', true, true)">😉 Nháy Mắt</button>
+        <button class="emoji-pill" onclick="setEmojiState('sleepy', true, true)">😴 Buồn Ngủ</button>
       </div>
     </div>
 
@@ -2217,6 +2227,7 @@
                   <div class="emoji-eye left"></div>
                   <div class="emoji-eye right"></div>
                 </div>
+                <img class="emoji-avatar-img" id="emoji-avatar-2" style="display:none; width: 130px; height: 130px; border-radius: 12px; object-fit: contain; box-shadow: 0 0 20px rgba(0, 229, 255, 0.35);" />
               </div>
               <!-- Subtitle Box (Phụ đề phản hồi 2-3 dòng từ XiaoZhi) -->
               <div class="emoji-subtitle-box">
@@ -2868,6 +2879,9 @@
       const wifiBadge = document.getElementById('screen-badge-wifi');
       const chatWifiBadge = document.getElementById('chat-screen-badge-wifi');
       isConnected = data.connected;
+      if (data.emoji_style !== undefined && data.emoji_style !== currentEmojiStyle) {
+        setEmojiStyle(data.emoji_style, false);
+      }
       activeImageName = data.active_img || "";
 
       if (data.mac) {
@@ -3045,6 +3059,8 @@
     if (e1) e1.style.display = (mode === 'emoji') ? 'flex' : 'none';
     if (p1) p1.style.display = (mode === 'pchud') ? 'flex' : 'none';
     if (sub1) sub1.style.display = (mode === 'emoji') ? 'flex' : 'none';
+    const stCtrl = document.getElementById('emoji-style-controls');
+    if (stCtrl) stCtrl.style.display = (mode === 'emoji') ? 'flex' : 'none';
     if (hudSub1) hudSub1.style.display = (mode === 'pchud') ? 'flex' : 'none';
     if (des1) des1.style.display = (mode === 'standby') ? 'block' : 'none';
 
@@ -3125,6 +3141,19 @@
     }, 115);
   }
 
+  let currentEmojiStyle = 0; // 0: Neon Vector, 1: Cute Girl, 2: Doi Mat Robot
+
+  function setEmojiStyle(styleIndex, pushToEsp = true) {
+    currentEmojiStyle = Number(styleIndex) % 3;
+    document.querySelectorAll('.emoji-style-pill').forEach((btn, idx) => {
+      btn.classList.toggle('active', idx === currentEmojiStyle);
+    });
+    renderEmojiDom(currentEmoji, false);
+    if (pushToEsp) {
+      syncScreenToEsp({ emoji_style: currentEmojiStyle });
+    }
+  }
+
   // Cập nhật DOM của mắt cho trạng thái cụ thể & đồng bộ tức thời sang màn hình ESP32 ST7789
   function renderEmojiDom(state, pushToEsp = true) {
     currentEmoji = state;
@@ -3133,56 +3162,72 @@
     }
 
     // Cập nhật mắt biểu cảm trên cả 2 màn hình ảo
-    ['emoji-box', 'chat-emoji-box'].forEach(boxId => {
-      const box = document.getElementById(boxId);
-      if (!box || !box.children || box.children.length < 2) return;
+    [1, 2].forEach(num => {
+      const box = document.getElementById(num === 1 ? 'emoji-box' : 'chat-emoji-box');
+      const img = document.getElementById(num === 1 ? 'emoji-avatar-1' : 'emoji-avatar-2');
+      if (!box || !img) return;
 
-      box.className = 'emoji-eyes';
-      const leftEye = box.children[0];
-      const rightEye = box.children[1];
-      leftEye.innerHTML = '';
-      rightEye.innerHTML = '';
+      if (currentEmojiStyle === 0) {
+        // Style 0: Mắt Neon Cyberpunk (Vector CSS phát sáng)
+        box.style.display = 'flex';
+        img.style.display = 'none';
 
-      if (state === 'idle') {
-        // Mắt xanh tròn neon
-      } else if (state === 'left') {
-        box.classList.add('emoji-look-left');
-      } else if (state === 'right') {
-        box.classList.add('emoji-look-right');
-      } else if (state === 'up') {
-        box.classList.add('emoji-look-up');
-      } else if (state === 'down') {
-        box.classList.add('emoji-look-down');
-      } else if (state === 'blink') {
-        box.classList.add('emoji-blink');
-      } else if (state === 'wink-left') {
-        box.classList.add('emoji-wink-left');
-      } else if (state === 'wink-right') {
-        box.classList.add('emoji-wink-right');
-      } else if (state === 'angry') {
-        box.classList.add('emoji-angry');
-      } else if (state === 'confused') {
-        box.classList.add('emoji-confused');
-        leftEye.innerText = '@';
-        rightEye.innerText = '@';
-      } else if (state === 'happy') {
-        box.classList.add('emoji-happy');
-      } else if (state === 'sleepy') {
-        box.classList.add('emoji-sleepy');
-      } else if (state === 'listen') {
-        box.classList.add('emoji-listen');
-      } else if (state === 'speak') {
-        box.classList.add('emoji-speak');
+        box.className = 'emoji-eyes';
+        const leftEye = box.children[0];
+        const rightEye = box.children[1];
+        if (leftEye && rightEye) {
+          leftEye.innerHTML = '';
+          rightEye.innerHTML = '';
+
+          if (state === 'idle' || state === 'neutral') {
+            // Mắt tròn xanh neon
+          } else if (state === 'left') {
+            box.classList.add('emoji-look-left');
+          } else if (state === 'right') {
+            box.classList.add('emoji-look-right');
+          } else if (state === 'up' || state === 'thinking') {
+            box.classList.add('emoji-look-up');
+          } else if (state === 'down' || state === 'sad') {
+            box.classList.add('emoji-look-down');
+          } else if (state === 'blink' || state === 'winking') {
+            box.classList.add('emoji-blink');
+          } else if (state === 'wink-left') {
+            box.classList.add('emoji-wink-left');
+          } else if (state === 'wink-right') {
+            box.classList.add('emoji-wink-right');
+          } else if (state === 'angry') {
+            box.classList.add('emoji-angry');
+          } else if (state === 'confused') {
+            box.classList.add('emoji-confused');
+            leftEye.innerText = '@';
+            rightEye.innerText = '@';
+          } else if (state === 'happy') {
+            box.classList.add('emoji-happy');
+          } else if (state === 'sleepy') {
+            box.classList.add('emoji-sleepy');
+          } else if (state === 'listen') {
+            box.classList.add('emoji-listen');
+          } else if (state === 'speak') {
+            box.classList.add('emoji-speak');
+          }
+        }
+      } else {
+        // Style 1 (Cute Girl) hoặc Style 2 (Đôi Mắt Robot)
+        box.style.display = 'none';
+        img.style.display = 'block';
+        img.src = `/api/emoji_preview?style=${currentEmojiStyle}&name=${encodeURIComponent(state)}`;
       }
     });
 
-    // Cập nhật trạng thái các nút emoji pill (Tab 1)
-    const stateMap = { 'idle': 0, 'happy': 1, 'blink': 2, 'left': 3, 'right': 4, 'up': 5, 'down': 6, 'angry': 7, 'confused': 8 };
+    // Cập nhật trạng thái các nút emoji pill theo 8 Canonical Emotions
+    const stateList = ['neutral', 'happy', 'angry', 'sad', 'thinking', 'confused', 'winking', 'sleepy'];
+    let canon = state;
+    if (canon === 'idle') canon = 'neutral';
+    if (canon === 'blink') canon = 'winking';
     const pills = document.querySelectorAll('.emoji-pill');
-    pills.forEach(p => p.classList.remove('active'));
-    if (stateMap[state] !== undefined && pills[stateMap[state]]) {
-      pills[stateMap[state]].classList.add('active');
-    }
+    pills.forEach((p, idx) => {
+      p.classList.toggle('active', stateList[idx] === canon);
+    });
 
     // Cập nhật trạng thái các nút palette emoji (Tab 2)
     document.querySelectorAll('.palette-btn').forEach(btn => {

@@ -151,6 +151,8 @@ namespace ApiSystem {
     doc["emoji_state"] = TestDisplay::getEmojiStateName();
     doc["emoji_subtitle"] = TestDisplay::getSubtitle();
     doc["hud_style"] = TestDisplay::getHudStyleName();
+    doc["emoji_style"] = TestDisplay::getEmojiStyle();
+    doc["emoji_style_name"] = TestDisplay::getEmojiStyleName();
     doc["sht31_online"] = TestSensors::isSht31Connected();
     doc["temperature_c"] = serialized(String(TestSensors::getTemperatureC(), 1));
     doc["humidity_pct"] = (int)roundf(TestSensors::getHumidityPct());
