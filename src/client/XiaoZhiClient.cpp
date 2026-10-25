@@ -8,6 +8,12 @@
 #include <LittleFS.h>
 #include "esp_websocket_client.h"
 #include <opus.h>
+#include "drivers/MotorDriver.h"
+#include "drivers/CobLedDriver.h"
+#include "drivers/SensorDriver.h"
+#include "drivers/DisplayDriver.h"
+#include "drivers/AudioDriver.h"
+#include "os/SpaceOS_WindowManager.h"
 
 static Preferences sysPrefs;
 static String s_lastAuthCode = "";
@@ -620,6 +626,307 @@ String XiaoZhiClient::transcribeMicAudioPcm16(const int16_t* pcmSamples, size_t 
 }
 
 // -------------------------------------------------------------
+// -------------------------------------------------------------
+// XIAOZHI MCP (MODEL CONTEXT PROTOCOL) & IOT TOOL CALLING
+// -------------------------------------------------------------
+
+static bool executeLocalVoiceIntent(const String& rawText) {
+  String s = XiaoZhiClient::stripVietnameseToAscii(rawText);
+  s.toLowerCase();
+  s.trim();
+
+  // 1. Cối xay gió L298N
+  if (s.indexOf("bat coi xay") >= 0 || s.indexOf("quay coi xay") >= 0 || s.indexOf("chay coi xay") >= 0 || s.indexOf("bat quat") >= 0) {
+    MotorDriver::setMode(2); // 60%
+    Serial.println("⚡ [VOICE INTENT] Đã bật cối xay gió!");
+    return true;
+  }
+  if (s.indexOf("tat coi xay") >= 0 || s.indexOf("dung coi xay") >= 0 || s.indexOf("ngung coi xay") >= 0 || s.indexOf("tat quat") >= 0) {
+    MotorDriver::setMode(0);
+    Serial.println("⚡ [VOICE INTENT] Đã tắt cối xay gió!");
+    return true;
+  }
+
+  // 2. Đèn ống Edison
+  if (s.indexOf("bat den edison") >= 0 || s.indexOf("bat den ong") >= 0) {
+    MotorDriver::setEdisonBrightness(80);
+    Serial.println("⚡ [VOICE INTENT] Đã bật đèn Edison!");
+    return true;
+  }
+  if (s.indexOf("tat den edison") >= 0 || s.indexOf("tat den ong") >= 0) {
+    MotorDriver::setEdisonBrightness(0);
+    Serial.println("⚡ [VOICE INTENT] Đã tắt đèn Edison!");
+    return true;
+  }
+
+  // 3. Đèn COB mặt lưng
+  if (s.indexOf("bat den cob") >= 0 || s.indexOf("bat den sao bang") >= 0 || s.indexOf("bat led cob") >= 0) {
+    CobLeds::turnOn();
+    Serial.println("⚡ [VOICE INTENT] Đã bật LED COB!");
+    return true;
+  }
+  if (s.indexOf("tat den cob") >= 0 || s.indexOf("tat den sao bang") >= 0 || s.indexOf("tat led cob") >= 0) {
+    CobLeds::turnOff();
+    Serial.println("⚡ [VOICE INTENT] Đã tắt LED COB!");
+    return true;
+  }
+
+  // 4. Bật/Tắt toàn bộ đèn
+  if (s.indexOf("tat het den") >= 0 || s.indexOf("tat tat ca den") >= 0) {
+    MotorDriver::setEdisonBrightness(0);
+    CobLeds::turnOff();
+    Serial.println("⚡ [VOICE INTENT] Đã tắt toàn bộ đèn!");
+    return true;
+  }
+  if (s.indexOf("bat het den") >= 0 || s.indexOf("bat tat ca den") >= 0) {
+    MotorDriver::setEdisonBrightness(80);
+    CobLeds::turnOn();
+    Serial.println("⚡ [VOICE INTENT] Đã bật toàn bộ đèn!");
+    return true;
+  }
+
+  // 5. Chuyển chế độ màn hình SpaceOS
+  if (s.indexOf("man hinh cho") >= 0 || s.indexOf("ve man hinh cho") >= 0) {
+    TestDisplay::setScreenMode("standby");
+    Serial.println("⚡ [VOICE INTENT] Chuyển về Màn hình chờ!");
+    return true;
+  }
+  if (s.indexOf("man hinh pc") >= 0 || s.indexOf("thong so pc") >= 0 || s.indexOf("kiem tra may tinh") >= 0) {
+    TestDisplay::setScreenMode("pchud");
+    Serial.println("⚡ [VOICE INTENT] Chuyển sang màn hình PC HUD!");
+    return true;
+  }
+  if (s.indexOf("man hinh bieu cam") >= 0 || s.indexOf("man hinh xiaozhi") >= 0) {
+    TestDisplay::setScreenMode("emoji");
+    Serial.println("⚡ [VOICE INTENT] Chuyển sang màn hình Biểu cảm XiaoZhi!");
+    return true;
+  }
+  if (s.indexOf("man hinh song am") >= 0 || s.indexOf("man hinh cam bien") >= 0) {
+    TestDisplay::setScreenMode("diag");
+    Serial.println("⚡ [VOICE INTENT] Chuyển sang màn hình Sóng âm & Chẩn đoán!");
+    return true;
+  }
+
+  return false;
+}
+
+static void handleMcpMessage(const JsonDocument& doc) {
+  JsonObjectConst payload = doc["payload"].is<JsonObjectConst>() ? doc["payload"].as<JsonObjectConst>() : doc.as<JsonObjectConst>();
+  String method = payload["method"] | doc["method"] | "";
+  int reqId = payload["id"] | doc["id"] | 1;
+  String sid = doc["session_id"] | s_sessionId;
+
+  Serial.printf("🛠️ [XIAOZHI MCP] Phương thức nhận được: \"%s\" (ID: %d)\n", method.c_str(), reqId);
+
+  // 1. Phản hồi danh mục công cụ (tools/list)
+  if (method == "tools/list") {
+    JsonDocument resDoc;
+    resDoc["session_id"] = sid;
+    resDoc["type"] = "mcp";
+    JsonObject pl = resDoc["payload"].to<JsonObject>();
+    pl["jsonrpc"] = "2.0";
+    pl["id"] = reqId;
+    JsonObject resObj = pl["result"].to<JsonObject>();
+    JsonArray tools = resObj["tools"].to<JsonArray>();
+
+    // Tool 1: Cối xay gió
+    {
+      JsonObject t = tools.add<JsonObject>();
+      t["name"] = "self.windmill.set";
+      t["description"] = "Dieu khien bat, tat hoac dieu chinh toc do motor coi xay gio cua tram decor";
+      JsonObject schema = t["inputSchema"].to<JsonObject>();
+      schema["type"] = "object";
+      JsonObject props = schema["properties"].to<JsonObject>();
+      props["state"]["type"] = "boolean";
+      props["state"]["description"] = "true de bat coi xay, false de tat";
+      props["speed"]["type"] = "integer";
+      props["speed"]["description"] = "Toc do phan tram tu 0 den 100";
+      props["mode"]["type"] = "string";
+      props["mode"]["description"] = "Che do: off, low (35%), medium (60%), high (85%), breath (nhip tho)";
+    }
+
+    // Tool 2: Đèn ống Edison
+    {
+      JsonObject t = tools.add<JsonObject>();
+      t["name"] = "self.edison_lights.set";
+      t["description"] = "Dieu khien bat tat va do sang 2 den ong nang luong Edison filament suon trai va phai";
+      JsonObject schema = t["inputSchema"].to<JsonObject>();
+      schema["type"] = "object";
+      JsonObject props = schema["properties"].to<JsonObject>();
+      props["state"]["type"] = "boolean";
+      props["state"]["description"] = "true de bat den, false de tat";
+      props["side"]["type"] = "string";
+      props["side"]["description"] = "Vi tri den: 'both' (ca hai), 'left' (trai), 'right' (phai)";
+      props["brightness"]["type"] = "integer";
+      props["brightness"]["description"] = "Do sang tu 0 den 100%";
+      props["breathing"]["type"] = "boolean";
+      props["breathing"]["description"] = "Bat hieu ung den tho nhip nhang";
+    }
+
+    // Tool 3: Đèn COB sao băng
+    {
+      JsonObject t = tools.add<JsonObject>();
+      t["name"] = "self.cob_leds.set";
+      t["description"] = "Bat hoac tat 2 thanh LED nuoc chay sao bang COB o mat sau tram";
+      JsonObject schema = t["inputSchema"].to<JsonObject>();
+      schema["type"] = "object";
+      JsonObject props = schema["properties"].to<JsonObject>();
+      props["state"]["type"] = "boolean";
+      props["state"]["description"] = "true de bat, false de tat";
+      props["action"]["type"] = "string";
+      props["action"]["description"] = "'toggle' hoac 'next_mode' de chuyen hieu ung";
+    }
+
+    // Tool 4: Cảm biến & Telemetry
+    {
+      JsonObject t = tools.add<JsonObject>();
+      t["name"] = "self.telemetry.get";
+      t["description"] = "Doc thong so cam bien moi truong thuc te: nhiet do phong, do am tu SHT31, phan tram pin va trang thai sac";
+      JsonObject schema = t["inputSchema"].to<JsonObject>();
+      schema["type"] = "object";
+      schema["properties"].to<JsonObject>();
+    }
+
+    // Tool 5: Chuyển màn hình SpaceOS
+    {
+      JsonObject t = tools.add<JsonObject>();
+      t["name"] = "self.screen.switch_mode";
+      t["description"] = "Chuyen trang hien thi tren man hinh SpaceOS";
+      JsonObject schema = t["inputSchema"].to<JsonObject>();
+      schema["type"] = "object";
+      JsonObject props = schema["properties"].to<JsonObject>();
+      props["mode"]["type"] = "string";
+      props["mode"]["description"] = "Ten che do: 'standby' (man hinh cho), 'weather' (thoi tiet), 'pc_status' (thong so PC), 'music' (nghe nhac), 'game' (tro choi), 'diag' (chan doan)";
+    }
+
+    // Tool 6: Âm lượng loa
+    {
+      JsonObject t = tools.add<JsonObject>();
+      t["name"] = "self.audio.set_volume";
+      t["description"] = "Dieu chinh am luong loa phat cua tram";
+      JsonObject schema = t["inputSchema"].to<JsonObject>();
+      schema["type"] = "object";
+      JsonObject props = schema["properties"].to<JsonObject>();
+      props["volume"]["type"] = "integer";
+      props["volume"]["description"] = "Muc am luong tu 0 den 100%";
+    }
+
+    String resStr;
+    serializeJson(resDoc, resStr);
+    esp_websocket_client_send_text(s_wsClient, resStr.c_str(), resStr.length(), pdMS_TO_TICKS(2000));
+    Serial.printf("📤 [XIAOZHI MCP] Đã gửi danh mục 6 Tools tới XiaoZhi Cloud (%d bytes)\n", (int)resStr.length());
+    return;
+  }
+
+  // 2. Thực thi lệnh gọi công cụ (tools/call)
+  if (method == "tools/call") {
+    JsonObjectConst params = payload["params"].as<JsonObjectConst>();
+    String toolName = params["name"] | "";
+    JsonObjectConst args = params["arguments"].as<JsonObjectConst>();
+    String replyText = "Thành công";
+    bool isError = false;
+
+    if (toolName == "self.windmill.set") {
+      if (args["state"].is<bool>() && !args["state"].as<bool>()) {
+        MotorDriver::setMode(0);
+        replyText = "Đã tắt motor cối xay gió.";
+      } else if (args["speed"].is<int>()) {
+        int spd = constrain(args["speed"].as<int>(), 0, 100);
+        MotorDriver::setMotorSpeed(spd);
+        replyText = "Đã bật cối xay gió tốc độ " + String(spd) + "%.";
+      } else if (args["mode"].is<const char*>()) {
+        String m = args["mode"].as<String>();
+        if (m == "breath") MotorDriver::setMode(4);
+        else if (m == "high") MotorDriver::setMode(3);
+        else if (m == "medium") MotorDriver::setMode(2);
+        else if (m == "low") MotorDriver::setMode(1);
+        else MotorDriver::setMode(0);
+        replyText = "Đã chỉnh chế độ cối xay: " + m;
+      } else {
+        MotorDriver::setMode(2); // 60%
+        replyText = "Đã bật motor cối xay gió.";
+      }
+    } else if (toolName == "self.edison_lights.set") {
+      bool st = args["state"] | true;
+      int br = args["brightness"] | 80;
+      bool breath = args["breathing"] | false;
+      String side = args["side"] | "both";
+      if (!st) {
+        if (side == "left") MotorDriver::setEdisonLeftBrightness(0);
+        else if (side == "right") MotorDriver::setEdisonRightBrightness(0);
+        else MotorDriver::setEdisonBrightness(0);
+        replyText = "Đã tắt đèn ống Edison.";
+      } else {
+        if (side == "left") MotorDriver::setEdisonLeftBrightness(br, breath);
+        else if (side == "right") MotorDriver::setEdisonRightBrightness(br, breath);
+        else {
+          MotorDriver::setEdisonLeftBrightness(br, breath);
+          MotorDriver::setEdisonRightBrightness(br, breath);
+        }
+        replyText = "Đã bật đèn Edison " + side + " độ sáng " + String(br) + "%.";
+      }
+    } else if (toolName == "self.cob_leds.set") {
+      bool st = args["state"] | true;
+      String act = args["action"] | "";
+      if (act == "next_mode") {
+        CobLeds::nextMode();
+        replyText = "Đã chuyển chế độ đèn nước chảy COB.";
+      } else if (!st) {
+        CobLeds::turnOff();
+        replyText = "Đã tắt đèn nước chảy COB.";
+      } else {
+        CobLeds::turnOn();
+        replyText = "Đã bật đèn nước chảy COB.";
+      }
+    } else if (toolName == "self.telemetry.get") {
+      float temp = SensorDriver::getTemperatureC();
+      float hum = SensorDriver::getHumidityPct();
+      int bat = SensorDriver::getBatteryPercentage();
+      float vbat = SensorDriver::getBatteryVoltage();
+      bool chg = SensorDriver::isCharging();
+      uint8_t wSpeed = MotorDriver::getMotorSpeed();
+      replyText = "Nhiệt độ phòng hiện tại: " + String(temp, 1) + "°C, độ ẩm: " + String(hum, 0) +
+                  "%, pin trạm: " + String(bat) + "% (" + String(vbat, 2) + "V" + (chg ? ", đang sạc" : "") +
+                  "), tốc độ cối xay: " + String(wSpeed) + "%.";
+    } else if (toolName == "self.screen.switch_mode") {
+      String m = args["mode"] | "standby";
+      m.toLowerCase();
+      if (m == "standby" || m == "home" || m == "cho") TestDisplay::setScreenMode("standby");
+      else if (m == "pc_status" || m == "pc" || m == "hud") TestDisplay::setScreenMode("pchud");
+      else if (m == "emoji" || m == "ai") TestDisplay::setScreenMode("emoji");
+      else if (m == "diag" || m == "sensors" || m == "song_am") TestDisplay::setScreenMode("diag");
+      replyText = "Đã chuyển màn hình sang chế độ: " + m;
+    } else if (toolName == "self.audio.set_volume") {
+      int vol = constrain((int)(args["volume"] | 70), 0, 100);
+      AudioDriver::setSpeakerVolumePct(vol);
+      AudioDriver::setXiaoZhiVolumePct(vol);
+      replyText = "Đã đặt âm lượng loa: " + String(vol) + "%.";
+    } else {
+      replyText = "Không tìm thấy công cụ: " + toolName;
+      isError = true;
+    }
+
+    // Gửi gói tin JSON-RPC kết quả thực thi
+    JsonDocument resDoc;
+    resDoc["session_id"] = sid;
+    resDoc["type"] = "mcp";
+    JsonObject pl = resDoc["payload"].to<JsonObject>();
+    pl["jsonrpc"] = "2.0";
+    pl["id"] = reqId;
+    JsonObject resObj = pl["result"].to<JsonObject>();
+    JsonArray contentArr = resObj["content"].to<JsonArray>();
+    JsonObject item = contentArr.add<JsonObject>();
+    item["type"] = "text";
+    item["text"] = replyText;
+    resObj["isError"] = isError;
+
+    String resStr;
+    serializeJson(resDoc, resStr);
+    esp_websocket_client_send_text(s_wsClient, resStr.c_str(), resStr.length(), pdMS_TO_TICKS(1500));
+    Serial.printf("⚡ [XIAOZHI MCP CALL EXECUTED]: %s -> %s\n", toolName.c_str(), replyText.c_str());
+  }
+}
+
 // Triển khai WebSocket Client nền kết nối XiaoZhi Cloud
 // -------------------------------------------------------------
 
@@ -639,7 +946,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       Serial.println("🌐 [XIAOZHI HUB] Thiết bị hiện đang ONLINE trên Hub (xiaozhi.me)!");
       Serial.println("=======================================================");
       // Gửi bản tin hello theo chuẩn giao thức XiaoZhi Cloud Protocol v1 (Hỗ trợ Audio format PCM/Opus)
-      const char* hello = "{\"type\":\"hello\",\"version\":1,\"transport\":\"websocket\",\"audio_params\":{\"format\":\"pcm\",\"sample_rate\":16000,\"channels\":1,\"frame_duration\":60}}";
+      const char* hello = "{\"type\":\"hello\",\"version\":1,\"transport\":\"websocket\",\"features\":{\"mcp\":true},\"audio_params\":{\"format\":\"pcm\",\"sample_rate\":16000,\"channels\":1,\"frame_duration\":60}}";
       esp_websocket_client_send_text(s_wsClient, hello, strlen(hello), pdMS_TO_TICKS(1500));
       break;
     }
@@ -693,6 +1000,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 s_lastSttText = String(txt);
                 s_sttReceived = true;
                 Serial.printf("🎤 [XIAOZHI WS STT]: \"%s\"\n", s_lastSttText.c_str());
+                executeLocalVoiceIntent(s_lastSttText);
               }
             } else if (strcmp(type, "llm") == 0) {
               if (doc["text"].is<const char*>()) {
@@ -741,6 +1049,10 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               if (strcmp(st, "stop") == 0) {
                 s_ttsFinished = true;
                 Serial.println("⏹️ [XIAOZHI WS TTS STOP]: Máy chủ đã gửi xong toàn bộ chuỗi câu thoại TTS.");
+              }
+            } else if (strcmp(type, "mcp") == 0 || strcmp(type, "iot") == 0 || doc["payload"].is<JsonObjectConst>()) {
+              if (doc["payload"].is<JsonObjectConst>() || doc["method"].is<const char*>()) {
+                handleMcpMessage(doc);
               }
             }
           }
