@@ -1,5 +1,5 @@
 #define REAL_DISPLAY_DRIVER_CPP 1
-#include "tests/TestDisplay.h"
+#include "os/SpaceOS_WindowManager.h"
 #include "tests/TestSensors.h"
 #include "tests/TestAudio.h"
 #include "tests/TestButtons.h"

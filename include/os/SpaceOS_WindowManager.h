@@ -1,7 +1,115 @@
 #pragma once
-#include "tests/TestDisplay.h"
+#include <Arduino.h>
+#include <Preferences.h>
+#include "drivers/DisplayDriver.h"
 
-// Space OS Core Window Manager & Event Dispatcher
-// Manages Symbian S40 4x3 Grid, 19 Display Modes, Chrome, Softkeys & Toasts
+// ============================================================================
+// Space OS Core Window Manager & Desktop Environment
+// Quản lý Symbian S40 Grid, Chuyển đổi màn hình, Thanh trạng thái, Toasts, Phím mềm
+// ============================================================================
+namespace TestDisplay {
+  // Khởi tạo màn hình ST7789 (GPIO 12, 11, 10, 13, 14) và nạp giao diện Màn Hình Chờ
+  void init();
+
+  // Vòng lặp cập nhật đồng hồ thời gian thực, hiệu ứng mắt và thông số PC HUD
+  void loop();
+
+  // Đọc lại cấu hình Màn Hình Chờ từ tệp /standby_config.json trên LittleFS và vẽ lại ngay
+  void reloadStandbyConfig();
+
+  // Đồng bộ chế độ hiển thị từ giao diện Web ("standby", "emoji", "pchud", "diag")
+  void setScreenMode(const String& mode);
+
+  // Đồng bộ trạng thái biểu cảm XiaoZhi từ Web ("idle", "happy", "angry", "confused", "left", "right", "up", "down", "blink")
+  void setEmojiState(const String& state, const String& subtitle = "");
+
+  // Đồng bộ phong cách PC HUD từ Web ("bars", "gauges", "graph", "matrix")
+  void setHudStyle(const String& style);
+
+  // Lấy trạng thái màn hình hiện tại để đồng bộ ngược về Web UI
+  String  getScreenModeName();
+  uint8_t getCurrentMode();
+  int     getS40MenuCursor();
+  String  getCurrentScreenTitle();
+  String  getEmojiStateName();
+  String  getSubtitle();
+  String  getHudStyleName();
+
+  // Lấy cấu hình Màn Hình Chờ hiện tại (Hình nền, độ mờ, màu đồng hồ, thời tiết) để đồng bộ lên Web Keypad
+  String  getStandbyBgImage();
+  String  getStandbyBgMode();
+  int     getStandbyDimOverlay();
+  String  getStandbyClockColor();
+  String  getStandbyCustomText();
+  float   getStandbyTemp();
+  int     getStandbyHumidity();
+
+  // Cập nhật nhiệt độ & độ ẩm thực từ cảm biến SHT31 (GPIO 8, 9) lên Màn Hình Chờ
+  void updateLiveWeather(float tempC, float humPct);
+
+  // Điều khiển chuyển màn hình / kiểu HUD từ phím cứng & cảm biến chạm TTP223
+  void cycleScreenMode();
+  void cycleHudStyle(int dir = 1);
+
+  // Điều hướng Hệ Điều Hành Symbian S40 từ cụm 7 phím bấm ADC (0=OK, 1=UP, 2=DOWN, 3=LEFT, 4=RIGHT, 5=MENU, 6=EXIT)
+  void onKeypadEvent(int keyIndex);
+
+  // Kiểm tra trạng thái màn hình đang Sleep / Always On Display (Thread-safe)
+  bool isSleeping();
+  // Đánh thức màn hình tức thì từ task nền FreeRTOS (bật đèn nền LEDC ngay lập tức < 10ms)
+  void wakeUpScreenFromTask();
+
+  // Điều chỉnh độ sáng đèn nền màn hình ST7789 (PWM GPIO 7: 0..100%)
+  void setBacklightBrightness(int pct);
+  int  getBacklightBrightness();
+
+  // --- ĐỒNG BỘ & ĐIỀU KHIỂN TRÌNH PHÁT NHẠC ĐA PHƯƠNG TIỆN (MODE 12 <-> WEB UI) ---
+  void getMediaPlayerState(String& trackName, int& trackIdx, int& trackCount, bool& playing,
+                           uint8_t& visMode, uint8_t& repeatMode, uint16_t& curSec,
+                           uint16_t& totalSec, int& volumePct, bool& fromSd);
+  void controlMediaPlayer(const String& action, int value = 0, const String& trackName = "");
+  int  getMediaPlaylistItems(String names[], uint16_t durations[], bool fromSd[], size_t sizes[], int maxCount);
+  int  getUiThemeIdx();
+  void setUiThemeIdx(int idx);
+
+  // --- ĐỒNG BỘ & ĐIỀU KHIỂN TRỢ LÝ XIAOZHI AI (MODE 11 <-> WEB UI) ---
+  void getXiaoZhiChatState(String& stateStr, String& userText, String& aiReply, String& emotion,
+                           uint8_t& eyeState, int& volumePct, int& micLevelPct, uint32_t& turnId);
+  void triggerXiaoZhiListeningFromWeb();
+  void stopXiaoZhiListeningFromWeb();
+
+  // Xử lý lệnh điều khiển nhanh từ Serial Monitor ('1', '2', '3', '4', '5', 's', 'i', 'x', 'd')
+  bool handleSerial(char cmd);
+
+  // In bảng hướng dẫn các phím điều khiển màn hình
+  void printHelp();
+
+  // Chạy hoạt ảnh Boot Cyberpunk & Bảng kiểm tra ngoại vi POST (Power-On Self-Test)
+  void runBootSequence(bool playChime = true);
+
+  // Hoạt ảnh khởi động Trạm Không Gian (Phóng to từ 1 điểm, vệ tinh xoay quanh Trái Đất, hiệu ứng đèn Edison & loading Wi-Fi)
+  void runSpaceStationBootAnimation(bool playChime = true);
+
+  // Hiển thị tiến trình cập nhật phần mềm từ xa tối giản (OTA Progress Screen)
+  void drawOtaProgressScreen(const char* status, int pct);
+
+  // --- KẾT XUẤT STREAM VIDEO (CHẾ ĐỘ 17: STREAMING TỪ TRÌNH DUYỆT WEB / URL) ---
+  bool drawStreamJpegFrame(const uint8_t* buf, size_t len);
+  void stopStreamMode();
+  bool isStreamActive();
+
+  // --- HOẠT ẢNH LOADING KẾT NỐI WI-FI (CHẤM XOAY ĐUỔI NHAU) & TOAST THÔNG BÁO ---
+  void showWifiConnectingScreen(const String& ssid);
+  void updateWifiConnectingSpinner(const String& ssid, uint8_t animStep);
+  void onWifiConnectedSuccess(const String& ssid, const String& ip);
+  void onWifiConnectFailed(const String& ssid);
+  void showSymbianToast(const String& msg, unsigned long durationMs = 2500);
+  void refreshActiveScreen();
+  void triggerStandbyRedraw();
+
+  // Khôi phục Cài đặt Ban đầu (Factory Reset): Chuyển giao diện mặc định sang Mèo Gome Chibi, xóa tùy chỉnh người dùng
+  void performFactoryReset();
+}
+
+// Bí danh Space OS Window Manager chuẩn hóa
 namespace SpaceOS_WindowManager = TestDisplay;
-
