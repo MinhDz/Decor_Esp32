@@ -677,7 +677,7 @@ bool WebStreamManager::startUrlStream(const String& type, const String& url) {
   BaseType_t res = xTaskCreatePinnedToCore(
     urlStreamTask,
     "urlStreamTask",
-    14336,
+    10240,
     nullptr,
     1,
     &s_urlStreamTaskHandle,

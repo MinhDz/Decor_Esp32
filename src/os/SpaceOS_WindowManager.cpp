@@ -611,7 +611,7 @@ namespace TestDisplay {
       f.close();
       return (TJpgDec.drawFsJpg(x, y, path, LittleFS) == JDR_OK);
     }
-    uint8_t* jpgBuf = (uint8_t*)malloc(sz);
+    uint8_t* jpgBuf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
     if (!jpgBuf) {
       f.close();
       return (TJpgDec.drawFsJpg(x, y, path, LittleFS) == JDR_OK);
@@ -754,7 +754,7 @@ namespace TestDisplay {
           File sf = SD.open(fsPath, FILE_READ);
           size_t sz = sf ? sf.size() : 0;
           if (sz > 0 && sz <= 90000) {
-            uint8_t* buf = (uint8_t*)malloc(sz);
+            uint8_t* buf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
             if (buf) {
               if (sf.read(buf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, buf, sz) == JDR_OK && jw > 0 && jh > 0) {
                 uint8_t scale = 1;
@@ -2662,7 +2662,7 @@ namespace TestDisplay {
         File sf = SD.open(fsPath, FILE_READ);
         size_t sz = sf ? sf.size() : 0;
         if (sz > 0 && sz <= 90000) {
-          uint8_t* buf = (uint8_t*)malloc(sz);
+          uint8_t* buf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
           if (buf) {
             if (sf.read(buf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, buf, sz) == JDR_OK && jw > 0 && jh > 0) {
               uint8_t scale = 2;
@@ -4097,7 +4097,7 @@ namespace TestDisplay {
         if (f) {
           size_t sz = f.size();
           if (sz > 0 && sz <= 180000) {
-            uint8_t* buf = (uint8_t*)malloc(sz);
+            uint8_t* buf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
             if (buf) {
               if (f.read(buf, sz) == sz) {
                 uint16_t jw = 0, jh = 0;
@@ -4533,7 +4533,7 @@ namespace TestDisplay {
             File sf = SD.open(cleanFsPath, FILE_READ);
             size_t sz = sf ? sf.size() : 0;
             if (sz > 0 && sz <= 90000) {
-              uint8_t* buf = (uint8_t*)malloc(sz);
+              uint8_t* buf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
               if (buf) {
                 if (sf.read(buf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, buf, sz) == JDR_OK && jw > 0 && jh > 0) {
                   uint8_t scale = (jw >= 480 || jh >= 640) ? 4 : 2;
@@ -5142,7 +5142,7 @@ namespace TestDisplay {
             if (f) {
               size_t sz = f.size();
               if (sz > 0 && sz <= 65536) {
-                uint8_t* jBuf = (uint8_t*)malloc(sz);
+                uint8_t* jBuf = (uint8_t*)(psramFound() ? ps_malloc(sz) : malloc(sz));
                 if (jBuf && f.read(jBuf, sz) == sz && TJpgDec.getJpgSize(&jw, &jh, jBuf, sz) == JDR_OK && jw > 0 && jh > 0) {
                   uint8_t scale = 1;
                   if (jw >= 256 || jh >= 256) scale = 4;

@@ -1323,11 +1323,11 @@ namespace AudioDriver {
       Serial.printf("🎵 [MP3 DECODER] Bắt đầu giải mã & phát MP3: %s (%u bytes)...\n",
                     asyncSdFilePath.c_str(), (unsigned)f.size());
 
-      mp3dec_t* mp3d = (mp3dec_t*)malloc(sizeof(mp3dec_t));
+      mp3dec_t* mp3d = (mp3dec_t*)(psramFound() ? ps_malloc(sizeof(mp3dec_t)) : malloc(sizeof(mp3dec_t)));
       const int MP3_BUF_SIZE = 32768; // 32KB đệm PSRAM đọc SD một lần
       uint8_t* mp3Buf = (uint8_t*)(psramFound() ? ps_malloc(MP3_BUF_SIZE) : malloc(MP3_BUF_SIZE));
-      mp3d_sample_t* pcmOut = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
-      int16_t* stereoPcm = (int16_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t));
+      mp3d_sample_t* pcmOut = (mp3d_sample_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)));
+      int16_t* stereoPcm = (int16_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)));
 
       if (mp3d && mp3Buf && pcmOut && stereoPcm) {
         mp3dec_init(mp3d);
@@ -1415,8 +1415,8 @@ namespace AudioDriver {
     } else {
       s_mediaSampleRate = wavSampleRate;
       const size_t WAV_CHUNK = 1024;
-      int16_t* chunk = (int16_t*)malloc(WAV_CHUNK * sizeof(int16_t));
-      int16_t* stereoChunk = (int16_t*)malloc(WAV_CHUNK * 2 * sizeof(int16_t));
+      int16_t* chunk = (int16_t*)(psramFound() ? ps_malloc(WAV_CHUNK * sizeof(int16_t)) : malloc(WAV_CHUNK * sizeof(int16_t)));
+      int16_t* stereoChunk = (int16_t*)(psramFound() ? ps_malloc(WAV_CHUNK * 2 * sizeof(int16_t)) : malloc(WAV_CHUNK * 2 * sizeof(int16_t)));
       size_t totalBytes = (f.size() > 44) ? (f.size() - 44) : 0;
       size_t bytesRead = 0;
 
@@ -1836,7 +1836,7 @@ namespace AudioDriver {
 
   // --- THU HỒI BỘ NHỚ AN TOÀN (MEMORY SCAVENGER / STRICT MODE) ---
   bool hasAllocatedRecBuffer() {
-    return (pcmRecBuffer != nullptr);
+    return (pcmRecBuffer != nullptr || s_mediaPcmRingBuf != nullptr || s_asyncStreamRingBuf != nullptr);
   }
 
   size_t trimMemory() {
