@@ -5342,6 +5342,10 @@ namespace TestDisplay {
     }
   }
 
+  static void stopMediaAudioPlayback() {
+    TestAudio::stopVoicePlaybackAsync();
+  }
+
   // Bắt đầu / Dừng phát âm thanh thật ra Loa PWM GPIO 15 trong Trình Phát Nhạc
   static void startMediaAudioPlayback() {
     if (s40MediaTrackCount <= 0) return;
@@ -5411,10 +5415,6 @@ namespace TestDisplay {
     if (!s40MediaFromSd[s40MediaTrackIdx]) {
       TestAudio::playSynthMusicAsync(fn, PIN_I2S_SPK_DIN);
     }
-  }
-
-  static void stopMediaAudioPlayback() {
-    TestAudio::stopVoicePlaybackAsync();
   }
 
   // Tìm tệp ảnh bìa (Album Cover Art) cho bài hát hiện tại:
