@@ -941,12 +941,6 @@ namespace AudioDriver {
   static void audioPwmTask(void* arg) {
     uint8_t pin = (uint8_t)(uintptr_t)arg;
     bool playFromSd = false;
-    if (StorageDriver::isMounted() && asyncSdFilePath.length() > 0 && !asyncSdFilePath.startsWith("SYNTH:")) {
-      if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
-        playFromSd = SD.exists(asyncSdFilePath);
-        StorageDriver::unlock();
-      }
-    }
     File f;
     uint32_t wavSampleRate = 16000;
     uint16_t wavChannels = 1;
@@ -954,37 +948,41 @@ namespace AudioDriver {
     bool isWav = false;
     bool isMp3 = false;
 
-    if (playFromSd && (asyncSdFilePath.indexOf("rec_latest") < 0 || pcmRecSampleCount == 0)) {
-      if (StorageDriver::lock(pdMS_TO_TICKS(150))) {
-        f = SD.open(asyncSdFilePath, FILE_READ);
-        if (f && f.size() > 128) {
-          uint8_t h[44];
-          f.read(h, 44);
-          if (memcmp(h, "RIFF", 4) == 0 && memcmp(h + 8, "WAVE", 4) == 0) {
-            isWav = true;
-            wavSampleRate = h[24] | (h[25] << 8) | (h[26] << 16) | (h[27] << 24);
-            wavChannels = h[22] | (h[23] << 8);
-            if (wavSampleRate < 8000 || wavSampleRate > 48000) wavSampleRate = 16000;
-            if (wavChannels != 1 && wavChannels != 2) wavChannels = 1;
+    if (StorageDriver::isMounted() && asyncSdFilePath.length() > 0 && !asyncSdFilePath.startsWith("SYNTH:")) {
+      if (asyncSdFilePath.indexOf("rec_latest") < 0 || pcmRecSampleCount == 0) {
+        if (StorageDriver::lock(pdMS_TO_TICKS(1000))) {
+          f = SD.open(asyncSdFilePath, FILE_READ);
+          if (f && f.size() > 128) {
+            playFromSd = true;
+            uint8_t h[44];
+            f.read(h, 44);
+            if (memcmp(h, "RIFF", 4) == 0 && memcmp(h + 8, "WAVE", 4) == 0) {
+              isWav = true;
+              wavSampleRate = h[24] | (h[25] << 8) | (h[26] << 16) | (h[27] << 24);
+              wavChannels = h[22] | (h[23] << 8);
+              if (wavSampleRate < 8000 || wavSampleRate > 48000) wavSampleRate = 16000;
+              if (wavChannels != 1 && wavChannels != 2) wavChannels = 1;
+            } else {
+              // File MP3 trên thẻ nhớ SD -> Giải mã bằng bộ minimp3
+              isMp3 = true;
+              f.seek(0);
+            }
           } else {
-            // File MP3 trên thẻ nhớ SD -> Giải mã bằng bộ minimp3
-            isMp3 = true;
-            f.seek(0);
+            playFromSd = false;
+            if (f) f.close();
           }
+          StorageDriver::unlock();
         } else {
+          Serial.printf("⚠️ [AUDIO TASK] Timeout lock SD khi mo file: %s\n", asyncSdFilePath.c_str());
           playFromSd = false;
         }
-        StorageDriver::unlock();
-      } else {
-        playFromSd = false;
       }
-    } else {
-      playFromSd = false;
     }
 
-    bool isSynthMode = asyncSdFilePath.startsWith("SYNTH:") || (!playFromSd && pcmRecSampleCount == 0 && asyncSdFilePath.length() > 0);
+    bool isSynthMode = asyncSdFilePath.startsWith("SYNTH:");
 
     if (!playFromSd && pcmRecSampleCount == 0 && !isSynthMode) {
+      Serial.printf("❌ [AUDIO TASK] Huy phat nhac: File khong hop le hoac loi the nho SD (%s)\n", asyncSdFilePath.c_str());
       audioPlayRunning = false;
       audioTaskHandle = NULL;
       vTaskDelete(NULL);

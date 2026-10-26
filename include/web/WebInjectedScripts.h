@@ -2175,15 +2175,27 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     if (wrap) wrap.style.display = 'block';
     if (btn) btn.disabled = true;
 
+    function sanitizeFilename(name) {
+      let clean = name.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      clean = clean.replace(/đ/g, 'd').replace(/Đ/g, 'D');
+      clean = clean.replace(/[^a-zA-Z0-9.\-_ ()]/g, '_');
+      clean = clean.replace(/_+/g, '_').trim();
+      if (!clean || clean === '.mp3' || clean === '.wav') {
+        clean = 'track_' + Date.now() + (name.endsWith('.wav') ? '.wav' : '.mp3');
+      }
+      return clean;
+    }
+
     let successCount = 0;
     for (let i = 0; i < files.length; i++) {
       const file = files[i];
-      if (statusTxt) statusTxt.innerText = `Đang tải (${i + 1}/${files.length}): ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
+      const cleanName = sanitizeFilename(file.name);
+      if (statusTxt) statusTxt.innerText = `Đang tải (${i + 1}/${files.length}): ${cleanName} (${(file.size / 1024 / 1024).toFixed(2)} MB)...`;
 
       await new Promise((resolve) => {
         const xhr = new XMLHttpRequest();
         const formData = new FormData();
-        formData.append('music', file, file.name);
+        formData.append('music', file, cleanName);
 
         xhr.upload.onprogress = function(ev) {
           if (ev.lengthComputable) {
@@ -2194,7 +2206,14 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           }
         };
         xhr.onload = function() {
-          if (xhr.status >= 200 && xhr.status < 300) successCount++;
+          try {
+            const resp = JSON.parse(xhr.responseText);
+            if (xhr.status >= 200 && xhr.status < 300 && resp.status === 'ok') {
+              successCount++;
+            }
+          } catch(e) {
+            if (xhr.status >= 200 && xhr.status < 300) successCount++;
+          }
           resolve();
         };
         xhr.onerror = function() { resolve(); };
@@ -2205,7 +2224,13 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
     if (btn) btn.disabled = false;
     input.value = '';
-    if (statusTxt) statusTxt.innerText = `✅ Hoàn tất tải lên ${successCount}/${files.length} tệp vào thư mục /Musics trên Thẻ SD!`;
+    if (statusTxt) {
+      if (successCount === files.length) {
+        statusTxt.innerText = `✅ Hoàn tất tải lên cả ${successCount} tệp vào thư mục /Musics trên Thẻ SD!`;
+      } else {
+        statusTxt.innerText = `⚠️ Hoàn tất ${successCount}/${files.length} tệp (${files.length - successCount} tệp lỗi hoặc 0KB)!`;
+      }
+    }
     if (pctTxt) pctTxt.innerText = '100%';
     if (bar) bar.style.width = '100%';
     if (typeof showToast === 'function') {

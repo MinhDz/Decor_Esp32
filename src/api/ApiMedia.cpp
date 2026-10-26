@@ -307,18 +307,74 @@ namespace ApiMedia {
     handleMediaStatus(server);
   }
 
+  static String sanitizeMusicFilename(const String& raw) {
+    String s = raw;
+    int sl = s.lastIndexOf('/');
+    if (sl >= 0) s = s.substring(sl + 1);
+    int bsl = s.lastIndexOf('\\');
+    if (bsl >= 0) s = s.substring(bsl + 1);
+
+    // Chuẩn hóa ký tự có dấu UTF-8 tiếng Việt sang ASCII an toàn cho FAT32
+    s.replace("đ", "d"); s.replace("Đ", "D");
+    s.replace("á", "a"); s.replace("à", "a"); s.replace("ả", "a"); s.replace("ã", "a"); s.replace("ạ", "a");
+    s.replace("â", "a"); s.replace("ấ", "a"); s.replace("ầ", "a"); s.replace("ẩ", "a"); s.replace("ẫ", "a"); s.replace("ậ", "a");
+    s.replace("ă", "a"); s.replace("ắ", "a"); s.replace("ằ", "a"); s.replace("ẳ", "a"); s.replace("ẵ", "a"); s.replace("ặ", "a");
+    s.replace("Á", "A"); s.replace("À", "A"); s.replace("Ả", "A"); s.replace("Ã", "A"); s.replace("Ạ", "A");
+    s.replace("Â", "A"); s.replace("Ấ", "A"); s.replace("Ầ", "A"); s.replace("Ẩ", "A"); s.replace("Ẫ", "A"); s.replace("Ậ", "A");
+    s.replace("Ă", "A"); s.replace("Ắ", "A"); s.replace("Ằ", "A"); s.replace("Ẳ", "A"); s.replace("Ẵ", "A"); s.replace("Ặ", "A");
+    s.replace("é", "e"); s.replace("è", "e"); s.replace("ẻ", "e"); s.replace("ẽ", "e"); s.replace("ẹ", "e");
+    s.replace("ê", "e"); s.replace("ế", "e"); s.replace("ề", "e"); s.replace("ể", "e"); s.replace("ễ", "e"); s.replace("ệ", "e");
+    s.replace("É", "E"); s.replace("È", "E"); s.replace("Ẻ", "E"); s.replace("Ẽ", "E"); s.replace("Ẹ", "E");
+    s.replace("Ê", "E"); s.replace("Ế", "E"); s.replace("Ề", "E"); s.replace("Ể", "E"); s.replace("Ễ", "E"); s.replace("Ệ", "E");
+    s.replace("í", "i"); s.replace("ì", "i"); s.replace("ỉ", "i"); s.replace("ĩ", "i"); s.replace("ị", "i");
+    s.replace("Í", "I"); s.replace("Ì", "I"); s.replace("Ỉ", "I"); s.replace("Ĩ", "I"); s.replace("Ị", "I");
+    s.replace("ó", "o"); s.replace("ò", "o"); s.replace("ỏ", "o"); s.replace("õ", "o"); s.replace("ọ", "o");
+    s.replace("ô", "o"); s.replace("ố", "o"); s.replace("ồ", "o"); s.replace("ổ", "o"); s.replace("ỗ", "o"); s.replace("ộ", "o");
+    s.replace("ơ", "o"); s.replace("ớ", "o"); s.replace("ờ", "o"); s.replace("ở", "o"); s.replace("ỡ", "o"); s.replace("ợ", "o");
+    s.replace("Ó", "O"); s.replace("Ò", "O"); s.replace("Ỏ", "O"); s.replace("Õ", "O"); s.replace("Ọ", "O");
+    s.replace("Ô", "O"); s.replace("Ố", "O"); s.replace("Ồ", "O"); s.replace("Ổ", "O"); s.replace("Ỗ", "O"); s.replace("Ộ", "O");
+    s.replace("Ơ", "O"); s.replace("Ớ", "O"); s.replace("Ờ", "O"); s.replace("Ở", "O"); s.replace("Ỡ", "O"); s.replace("Ợ", "O");
+    s.replace("ú", "u"); s.replace("ù", "u"); s.replace("ủ", "u"); s.replace("ũ", "u"); s.replace("ụ", "u");
+    s.replace("ư", "u"); s.replace("ứ", "u"); s.replace("ừ", "u"); s.replace("ử", "u"); s.replace("ữ", "u"); s.replace("ự", "u");
+    s.replace("Ú", "U"); s.replace("Ù", "U"); s.replace("Ủ", "U"); s.replace("Ũ", "U"); s.replace("Ụ", "U");
+    s.replace("Ư", "U"); s.replace("Ứ", "U"); s.replace("Ừ", "U"); s.replace("Ử", "U"); s.replace("Ữ", "U"); s.replace("Ự", "U");
+    s.replace("ý", "y"); s.replace("ỳ", "y"); s.replace("ỷ", "y"); s.replace("ỹ", "y"); s.replace("ỵ", "y");
+    s.replace("Ý", "Y"); s.replace("Ỳ", "Y"); s.replace("Ỷ", "Y"); s.replace("Ỹ", "Y"); s.replace("Ỵ", "Y");
+
+    String out = "";
+    bool lastWasUnder = false;
+    for (size_t i = 0; i < s.length(); i++) {
+      char c = s[i];
+      if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') ||
+          c == '.' || c == '-' || c == ' ' || c == '(' || c == ')') {
+        out += c;
+        lastWasUnder = false;
+      } else if (c == '_' || (uint8_t)c > 127 || c == '+' || c == '@' || c == '#' || c == '$' || c == '%' || c == '^' || c == '&') {
+        if (!lastWasUnder) {
+          out += '_';
+          lastWasUnder = true;
+        }
+      }
+    }
+    out.trim();
+    if (out.length() == 0 || out.equalsIgnoreCase(".mp3") || out.equalsIgnoreCase(".wav")) {
+      out = "track_" + String(millis()) + (raw.endsWith(".wav") ? ".wav" : ".mp3");
+    }
+    return out;
+  }
+
   void handleMediaUploadChunk(WebServer& server) {
     HTTPUpload& upload = server.upload();
     if (upload.status == UPLOAD_FILE_START) {
       s_mediaUploadSuccess = false;
-      s_lastUploadedMusicName = upload.filename;
-      int sl = s_lastUploadedMusicName.lastIndexOf('/');
-      if (sl >= 0) s_lastUploadedMusicName = s_lastUploadedMusicName.substring(sl + 1);
-      int bsl = s_lastUploadedMusicName.lastIndexOf('\\');
-      if (bsl >= 0) s_lastUploadedMusicName = s_lastUploadedMusicName.substring(bsl + 1);
+      // Dừng ngay audio playback nếu đang phát nhạc để giải phóng SPI bus và SD card lock
+      TestAudio::stopVoicePlaybackAsync();
+      vTaskDelay(pdMS_TO_TICKS(40));
+
+      s_lastUploadedMusicName = sanitizeMusicFilename(upload.filename);
 
       if (TestSDCard::isMounted() && StorageDriver::isHealthy()) {
-        if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
+        if (StorageDriver::lock(pdMS_TO_TICKS(2000))) {
           if (!SD.exists("/Musics")) {
             SD.mkdir("/Musics");
           }
@@ -327,11 +383,13 @@ namespace ApiMedia {
           s_mediaUploadFile = SD.open(fullPath, FILE_WRITE);
           StorageDriver::unlock();
           Serial.printf("🎵 [SD /Musics] Đang nhận file nhạc: %s\n", fullPath.c_str());
+        } else {
+          Serial.printf("❌ [SD /Musics] Lock SD timeout khi bắt đầu nhận: %s\n", s_lastUploadedMusicName.c_str());
         }
       }
     } else if (upload.status == UPLOAD_FILE_WRITE) {
       if (s_mediaUploadFile && upload.currentSize > 0) {
-        if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
+        if (StorageDriver::lock(pdMS_TO_TICKS(2000))) {
           size_t written = s_mediaUploadFile.write(upload.buf, upload.currentSize);
           if (written != upload.currentSize) {
             StorageDriver::notifyIoError(true, "handleMediaUploadChunk write error");
@@ -342,22 +400,41 @@ namespace ApiMedia {
         }
       }
     } else if (upload.status == UPLOAD_FILE_END) {
+      size_t actualSize = 0;
       if (s_mediaUploadFile) {
-        if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
+        if (StorageDriver::lock(pdMS_TO_TICKS(2000))) {
+          s_mediaUploadFile.flush();
+          actualSize = s_mediaUploadFile.size();
           s_mediaUploadFile.close();
           StorageDriver::unlock();
         }
+      }
+      if (actualSize > 0 && actualSize >= upload.totalSize) {
         s_mediaUploadSuccess = true;
         Serial.printf("✅ [SD /Musics] Đã lưu xong: /Musics/%s (%u bytes)\n",
-                      s_lastUploadedMusicName.c_str(), (unsigned)upload.totalSize);
+                      s_lastUploadedMusicName.c_str(), (unsigned)actualSize);
         TestDisplay::controlMediaPlayer("select", 0, s_lastUploadedMusicName);
+      } else {
+        s_mediaUploadSuccess = false;
+        Serial.printf("❌ [SD /Musics] File upload lỗi hoặc 0 bytes: /Musics/%s (ghi %u / %u bytes)\n",
+                      s_lastUploadedMusicName.c_str(), (unsigned)actualSize, (unsigned)upload.totalSize);
+        if (StorageDriver::lock(pdMS_TO_TICKS(1000))) {
+          String fullPath = "/Musics/" + s_lastUploadedMusicName;
+          if (SD.exists(fullPath)) SD.remove(fullPath);
+          StorageDriver::unlock();
+        }
       }
     } else if (upload.status == UPLOAD_FILE_ABORTED) {
       if (s_mediaUploadFile) {
-        if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
+        if (StorageDriver::lock(pdMS_TO_TICKS(2000))) {
           s_mediaUploadFile.close();
           StorageDriver::unlock();
         }
+      }
+      if (StorageDriver::lock(pdMS_TO_TICKS(1000))) {
+        String fullPath = "/Musics/" + s_lastUploadedMusicName;
+        if (SD.exists(fullPath)) SD.remove(fullPath);
+        StorageDriver::unlock();
       }
       s_mediaUploadSuccess = false;
     }

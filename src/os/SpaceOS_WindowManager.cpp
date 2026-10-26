@@ -5128,12 +5128,14 @@ namespace TestDisplay {
               low.toLowerCase();
               if (low.endsWith(".wav") || low.endsWith(".mp3")) {
                 size_t fsz = f.size();
-                s40MediaTracks[s40MediaTrackCount] = fn;
-                s40MediaFileSizes[s40MediaTrackCount] = fsz;
-                uint16_t estSec = (fsz > 44) ? max((size_t)3, (fsz - 44) / 32000) : 10;
-                s40MediaDurations[s40MediaTrackCount] = estSec;
-                s40MediaFromSd[s40MediaTrackCount] = true;
-                s40MediaTrackCount++;
+                if (fsz > 128) {
+                  s40MediaTracks[s40MediaTrackCount] = fn;
+                  s40MediaFileSizes[s40MediaTrackCount] = fsz;
+                  uint16_t estSec = (fsz > 44) ? max((size_t)3, (fsz - 44) / 32000) : 10;
+                  s40MediaDurations[s40MediaTrackCount] = estSec;
+                  s40MediaFromSd[s40MediaTrackCount] = true;
+                  s40MediaTrackCount++;
+                }
               }
             }
             f.close();
@@ -5158,19 +5160,21 @@ namespace TestDisplay {
               low.toLowerCase();
               if (low.endsWith(".mp3") || low.endsWith(".wav") || low.endsWith(".flac") || low.endsWith(".ogg")) {
                 size_t fsz = f.size();
-                s40MediaTracks[s40MediaTrackCount] = fn;
-                s40MediaFileSizes[s40MediaTrackCount] = fsz;
-                // Ước tính thời lượng thực từ dung lượng file (.mp3 ~ 16KB/s @128kbps, .wav ~ 88KB/s hoặc 32KB/s)
-                uint16_t estSec = 180;
-                if (low.endsWith(".wav")) {
-                  estSec = (fsz > 44) ? max((size_t)5, (fsz - 44) / 32000) : 120;
-                } else {
-                  estSec = (fsz > 1024) ? max((size_t)5, fsz / 16000) : 180;
+                if (fsz > 128) {
+                  s40MediaTracks[s40MediaTrackCount] = fn;
+                  s40MediaFileSizes[s40MediaTrackCount] = fsz;
+                  // Ước tính thời lượng thực từ dung lượng file (.mp3 ~ 16KB/s @128kbps, .wav ~ 88KB/s hoặc 32KB/s)
+                  uint16_t estSec = 180;
+                  if (low.endsWith(".wav")) {
+                    estSec = (fsz > 44) ? max((size_t)5, (fsz - 44) / 32000) : 120;
+                  } else {
+                    estSec = (fsz > 1024) ? max((size_t)5, fsz / 16000) : 180;
+                  }
+                  if (estSec > 1800) estSec = 240;
+                  s40MediaDurations[s40MediaTrackCount] = estSec;
+                  s40MediaFromSd[s40MediaTrackCount] = true;
+                  s40MediaTrackCount++;
                 }
-                if (estSec > 1800) estSec = 240;
-                s40MediaDurations[s40MediaTrackCount] = estSec;
-                s40MediaFromSd[s40MediaTrackCount] = true;
-                s40MediaTrackCount++;
               }
             }
             f.close();
@@ -5199,7 +5203,7 @@ namespace TestDisplay {
           for (int k = 0; k < s40MediaTrackCount; k++) {
             if (s40MediaTracks[k].equalsIgnoreCase(n)) { dup = true; break; }
           }
-          if (!dup) {
+          if (!dup && sizes[i] > 128) {
             s40MediaTracks[s40MediaTrackCount] = n;
             s40MediaFileSizes[s40MediaTrackCount] = sizes[i];
             s40MediaDurations[s40MediaTrackCount] = (sizes[i] > 16000) ? (sizes[i] / 16000) : 180;
@@ -5341,6 +5345,11 @@ namespace TestDisplay {
   // Bắt đầu / Dừng phát âm thanh thật ra Loa PWM GPIO 15 trong Trình Phát Nhạc
   static void startMediaAudioPlayback() {
     if (s40MediaTrackCount <= 0) return;
+
+    // Dừng ngay tác vụ phát cũ và nhường CPU 30ms để giải phóng SD Mutex
+    stopMediaAudioPlayback();
+    vTaskDelay(pdMS_TO_TICKS(30));
+
     String fn = s40MediaTracks[s40MediaTrackIdx];
     Serial.printf("▶️ [MEDIA PLAYER] Bat dau phat: %s\n", fn.c_str());
 
@@ -5351,7 +5360,7 @@ namespace TestDisplay {
         return;
       } else if (TestSDCard::isMounted()) {
         bool recFound = false;
-        if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
+        if (StorageDriver::lock(pdMS_TO_TICKS(1500))) {
           recFound = SD.exists("/recording/rec_latest.wav");
           StorageDriver::unlock();
         }
@@ -5365,7 +5374,7 @@ namespace TestDisplay {
     // Nếu là file trên thẻ nhớ SD (trong /recording/ hoặc /Musics/ hoặc /)
     if (TestSDCard::isMounted() && s40MediaFromSd[s40MediaTrackIdx]) {
       String path = "";
-      if (StorageDriver::lock(pdMS_TO_TICKS(50))) {
+      if (StorageDriver::lock(pdMS_TO_TICKS(1500))) {
         String p = "/recording/" + fn;
         if (SD.exists(p)) path = p;
         else {
@@ -5376,16 +5385,32 @@ namespace TestDisplay {
             if (SD.exists(p)) path = p;
           }
         }
+        if (path.length() > 0) {
+          File checkF = SD.open(path, FILE_READ);
+          if (!checkF || checkF.size() <= 128) {
+            if (checkF) checkF.close();
+            path = "";
+            showSymbianToast("TEP LOI 0KB: KHONG THE PHAT!");
+          } else {
+            checkF.close();
+          }
+        }
         StorageDriver::unlock();
       }
       if (path.length() > 0) {
         TestAudio::playSdFileAsync(path, PIN_I2S_SPK_DIN);
         return;
+      } else {
+        s40MediaPlaying = false;
+        Serial.printf("❌ [MEDIA PLAYER] File SD khong hop le hoac 0KB: %s\n", fn.c_str());
+        return;
       }
     }
 
     // Nếu là bài nhạc mẫu điện tử (Demo ROM Synthwave / Chiptune tracks)
-    TestAudio::playSynthMusicAsync(fn, PIN_I2S_SPK_DIN);
+    if (!s40MediaFromSd[s40MediaTrackIdx]) {
+      TestAudio::playSynthMusicAsync(fn, PIN_I2S_SPK_DIN);
+    }
   }
 
   static void stopMediaAudioPlayback() {
