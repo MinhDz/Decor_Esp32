@@ -257,7 +257,22 @@ namespace SensorDriver {
     // ================= 3. XỬ LÝ PIN BAT_ADC (GPIO 2) & SẠC VIN MH-CD42 (GPIO 46) =================
     if (now - lastBatteryReadMs >= 500) {
       lastBatteryReadMs = now;
-      currentCharging = (digitalRead(PIN_CHG_STAT) == HIGH);
+      // Đọc trạng thái sạc (GPIO 46) với bộ lọc 8 mẫu và xác thực chống nhiễu gợn nguồn USB
+      int chgHighCount = 0;
+      for (int i = 0; i < 8; i++) {
+        if (digitalRead(PIN_CHG_STAT) == HIGH) chgHighCount++;
+        delayMicroseconds(50);
+      }
+      bool detectedChg = (chgHighCount >= 5);
+      static uint8_t s_chgStableCount = 0;
+      static bool s_lastDetectedChg = false;
+      if (detectedChg == s_lastDetectedChg) {
+        if (s_chgStableCount < 3) s_chgStableCount++;
+        if (s_chgStableCount >= 2) currentCharging = detectedChg;
+      } else {
+        s_chgStableCount = 0;
+        s_lastDetectedChg = detectedChg;
+      }
 
       long sumMv = 0;
       long sumRaw = 0;

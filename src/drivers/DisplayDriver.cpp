@@ -17,7 +17,7 @@ namespace DisplayDriver {
 
   static bool s_isLedcAttached = false;
   static uint8_t s_ledcChannel = 0;
-  static double s_ledcFreq = 2000.0;
+  static double s_ledcFreq = 5000.0;
   static uint8_t s_ledcRes = 8;
 
   static void applyBacklightHardware() {

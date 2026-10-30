@@ -22,7 +22,7 @@ namespace DisplayDriver {
   static const uint32_t SPI_MAX_SPEED_HZ = 80000000; // 80 MHz max hardware SPI on ESP32-S3
 
   // Backlight & Sleep state
-  void initBacklight(uint8_t channel = 0, double freq = 2000, uint8_t resolution = 8);
+  void initBacklight(uint8_t channel = 0, double freq = 5000, uint8_t resolution = 8);
   void setBrightness(int pct);
   int  getBrightness();
   int& getBrightnessRef();

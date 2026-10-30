@@ -925,14 +925,17 @@ namespace TestDisplay {
       }
     }
 
-    // Tia sét sạc mini (x - 7 .. x - 1)
+    // Tia sét sạc mini (x - 8 .. x - 1)
     if (charging) {
-      int lx = x - 6, ly = y + 1;
-      tft->drawLine(lx + 2, ly,     lx,     ly + 4, C_YELLOW);
-      tft->drawLine(lx,     ly + 4, lx + 3, ly + 4, C_YELLOW);
-      tft->drawLine(lx + 1, ly + 4, lx,     ly + 8, C_YELLOW);
+      int lx = x - 8, ly = y;
+      tft->drawLine(lx + 4, ly,     lx + 1, ly + 4, C_YELLOW);
+      tft->drawLine(lx + 5, ly,     lx + 2, ly + 4, C_YELLOW);
+      tft->drawLine(lx,     ly + 4, lx + 5, ly + 4, C_YELLOW);
+      tft->drawLine(lx + 1, ly + 5, lx + 5, ly + 5, C_YELLOW);
+      tft->drawLine(lx + 3, ly + 5, lx,     ly + 9, C_YELLOW);
+      tft->drawLine(lx + 4, ly + 5, lx + 1, ly + 9, C_YELLOW);
     } else {
-      tft->fillRect(x - 7, y, 6, 10, bgCol);
+      tft->fillRect(x - 9, y, 8, 10, bgCol);
     }
 
     // Thân pin chữ nhật (16x10) + núm cực dương bên phải (2x6)
@@ -943,8 +946,8 @@ namespace TestDisplay {
     // 4 Vạch nấc pin (Nokia S40 style)
     int fillBars = bars;
     if (charging) {
-      // Hiệu ứng nạp pin luân phiên 1->4 vạch (chu kỳ 350ms)
-      fillBars = ((millis() / 350) % 4) + 1;
+      // Hiệu ứng nạp pin luân phiên 1->4 vạch (chu kỳ 300ms/bước)
+      fillBars = ((millis() / 300) % 4) + 1;
     }
 
     for (int i = 0; i < 4; i++) {
@@ -1385,6 +1388,46 @@ namespace TestDisplay {
   // Cập nhật Đồng hồ số nổi trong suốt trên nền ảnh JPEG / Gradient (Không vẽ hộp đen che ảnh & không nháy hình)
   static void drawStandbyScreenFull();
 
+  // Cập nhật riêng viên thuốc Pin góc phải màn hình chờ (158, 8, 74, 20)
+  static void updateStandbyBatteryPill(bool force = false) {
+    if (!tft || isScreenSleeping || currentMode != 0) return;
+
+    static bool s_lastStandbyCharging = false;
+    static int  s_lastStandbyBars = -1;
+    static int  s_lastChargingStep = -1;
+    static int  s_lastVoltageTenth = -1;
+
+    bool curCharging = TestSensors::isCharging();
+    int curBars = TestSensors::getBatteryBars();
+    int chargingStep = curCharging ? (int)((millis() / 300) % 4) : -1;
+    int curVolTenth = (int)(TestSensors::getBatteryVoltage() * 10.0f + 0.5f);
+
+    bool needRedraw = force ||
+                      (curCharging != s_lastStandbyCharging) ||
+                      (!curCharging && (curBars != s_lastStandbyBars || curVolTenth != s_lastVoltageTenth)) ||
+                      (curCharging && chargingStep != s_lastChargingStep);
+
+    if (needRedraw) {
+      s_lastStandbyCharging = curCharging;
+      s_lastStandbyBars     = curBars;
+      s_lastChargingStep    = chargingStep;
+      s_lastVoltageTenth    = curVolTenth;
+
+      // Xóa nền kính mờ của riêng viên thuốc pin
+      tft->fillRoundRect(158, 8, 74, 20, 8, 0x10A2);
+      tft->drawRoundRect(158, 8, 74, 20, 8, 0x39E7);
+
+      // Biểu tượng tia sét và pin (Nokia S40 style) tại x=170, y=13
+      drawS40BatteryIcon(170, 13, 0x10A2);
+
+      // Hiển thị điện áp pin (không còn chữ SAC thô cứng)
+      tft->setTextSize(1);
+      tft->setTextColor(curCharging ? C_NEON_CYAN : C_WHITE, 0x10A2);
+      tft->setCursor(192, 14);
+      tft->printf("%.1fV", TestSensors::getBatteryVoltage());
+    }
+  }
+
   // Cập nhật Đồng hồ số nổi trong suốt trên nền ảnh JPEG / Gradient
   static void updateStandbyClockDigits(bool forceFullClock) {
     if (!tft || isScreenSleeping || currentMode != 0 || !clockCanvas) return;
@@ -1468,28 +1511,8 @@ namespace TestDisplay {
     tft->drawRGBBitmap(0, activeClockStripY, clockCanvas->getBuffer(), CLOCK_STRIP_W, CLOCK_STRIP_H);
     commitFrame();
 
-    // Cập nhật pill pin góc phải ở Màn hình Chờ Standby
-    static bool s_lastStandbyCharging = false;
-    static int s_lastStandbyBars = -1;
-    bool curCharging = TestSensors::isCharging();
-    int curBars = TestSensors::getBatteryBars();
-    if (forceFullClock || (second % 5 == 0) || (curCharging != s_lastStandbyCharging) || (curBars != s_lastStandbyBars)) {
-      s_lastStandbyCharging = curCharging;
-      s_lastStandbyBars = curBars;
-      tft->fillRoundRect(158, 8, 74, 20, 8, 0x10A2);
-      tft->drawRoundRect(158, 8, 74, 20, 8, 0x39E7);
-      drawS40BatteryIcon(166, 13, 0x10A2);
-      tft->setTextSize(1);
-      if (curCharging) {
-        tft->setTextColor(C_YELLOW, 0x10A2);
-        tft->setCursor(190, 14);
-        tft->print("SAC");
-      } else {
-        tft->setTextColor(C_WHITE, 0x10A2);
-        tft->setCursor(190, 14);
-        tft->printf("%.1fV", TestSensors::getBatteryVoltage());
-      }
-    }
+    // Cập nhật viên thuốc pin góc phải ở Màn hình Chờ Standby
+    updateStandbyBatteryPill(forceFullClock);
   }
 
   // Vẽ riêng viên thuốc kính mờ thời tiết ở đáy Màn Hình Chờ (tránh giật hình/flicker toàn màn hình)
@@ -1555,19 +1578,7 @@ namespace TestDisplay {
     }
     drawShadowText(28, 14, wifiTag, C_WHITE, 1);
 
-    tft->fillRoundRect(158, 8, 74, 20, 8, 0x10A2);
-    tft->drawRoundRect(158, 8, 74, 20, 8, 0x39E7);
-    drawS40BatteryIcon(166, 13, 0x10A2);
-    tft->setTextSize(1);
-    if (TestSensors::isCharging()) {
-      tft->setTextColor(C_YELLOW, 0x10A2);
-      tft->setCursor(190, 14);
-      tft->print("SAC");
-    } else {
-      tft->setTextColor(C_WHITE, 0x10A2);
-      tft->setCursor(190, 14);
-      tft->printf("%.1fV", TestSensors::getBatteryVoltage());
-    }
+    updateStandbyBatteryPill(true);
 
     // Bước 3: Vẽ Đồng hồ số trung tâm (nổi trong suốt trên ảnh nền) + Ngày tháng bên dưới
     lastDrawnMinute = -1;
@@ -9035,6 +9046,21 @@ namespace TestDisplay {
         drawAlwaysOnDisplayScreen(false);
       }
       return;
+    }
+
+    // Cập nhật hoạt ảnh nạp pin mượt mà 300ms/vạch đều tăm tắp khi đang cắm sạc
+    if (TestSensors::isCharging()) {
+      if (currentMode == 0) {
+        updateStandbyBatteryPill(false);
+      } else if (currentMode >= 4 && currentMode != 17) {
+        static int s_lastSymbianChgStep = -1;
+        int chgStep = (int)((millis() / 300) % 4);
+        if (chgStep != s_lastSymbianChgStep) {
+          s_lastSymbianChgStep = chgStep;
+          int w = tft->width();
+          drawS40BatteryIcon(w - 24, 7, C_HEADER_BG);
+        }
+      }
     }
 
     bool wifiNow = (WiFi.status() == WL_CONNECTED);
