@@ -1331,6 +1331,8 @@ namespace AudioDriver {
   static portMUX_TYPE s_asyncStreamMux = portMUX_INITIALIZER_UNLOCKED;
   static TaskHandle_t s_asyncStreamPumpHandle = nullptr;
   static volatile bool s_asyncStreamPumpRunning = false;
+  static volatile bool s_asyncStreamPrebuffering = true;
+  static const size_t ASYNC_PREBUFFER_THRESHOLD = 1920; // 120ms @ 16kHz Mono (2 Opus frames) chống giật và vấp tiếng
 
   static void asyncStreamPumpTask(void* param) {
     const size_t CHUNK = 256;
@@ -1344,8 +1346,18 @@ namespace AudioDriver {
       taskEXIT_CRITICAL(&s_asyncStreamMux);
 
       if (count == 0) {
+        s_asyncStreamPrebuffering = true;
         ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(50));
         continue;
+      }
+
+      // Cơ chế Jitter Pre-buffering: Tích lũy trước 120ms âm thanh để triệt tiêu vấp và nuốt từ do trễ gói Wi-Fi
+      if (s_asyncStreamPrebuffering) {
+        if (count < ASYNC_PREBUFFER_THRESHOLD && (millis() - s_lastStreamPcmMs < 200)) {
+          ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
+          continue;
+        }
+        s_asyncStreamPrebuffering = false;
       }
 
       size_t toRead = (count > CHUNK) ? CHUNK : count;
@@ -1461,6 +1473,7 @@ namespace AudioDriver {
     s_asyncStreamTail = 0;
     s_asyncStreamCount = 0;
     taskEXIT_CRITICAL(&s_asyncStreamMux);
+    s_asyncStreamPrebuffering = true;
     s_lastStreamPcmMs = 0;
     s_streamVoiceEnergy = 0;
     if (spkDriverInstalled) {

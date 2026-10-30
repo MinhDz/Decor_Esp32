@@ -1073,48 +1073,71 @@ namespace TestDisplay {
     return false;
   }
 
-  // Chuan hoa moi ten cam xuc (Anh, Viet, XiaoZhi Cloud tag, hoac eyeState) sang 8 Canonical Emotions
+  // Chuan hoa moi ten cam xuc sang kho 21 Bieu Cam Sinh Dong (BuiltinEmojis & Gome Dataset)
   static String mapToCanonicalEmotion(uint8_t state, const String& emoTag) {
     String e = emoTag;
     e.toLowerCase();
     e.trim();
 
-    // 1. Tuc gian / Angry
+    // 1. Tieng cuoi / Laughing / Funny
+    if (e.indexOf("laugh") >= 0 || e.indexOf("cuoito") >= 0 || e.indexOf("haha") >= 0) return "laughing";
+    if (e.indexOf("funny") >= 0 || e.indexOf("haihuoc") >= 0 || e.indexOf("hai_huoc") >= 0) return "funny";
+
+    // 2. Tinh yeu / Loving / Kissy
+    if (e.indexOf("loving") >= 0 || e.indexOf("love") >= 0 || e.indexOf("yeuthuong") >= 0 || e.indexOf("dangyeu") >= 0) return "loving";
+    if (e.indexOf("kissy") >= 0 || e.indexOf("kiss") >= 0 || e.indexOf("hon") >= 0) return "kissy";
+
+    // 3. Am thuc / Delicious
+    if (e.indexOf("delicious") >= 0 || e.indexOf("ngon") >= 0 || e.indexOf("amthuc") >= 0) return "delicious";
+
+    // 4. Cool / Ngau / Confident
+    if (e.indexOf("confident") >= 0 || e.indexOf("tutin") >= 0) return "confident";
+    if (e.indexOf("cool") >= 0 || e.indexOf("ngau") >= 0 || e.indexOf("pro") >= 0) return "cool";
+
+    // 5. Thu gian / Relaxed
+    if (e.indexOf("relax") >= 0 || e.indexOf("thugian") >= 0 || e.indexOf("chill") >= 0) return "relaxed";
+
+    // 6. Kinh ngac / Shocked / Surprised
+    if (e.indexOf("shock") >= 0 || e.indexOf("soc") >= 0 || e.indexOf("kinhngac") >= 0) return "shocked";
+    if (e.indexOf("surpris") >= 0 || e.indexOf("ngacnhien") >= 0) return "surprised";
+
+    // 7. Ngai ngung / Embarrassed
+    if (e.indexOf("embarrass") >= 0 || e.indexOf("nguong") >= 0 || e.indexOf("shy") >= 0) return "embarrassed";
+
+    // 8. Ngo nghinh / Silly
+    if (e.indexOf("silly") >= 0 || e.indexOf("ngonghinh") >= 0 || e.indexOf("ngo") >= 0) return "silly";
+
+    // 9. Khoc / Crying / Sad
+    if (e.indexOf("crying") >= 0 || e.indexOf("khoc") >= 0) return "crying";
+    if (e.indexOf("sad") >= 0 || e.indexOf("buon") >= 0) return "sad";
+
+    // 10. Tuc gian / Angry
     if (e.indexOf("angry") >= 0 || e.indexOf("mad") >= 0 || e.indexOf("furious") >= 0 ||
         e.indexOf("tuc") >= 0 || e.indexOf("gian") >= 0) return "angry";
 
-    // 2. Vui ve / Happy
-    if (e.indexOf("happy") >= 0 || e.indexOf("laugh") >= 0 || e.indexOf("funny") >= 0 ||
-        e.indexOf("loving") >= 0 || e.indexOf("delicious") >= 0 || e.indexOf("confident") >= 0 ||
-        e.indexOf("excited") >= 0 || e.indexOf("pleased") >= 0 ||
-        e.indexOf("vui") >= 0 || e.indexOf("cuoi") >= 0) return "happy";
+    // 11. Nhay mat / Chop mat / Winking
+    if (e.indexOf("wink") >= 0 || e.indexOf("blink") >= 0 || e.indexOf("nhay") >= 0 || e.indexOf("chop") >= 0) return "winking";
 
-    // 3. Suy nghi / Lang nghe / Thinking
+    // 12. Suy nghi / Lang nghe / Thinking
     if (e.indexOf("thinking") >= 0 || e.indexOf("pondering") >= 0 || e.indexOf("curious") >= 0 ||
         e.indexOf("listen") >= 0 || e.indexOf("suy_nghi") >= 0 || e.indexOf("suynghi") >= 0 ||
         e.indexOf("nghe") >= 0) return "thinking";
 
-    // 4. Nhay mat / Chop mat / Winking
-    if (e.indexOf("wink") >= 0 || e.indexOf("blink") >= 0 || e.indexOf("kissy") >= 0 ||
-        e.indexOf("playful") >= 0 || e.indexOf("nhay") >= 0 || e.indexOf("chop") >= 0) return "winking";
-
-    // 5. Buon ba / Khoc / Sad
-    if (e.indexOf("sad") >= 0 || e.indexOf("crying") >= 0 || e.indexOf("embarrassed") >= 0 ||
-        e.indexOf("shy") >= 0 || e.indexOf("buon") >= 0 || e.indexOf("khoc") >= 0) return "sad";
-
-    // 6. Boi roi / Hoa mat / Confused
-    if (e.indexOf("confused") >= 0 || e.indexOf("puzzled") >= 0 || e.indexOf("surprised") >= 0 ||
-        e.indexOf("shocked") >= 0 || e.indexOf("silly") >= 0 ||
+    // 13. Boi roi / Confused
+    if (e.indexOf("confused") >= 0 || e.indexOf("puzzled") >= 0 ||
         e.indexOf("boi_roi") >= 0 || e.indexOf("boiroi") >= 0 || e.indexOf("hoa_mat") >= 0 ||
         e.indexOf("hoamat") >= 0 || e.indexOf("cham_hoi") >= 0 || e.indexOf("chamhoi") >= 0) return "confused";
 
-    // 7. Buon ngu / Sleepy
+    // 14. Buon ngu / Sleepy
     if (e.indexOf("sleep") >= 0 || e.indexOf("tired") >= 0 || e.indexOf("bored") >= 0 ||
         e.indexOf("ngu") >= 0) return "sleepy";
 
-    // 8. Binh thuong / Neutral
+    // 15. Vui ve / Happy
+    if (e.indexOf("happy") >= 0 || e.indexOf("excited") >= 0 || e.indexOf("pleased") >= 0 ||
+        e.indexOf("vui") >= 0 || e.indexOf("cuoi") >= 0) return "happy";
+
+    // 16. Binh thuong / Neutral
     if (e.indexOf("neutral") >= 0 || e.indexOf("idle") >= 0 || e.indexOf("normal") >= 0 ||
-        e.indexOf("cool") >= 0 || e.indexOf("relaxed") >= 0 || e.indexOf("chill") >= 0 ||
         e.indexOf("binh_thuong") >= 0 || e.indexOf("binhthuong") >= 0) return "neutral";
 
     // Fallback theo eyeState
@@ -9206,9 +9229,17 @@ namespace TestDisplay {
       static unsigned long s_lastAiEyeBlinkMs = 0;
       static bool s_aiEyeBlinking = false;
       static uint8_t s_aiEyePrevState = 0;
+      static unsigned long s_lastIdleGestureMs = 0;
+      static unsigned long s_nextIdleIntervalMs = 7000;
+      static bool s_idleGestureActive = false;
+      static unsigned long s_idleGestureEndMs = 0;
+
+      if (s40AiState != AI_STATE_IDLE) {
+        s_idleGestureActive = false;
+      }
 
       if (s40AiState == AI_STATE_IDLE) {
-        // Trạng thái chờ: Mắt 2 vòng tròn phát sáng (Cyan). Tự động nháy mắt sinh học mỗi 4.2 giây
+        // 1. Nháy mắt sinh học tự nhiên (Blink 130ms) mỗi 4.0 - 5.5 giây
         if (!s_aiEyeBlinking && (now - s_lastAiEyeBlinkMs >= 4200)) {
           s_lastAiEyeBlinkMs = now;
           s_aiEyeBlinking = true;
@@ -9219,6 +9250,41 @@ namespace TestDisplay {
           s_aiEyeBlinking = false;
           s_lastAiEyeBlinkMs = now;
           eyeState = (s_aiEyePrevState == 1) ? 0 : s_aiEyePrevState;
+          drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+        }
+
+        // 2. Cử chỉ sinh học con người sống động (Lifelike Autonomous Micro-Gestures) mỗi 7 - 14 giây
+        if (!s_idleGestureActive && (now - s_lastIdleGestureMs >= s_nextIdleIntervalMs)) {
+          s_lastIdleGestureMs = now;
+          s_nextIdleIntervalMs = 7000 + (esp_random() % 7000); // 7s - 14s ngẫu nhiên
+          s_idleGestureActive = true;
+
+          static const char* IDLE_VIVID_EMOTIONS[] = {
+            "relaxed", "cool", "happy", "winking", "silly", "loving", "confident", "delicious", "laughing"
+          };
+          uint8_t randAction = esp_random() % 10;
+          if (randAction < 4) {
+            // A. Biểu cảm sống động ngẫu nhiên (3.5 - 5s)
+            int eIdx = esp_random() % (sizeof(IDLE_VIVID_EMOTIONS) / sizeof(IDLE_VIVID_EMOTIONS[0]));
+            s40AiEmotionTag = IDLE_VIVID_EMOTIONS[eIdx];
+            eyeState = (s40AiEmotionTag == "winking") ? 1 : 2;
+            s_idleGestureEndMs = now + 3500 + (esp_random() % 1500);
+            drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+          } else if (randAction < 7) {
+            // B. Liếc nhìn tự nhiên (trái, phải hoặc nhìn lên như quan sát môi trường) trong ~2 giây
+            uint8_t lookDir = (esp_random() % 3 == 0) ? 3 : ((esp_random() % 2 == 0) ? 4 : 5);
+            eyeState = lookDir;
+            s_idleGestureEndMs = now + 1800 + (esp_random() % 800);
+            drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
+          } else {
+            // C. Nháy mắt kép thư giãn
+            s_idleGestureEndMs = now + 600;
+          }
+        } else if (s_idleGestureActive && (now >= s_idleGestureEndMs)) {
+          // Trở về biểu cảm bình thường sau khi kết thúc cử chỉ
+          s_idleGestureActive = false;
+          s40AiEmotionTag = "neutral";
+          eyeState = 0;
           drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
         }
       } else if (s40AiState == AI_STATE_THINKING) {

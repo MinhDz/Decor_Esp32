@@ -35,6 +35,9 @@ static volatile bool s_llmReceived = false;
 static volatile bool s_ttsReceived = false;
 static volatile bool s_ttsFinished = false;
 static volatile uint32_t s_lastAiReplyTime = 0;
+static volatile bool s_localIntentHandled = false;
+static uint32_t s_localIntentHandledMs = 0;
+static String s_localIntentReplyText = "";
 
 static OpusDecoder* s_opusDecoder = nullptr;
 static int16_t s_pcmDecodeBuf[1920]; // Tối đa 120ms âm thanh @ 16000Hz Mono
@@ -494,44 +497,58 @@ String XiaoZhiClient::detectEmotionFromText(const String& text) {
   if (text.length() == 0) return "";
 
   // 1. Kiểm tra các mã Emoji UTF-8 phổ biến trả về từ mô hình LLM XiaoZhi:
+  if (text.indexOf("😂") >= 0 || text.indexOf("🤣") >= 0 || text.indexOf("😹") >= 0) return "laughing";
+  if (text.indexOf("🥰") >= 0 || text.indexOf("❤️") >= 0 || text.indexOf("💖") >= 0 || text.indexOf("💕") >= 0) return "loving";
+  if (text.indexOf("😘") >= 0 || text.indexOf("😽") >= 0) return "kissy";
+  if (text.indexOf("😋") >= 0 || text.indexOf("🤤") >= 0) return "delicious";
+  if (text.indexOf("😎") >= 0 || text.indexOf("🕶️") >= 0) return "cool";
+  if (text.indexOf("😜") >= 0 || text.indexOf("😝") >= 0 || text.indexOf("🤪") >= 0) return "silly";
+  if (text.indexOf("😱") >= 0 || text.indexOf("🙀") >= 0) return "shocked";
+  if (text.indexOf("😳") >= 0 || text.indexOf("🫣") >= 0) return "embarrassed";
+  if (text.indexOf("😭") >= 0) return "crying";
+  if (text.indexOf("😢") >= 0 || text.indexOf("🥺") >= 0 || text.indexOf("😞") >= 0) return "sad";
+  if (text.indexOf("😡") >= 0 || text.indexOf("😠") >= 0 || text.indexOf("🤬") >= 0) return "angry";
+  if (text.indexOf("😴") >= 0 || text.indexOf("🥱") >= 0 || text.indexOf("💤") >= 0) return "sleepy";
+  if (text.indexOf("😮") >= 0 || text.indexOf("😲") >= 0) return "surprised";
+  if (text.indexOf("🤔") >= 0 || text.indexOf("🧐") >= 0 || text.indexOf("🤨") >= 0) return "thinking";
+  if (text.indexOf("😉") >= 0) return "winking";
   if (text.indexOf("😊") >= 0 || text.indexOf("😄") >= 0 || text.indexOf("😃") >= 0 ||
-      text.indexOf("😀") >= 0 || text.indexOf("😆") >= 0 || text.indexOf("🥰") >= 0 ||
-      text.indexOf("🤗") >= 0 || text.indexOf("❤️") >= 0 || text.indexOf("💖") >= 0) {
+      text.indexOf("😀") >= 0 || text.indexOf("😆") >= 0 || text.indexOf("🤗") >= 0) {
     return "happy";
-  }
-  if (text.indexOf("😂") >= 0 || text.indexOf("🤣") >= 0 || text.indexOf("😹") >= 0) {
-    return "laughing";
-  }
-  if (text.indexOf("😉") >= 0 || text.indexOf("😜") >= 0 || text.indexOf("😝") >= 0 || text.indexOf("😋") >= 0) {
-    return "winking";
-  }
-  if (text.indexOf("😎") >= 0 || text.indexOf("😏") >= 0) {
-    return "cool";
-  }
-  if (text.indexOf("🤔") >= 0 || text.indexOf("🧐") >= 0 || text.indexOf("🤨") >= 0) {
-    return "thinking";
-  }
-  if (text.indexOf("😮") >= 0 || text.indexOf("😲") >= 0 || text.indexOf("😱") >= 0 || text.indexOf("😳") >= 0) {
-    return "confused";
-  }
-  if (text.indexOf("😴") >= 0 || text.indexOf("🥱") >= 0 || text.indexOf("💤") >= 0) {
-    return "sleepy";
-  }
-  if (text.indexOf("😢") >= 0 || text.indexOf("😭") >= 0 || text.indexOf("🥺") >= 0 || text.indexOf("😞") >= 0) {
-    return "sad";
-  }
-  if (text.indexOf("😡") >= 0 || text.indexOf("😠") >= 0 || text.indexOf("🤬") >= 0) {
-    return "angry";
   }
 
   // 2. Kiểm tra các thẻ cảm xúc dạng văn bản [EMOTION]
+  if (text.indexOf("[LAUGH]") >= 0 || text.indexOf("[LAUGHING]") >= 0) return "laughing";
+  if (text.indexOf("[LOVING]") >= 0 || text.indexOf("[LOVE]") >= 0) return "loving";
+  if (text.indexOf("[KISS]") >= 0 || text.indexOf("[KISSY]") >= 0) return "kissy";
+  if (text.indexOf("[COOL]") >= 0) return "cool";
+  if (text.indexOf("[RELAXED]") >= 0 || text.indexOf("[RELAX]") >= 0) return "relaxed";
+  if (text.indexOf("[DELICIOUS]") >= 0) return "delicious";
+  if (text.indexOf("[CONFIDENT]") >= 0) return "confident";
+  if (text.indexOf("[SHOCKED]") >= 0) return "shocked";
+  if (text.indexOf("[EMBARRASSED]") >= 0) return "embarrassed";
+  if (text.indexOf("[SILLY]") >= 0) return "silly";
+  if (text.indexOf("[CRYING]") >= 0) return "crying";
+  if (text.indexOf("[SURPRISED]") >= 0) return "surprised";
   if (text.indexOf("[HAPPY]") >= 0) return "happy";
   if (text.indexOf("[WINK]") >= 0) return "winking";
-  if (text.indexOf("[COOL]") >= 0) return "cool";
   if (text.indexOf("[CONFUSED]") >= 0) return "confused";
   if (text.indexOf("[SLEEPY]") >= 0) return "sleepy";
   if (text.indexOf("[ANGRY]") >= 0) return "angry";
   if (text.indexOf("[THINKING]") >= 0) return "thinking";
+
+  // 3. Phân tích ngữ nghĩa từ vựng tự nhiên (tiếng Việt không dấu / có dấu)
+  String s = stripVietnameseToAscii(text);
+  s.toLowerCase();
+  if (s.indexOf("buon cuoi") >= 0 || s.indexOf("hai huoc") >= 0 || s.indexOf("truyen cuoi") >= 0 || s.indexOf("haha") >= 0) return "laughing";
+  if (s.indexOf("yeu quy") >= 0 || s.indexOf("de thuong") >= 0 || s.indexOf("dang yeu") >= 0 || s.indexOf("yeu ban") >= 0) return "loving";
+  if (s.indexOf("ngon qua") >= 0 || s.indexOf("thom ngon") >= 0 || s.indexOf("am thuc") >= 0 || s.indexOf("mon an") >= 0) return "delicious";
+  if (s.indexOf("tuyet voi") >= 0 || s.indexOf("xuat sac") >= 0 || s.indexOf("pro") >= 0 || s.indexOf("xin xo") >= 0) return "cool";
+  if (s.indexOf("chuc ngu ngon") >= 0 || s.indexOf("thu gian") >= 0 || s.indexOf("binh yen") >= 0) return "relaxed";
+  if (s.indexOf("troi oi") >= 0 || s.indexOf("kinh ngac") >= 0 || s.indexOf("bat ngo") >= 0) return "shocked";
+  if (s.indexOf("ngai qua") >= 0 || s.indexOf("nguong qua") >= 0) return "embarrassed";
+  if (s.indexOf("ngonghinh") >= 0 || s.indexOf("ngo ghe") >= 0 || s.indexOf("hihi") >= 0) return "silly";
+  if (s.indexOf("that khong") >= 0 || s.indexOf("that sao") >= 0) return "surprised";
 
   return "";
 }
@@ -634,105 +651,135 @@ static bool executeLocalVoiceIntent(const String& rawText) {
   String s = XiaoZhiClient::stripVietnameseToAscii(rawText);
   s.toLowerCase();
   s.trim();
+  if (s.length() == 0) return false;
 
-  // 1. Cối xay gió L298N
-  if (s.indexOf("bat coi xay") >= 0 || s.indexOf("quay coi xay") >= 0 || s.indexOf("chay coi xay") >= 0 || s.indexOf("bat quat") >= 0) {
+  bool handled = false;
+  String replyMsg = "";
+
+  // 1. Quạt / Cối xay gió L298N
+  if (s.indexOf("bat coi xay") >= 0 || s.indexOf("quay coi xay") >= 0 || s.indexOf("chay coi xay") >= 0 ||
+      s.indexOf("bat quat") >= 0 || s.indexOf("chay quat") >= 0 || s.indexOf("quay quat") >= 0 ||
+      s.indexOf("cho quat quay") >= 0 || s.indexOf("cho coi xay quay") >= 0) {
     MotorDriver::setMode(2); // 60%
-    Serial.println("⚡ [VOICE INTENT] Đã bật cối xay gió!");
-    return true;
-  }
-  if (s.indexOf("tat coi xay") >= 0 || s.indexOf("dung coi xay") >= 0 || s.indexOf("ngung coi xay") >= 0 || s.indexOf("tat quat") >= 0) {
+    replyMsg = "Da bat coi xay gio!";
+    handled = true;
+  } else if (s.indexOf("tat coi xay") >= 0 || s.indexOf("dung coi xay") >= 0 || s.indexOf("ngung coi xay") >= 0 ||
+             s.indexOf("tat quat") >= 0 || s.indexOf("dung quat") >= 0 || s.indexOf("ngung quat") >= 0) {
     MotorDriver::setMode(0);
-    Serial.println("⚡ [VOICE INTENT] Đã tắt cối xay gió!");
-    return true;
+    replyMsg = "Da dung coi xay gio!";
+    handled = true;
   }
 
-  // 2. Đèn ống Edison
-  if (s.indexOf("bat den edison") >= 0 || s.indexOf("bat den ong") >= 0) {
-    MotorDriver::setEdisonBrightness(80);
-    Serial.println("⚡ [VOICE INTENT] Đã bật đèn Edison!");
-    return true;
-  }
-  if (s.indexOf("tat den edison") >= 0 || s.indexOf("tat den ong") >= 0) {
-    MotorDriver::setEdisonBrightness(0);
-    Serial.println("⚡ [VOICE INTENT] Đã tắt đèn Edison!");
-    return true;
-  }
-
-  // 3. Đèn COB mặt lưng
-  if (s.indexOf("bat den cob") >= 0 || s.indexOf("bat den sao bang") >= 0 || s.indexOf("bat led cob") >= 0) {
-    CobLeds::turnOn();
-    Serial.println("⚡ [VOICE INTENT] Đã bật LED COB!");
-    return true;
-  }
-  if (s.indexOf("tat den cob") >= 0 || s.indexOf("tat den sao bang") >= 0 || s.indexOf("tat led cob") >= 0) {
-    CobLeds::turnOff();
-    Serial.println("⚡ [VOICE INTENT] Đã tắt LED COB!");
-    return true;
-  }
-
-  // 4. Bật/Tắt toàn bộ đèn
-  if (s.indexOf("tat het den") >= 0 || s.indexOf("tat tat ca den") >= 0) {
+  // 2. Tắt đèn (kiểm tra trước để bắt chính xác các biến thể tắt đèn)
+  else if (s.indexOf("tat het den") >= 0 || s.indexOf("tat tat ca den") >= 0 || s.indexOf("tat ca den") >= 0) {
     MotorDriver::setEdisonBrightness(0);
     CobLeds::turnOff();
-    Serial.println("⚡ [VOICE INTENT] Đã tắt toàn bộ đèn!");
-    return true;
+    replyMsg = "Da tat toan bo den cua tram!";
+    handled = true;
+  } else if (s.indexOf("tat den edison") >= 0 || s.indexOf("tat den ong") >= 0) {
+    MotorDriver::setEdisonBrightness(0);
+    replyMsg = "Da tat den ong Edison!";
+    handled = true;
+  } else if (s.indexOf("tat den cob") >= 0 || s.indexOf("tat den sao bang") >= 0 || s.indexOf("tat led cob") >= 0) {
+    CobLeds::turnOff();
+    replyMsg = "Da tat den LED COB!";
+    handled = true;
+  } else if (s.indexOf("tat den") >= 0 || s.indexOf("tat led") >= 0 || s.indexOf("tat sang") >= 0 ||
+             s.indexOf("toi den") >= 0 || s.indexOf("tat bot den") >= 0 || s.indexOf("tat den di") >= 0) {
+    MotorDriver::setEdisonBrightness(0);
+    CobLeds::turnOff();
+    replyMsg = "Da tat den cho ban roi nhe!";
+    handled = true;
   }
-  if (s.indexOf("bat het den") >= 0 || s.indexOf("bat tat ca den") >= 0) {
+
+  // 3. Bật đèn
+  else if (s.indexOf("bat het den") >= 0 || s.indexOf("bat tat ca den") >= 0 || s.indexOf("bat ca den") >= 0) {
     MotorDriver::setEdisonBrightness(80);
     CobLeds::turnOn();
-    Serial.println("⚡ [VOICE INTENT] Đã bật toàn bộ đèn!");
-    return true;
+    replyMsg = "Da bat toan bo den cua tram!";
+    handled = true;
+  } else if (s.indexOf("bat den edison") >= 0 || s.indexOf("bat den ong") >= 0) {
+    MotorDriver::setEdisonBrightness(80);
+    replyMsg = "Da bat den ong Edison!";
+    handled = true;
+  } else if (s.indexOf("bat den cob") >= 0 || s.indexOf("bat den sao bang") >= 0 || s.indexOf("bat led cob") >= 0) {
+    CobLeds::turnOn();
+    replyMsg = "Da bat den LED COB!";
+    handled = true;
+  } else if (s.indexOf("bat den") >= 0 || s.indexOf("mo den") >= 0 || s.indexOf("sang den") >= 0 ||
+             s.indexOf("bat sang") >= 0 || s.indexOf("bat led") >= 0 || s.indexOf("thap den") >= 0 ||
+             s.indexOf("bat den ngu") >= 0 || s.indexOf("bat den len") >= 0 || s.indexOf("bat den di") >= 0) {
+    MotorDriver::setEdisonBrightness(80);
+    CobLeds::turnOn();
+    replyMsg = "Da bat den cho ban roi nhe!";
+    handled = true;
+  }
+
+  // 4. Âm lượng loa
+  else if (s.indexOf("tang am luong") >= 0 || s.indexOf("to len") >= 0 || s.indexOf("cho to") >= 0 ||
+           s.indexOf("noi to") >= 0 || s.indexOf("bat to") >= 0 || s.indexOf("cho to tieng") >= 0) {
+    int curV = AudioDriver::getSpeakerVolumePct();
+    int newV = min(100, curV + 20);
+    AudioDriver::setSpeakerVolumePct(newV);
+    AudioDriver::setXiaoZhiVolumePct(newV);
+    replyMsg = "Da tang am luong len " + String(newV) + "%";
+    handled = true;
+  } else if (s.indexOf("giam am luong") >= 0 || s.indexOf("nho lai") >= 0 || s.indexOf("cho nho") >= 0 ||
+             s.indexOf("noi nho") >= 0 || s.indexOf("bat nho") >= 0 || s.indexOf("cho nho tieng") >= 0) {
+    int curV = AudioDriver::getSpeakerVolumePct();
+    int newV = max(10, curV - 20);
+    AudioDriver::setSpeakerVolumePct(newV);
+    AudioDriver::setXiaoZhiVolumePct(newV);
+    replyMsg = "Da giam am luong xuong " + String(newV) + "%";
+    handled = true;
   }
 
   // 5. Chuyển chế độ màn hình SpaceOS
-  if (s.indexOf("man hinh cho") >= 0 || s.indexOf("ve man hinh cho") >= 0) {
+  else if (s.indexOf("man hinh cho") >= 0 || s.indexOf("ve man hinh cho") >= 0 || s.indexOf("dong ho") >= 0) {
     TestDisplay::setScreenMode("standby");
-    Serial.println("⚡ [VOICE INTENT] Chuyển về Màn hình chờ!");
-    return true;
-  }
-  if (s.indexOf("man hinh pc") >= 0 || s.indexOf("thong so pc") >= 0 || s.indexOf("kiem tra may tinh") >= 0) {
+    replyMsg = "Da chuyen ve man hinh cho!";
+    handled = true;
+  } else if (s.indexOf("man hinh pc") >= 0 || s.indexOf("thong so pc") >= 0 || s.indexOf("kiem tra may tinh") >= 0 || s.indexOf("pc hud") >= 0) {
     TestDisplay::setScreenMode("pchud");
-    Serial.println("⚡ [VOICE INTENT] Chuyển sang màn hình PC HUD!");
-    return true;
-  }
-  if (s.indexOf("man hinh bieu cam") >= 0 || s.indexOf("man hinh xiaozhi") >= 0) {
+    replyMsg = "Da chuyen sang man hinh PC HUD!";
+    handled = true;
+  } else if (s.indexOf("man hinh bieu cam") >= 0 || s.indexOf("man hinh xiaozhi") >= 0 || s.indexOf("man hinh tro ly") >= 0) {
     TestDisplay::setScreenMode("emoji");
-    Serial.println("⚡ [VOICE INTENT] Chuyển sang màn hình Biểu cảm XiaoZhi!");
-    return true;
-  }
-  if (s.indexOf("man hinh song am") >= 0 || s.indexOf("man hinh cam bien") >= 0) {
+    replyMsg = "Da chuyen sang man hinh bieu cam!";
+    handled = true;
+  } else if (s.indexOf("man hinh song am") >= 0 || s.indexOf("man hinh cam bien") >= 0 || s.indexOf("chan doan") >= 0) {
     TestDisplay::setScreenMode("diag");
-    Serial.println("⚡ [VOICE INTENT] Chuyển sang màn hình Sóng âm & Chẩn đoán!");
-    return true;
+    replyMsg = "Da chuyen sang man hinh chan doan!";
+    handled = true;
   }
 
   // 6. Đổi phong cách biểu cảm mắt XiaoZhi
-  if (s.indexOf("doi bieu cam sang co be") >= 0 || s.indexOf("doi sang co be") >= 0 ||
-      s.indexOf("doi sang chibi") >= 0 || s.indexOf("co be chibi") >= 0 || s.indexOf("bieu cam cute") >= 0 ||
-      s.indexOf("mat co be") >= 0) {
+  else if (s.indexOf("co be") >= 0 || s.indexOf("chibi") >= 0 || s.indexOf("bieu cam cute") >= 0) {
     TestDisplay::setEmojiStyle(1);
-    Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm sang Cô Bé Chibi!");
-    return true;
-  }
-  if (s.indexOf("doi sang doi mat") >= 0 || s.indexOf("doi mat robot") >= 0 ||
-      s.indexOf("bieu cam doi mat") >= 0 || s.indexOf("doi mat dong") >= 0 ||
-      s.indexOf("mat robot") >= 0) {
+    replyMsg = "Da doi bieu cam sang Co Be Chibi!";
+    handled = true;
+  } else if (s.indexOf("doi mat") >= 0 || s.indexOf("robot") >= 0) {
     TestDisplay::setEmojiStyle(2);
-    Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm sang Đôi Mắt Robot!");
-    return true;
-  }
-  if (s.indexOf("doi sang meo gome") >= 0 || s.indexOf("meo gome") >= 0 ||
-      s.indexOf("chu meo gome") >= 0 || s.indexOf("bieu cam meo") >= 0 ||
-      s.indexOf("mat meo") >= 0 || s.indexOf("gome") >= 0) {
+    replyMsg = "Da doi bieu cam sang Doi Mat Robot!";
+    handled = true;
+  } else if (s.indexOf("meo") >= 0 || s.indexOf("gome") >= 0) {
     TestDisplay::setEmojiStyle(3);
-    Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm sang Mèo Gome!");
-    return true;
-  }
-  if (s.indexOf("doi sang mat neon") >= 0 || s.indexOf("mat neon") >= 0 ||
-      s.indexOf("bieu cam mac dinh") >= 0 || s.indexOf("mat mac dinh") >= 0) {
+    replyMsg = "Da doi bieu cam sang Meo Gome!";
+    handled = true;
+  } else if (s.indexOf("mat neon") >= 0 || s.indexOf("mac dinh") >= 0) {
     TestDisplay::setEmojiStyle(0);
-    Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm về Mắt Neon mặc định!");
+    replyMsg = "Da doi bieu cam ve Mat Neon mac dinh!";
+    handled = true;
+  }
+
+  if (handled) {
+    s_localIntentHandled = true;
+    s_localIntentHandledMs = millis();
+    s_localIntentReplyText = replyMsg;
+    s_lastAiFullReply = replyMsg;
+    s_lastEmotion = "happy";
+    Serial.printf("⚡ [VOICE INTENT EXECUTED]: \"%s\" -> %s\n", rawText.c_str(), replyMsg.c_str());
+    TestAudio::playOkChime();
     return true;
   }
 
@@ -1045,6 +1092,15 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               if (doc["session_id"].is<const char*>()) {
                 s_sessionId = doc["session_id"].as<String>();
                 Serial.printf("🤝 [XIAOZHI WS HELLO ACK] Session ID: %s\n", s_sessionId.c_str());
+
+                // Đăng ký danh sách thiết bị IoT chuẩn XiaoZhi Cloud
+                String iotDesc = "{\"session_id\":\"" + s_sessionId + "\",\"type\":\"iot\",\"descriptors\":["
+                  "{\"name\":\"Light\",\"description\":\"He thong den trang tri tram vu tru gom den Edison va LED COB\",\"properties\":{\"power\":{\"type\":\"boolean\"},\"brightness\":{\"type\":\"integer\"}},\"methods\":{\"TurnOn\":{\"description\":\"Bat den\"},\"TurnOff\":{\"description\":\"Tat den\"}}},"
+                  "{\"name\":\"Fan\",\"description\":\"Coi xay gio trang tri tram\",\"properties\":{\"power\":{\"type\":\"boolean\"},\"speed\":{\"type\":\"integer\"}},\"methods\":{\"TurnOn\":{\"description\":\"Bat coi xay\"},\"TurnOff\":{\"description\":\"Tat coi xay\"}}},"
+                  "{\"name\":\"Speaker\",\"description\":\"Loa phat am thanh\",\"properties\":{\"volume\":{\"type\":\"integer\"}},\"methods\":{\"SetVolume\":{\"description\":\"Chinh am luong loa\"}}}"
+                  "]}";
+                esp_websocket_client_send_text(s_wsClient, iotDesc.c_str(), iotDesc.length(), pdMS_TO_TICKS(1500));
+                Serial.println("📡 [XIAOZHI IOT] Đã đăng ký thành công IoT Descriptors (Light, Fan, Speaker) lên Cloud!");
               }
               if (doc["audio_params"]["format"].is<const char*>()) {
                 Serial.printf("🎧 [XIAOZHI SERVER AUDIO]: Format=%s | Rate=%d Hz\n",
@@ -1079,25 +1135,40 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               if (doc["text"].is<const char*>()) {
                 const char* txt = doc["text"].as<const char*>();
                 if (strlen(txt) > 0) {
-                  // Tránh trùng lặp câu nếu server gửi lại cùng đoạn text trong các frame liên tiếp
-                  if (String(txt) != s_lastTtsSentence || (millis() - s_lastAiReplyTime > 1500)) {
-                    s_lastTtsSentence = String(txt);
-                    if (s_lastAiFullReply.length() > 0) {
-                      s_lastAiFullReply += " ";
+                  // Nếu lệnh cục bộ đã xử lý, kiểm tra xem câu thoại server có phải là từ chối không
+                  bool isRejection = false;
+                  if (s_localIntentHandled && (millis() - s_localIntentHandledMs < 6000)) {
+                    String norm = XiaoZhiClient::stripVietnameseToAscii(String(txt));
+                    norm.toLowerCase();
+                    if (norm.indexOf("khong the") >= 0 || norm.indexOf("xin loi") >= 0 ||
+                        norm.indexOf("khong ho tro") >= 0 || norm.indexOf("toi la") >= 0) {
+                      isRejection = true;
                     }
-                    s_lastAiFullReply += String(txt);
-                    s_ttsReceived = true;
-                    s_lastAiReplyTime = millis();
-                    Serial.printf("🔊 [XIAOZHI WS TTS ACCUM]: \"%s\" (Toàn bộ: \"%s\")\n", txt, s_lastAiFullReply.c_str());
-                    String emoFromTxt = XiaoZhiClient::detectEmotionFromText(String(txt));
-                    if (emoFromTxt.length() > 0) {
-                      s_lastEmotion = emoFromTxt;
-                      Serial.printf("🎭 [XIAOZHI EMOTION FROM TTS]: %s\n", s_lastEmotion.c_str());
+                  }
+
+                  if (!isRejection) {
+                    // Tránh trùng lặp câu nếu server gửi lại cùng đoạn text trong các frame liên tiếp
+                    if (String(txt) != s_lastTtsSentence || (millis() - s_lastAiReplyTime > 1500)) {
+                      s_lastTtsSentence = String(txt);
+                      if (s_lastAiFullReply.length() > 0) {
+                        s_lastAiFullReply += " ";
+                      }
+                      s_lastAiFullReply += String(txt);
+                      s_ttsReceived = true;
+                      s_lastAiReplyTime = millis();
+                      Serial.printf("🔊 [XIAOZHI WS TTS ACCUM]: \"%s\" (Toàn bộ: \"%s\")\n", txt, s_lastAiFullReply.c_str());
+                      String emoFromTxt = XiaoZhiClient::detectEmotionFromText(String(txt));
+                      if (emoFromTxt.length() > 0) {
+                        s_lastEmotion = emoFromTxt;
+                        Serial.printf("🎭 [XIAOZHI EMOTION FROM TTS]: %s\n", s_lastEmotion.c_str());
+                      }
                     }
                   }
                 }
               }
-              if (strcmp(st, "start") == 0 || strcmp(st, "sentence_start") == 0) {
+              // CHỈ reset Opus và Audio Stream khi bắt đầu một phiên thoại mới (state == "start").
+              // TUYỆT ĐỐI KHÔNG reset trên "sentence_start" để tránh cắt cụt câu và nuốt từ giữa các câu thoại!
+              if (strcmp(st, "start") == 0) {
                 if (s_opusDecoder) {
                   opus_decoder_ctl(s_opusDecoder, OPUS_RESET_STATE);
                 }
@@ -1107,7 +1178,38 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 s_ttsFinished = true;
                 Serial.println("⏹️ [XIAOZHI WS TTS STOP]: Máy chủ đã gửi xong toàn bộ chuỗi câu thoại TTS.");
               }
-            } else if (strcmp(type, "mcp") == 0 || strcmp(type, "iot") == 0 || doc["payload"].is<JsonObjectConst>()) {
+            } else if (strcmp(type, "iot") == 0) {
+              String dName = doc["command"]["name"] | doc["name"] | "";
+              String dMethod = doc["command"]["method"] | doc["method"] | "";
+              Serial.printf("🛠️ [XIAOZHI IOT CMD]: Device=\"%s\" | Method=\"%s\"\n", dName.c_str(), dMethod.c_str());
+              if (dName.equalsIgnoreCase("Light") || dName.equalsIgnoreCase("edison_lights") || dName.equalsIgnoreCase("cob_leds")) {
+                if (dMethod.equalsIgnoreCase("TurnOn") || dMethod.equalsIgnoreCase("on")) {
+                  MotorDriver::setEdisonBrightness(80);
+                  CobLeds::turnOn();
+                  s_lastAiFullReply = "Da bat den cho ban roi nhe!";
+                  s_lastEmotion = "happy";
+                  TestAudio::playOkChime();
+                } else if (dMethod.equalsIgnoreCase("TurnOff") || dMethod.equalsIgnoreCase("off")) {
+                  MotorDriver::setEdisonBrightness(0);
+                  CobLeds::turnOff();
+                  s_lastAiFullReply = "Da tat toan bo den!";
+                  s_lastEmotion = "happy";
+                  TestAudio::playOkChime();
+                }
+              } else if (dName.equalsIgnoreCase("Fan") || dName.equalsIgnoreCase("windmill")) {
+                if (dMethod.equalsIgnoreCase("TurnOn") || dMethod.equalsIgnoreCase("on")) {
+                  MotorDriver::setMode(2);
+                  s_lastAiFullReply = "Da bat coi xay gio!";
+                  s_lastEmotion = "happy";
+                  TestAudio::playOkChime();
+                } else if (dMethod.equalsIgnoreCase("TurnOff") || dMethod.equalsIgnoreCase("off")) {
+                  MotorDriver::setMode(0);
+                  s_lastAiFullReply = "Da dung coi xay gio!";
+                  s_lastEmotion = "happy";
+                  TestAudio::playOkChime();
+                }
+              }
+            } else if (strcmp(type, "mcp") == 0 || doc["payload"].is<JsonObjectConst>()) {
               if (doc["payload"].is<JsonObjectConst>() || doc["method"].is<const char*>()) {
                 handleMcpMessage(doc);
               }
@@ -1115,6 +1217,10 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
           }
         } else if (data->op_code == 0x02) { // Binary frame: Opus compressed audio từ XiaoZhi TTS
           if (data->data_len > 0 && data->data_ptr != nullptr) {
+            // Nếu khẩu lệnh cục bộ đã được thực thi và chuông xác nhận đã phát, bỏ qua luồng audio từ chối của server
+            if (s_localIntentHandled && (millis() - s_localIntentHandledMs < 5000)) {
+              break;
+            }
             static uint32_t s_binFrames = 0;
             s_binFrames++;
 
