@@ -9,4 +9,6 @@
 namespace BuiltinEmojis {
   const uint8_t* getCuteGirlJpg(const String& emo, size_t& outLen);
   const uint8_t* getDoiMatJpg(const String& emo, size_t& outLen);
+  const uint8_t* getGomeJpg(const String& emo, size_t& outLen);
+  bool syncGomeToSdCard(bool force = false);
 }

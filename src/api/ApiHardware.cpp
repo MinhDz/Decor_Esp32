@@ -11,8 +11,10 @@
 #include "WifiManager.h"
 #include "WebAuth.h"
 
+#include "drivers/StorageDriver.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
+#include <SD.h>
 #include <WiFi.h>
 
 namespace ApiHardware {
@@ -115,6 +117,7 @@ namespace ApiHardware {
       st.toLowerCase();
       if (st == "cute_girl" || st == "chibi") TestDisplay::setEmojiStyle(1);
       else if (st == "doi_mat" || st == "robot") TestDisplay::setEmojiStyle(2);
+      else if (st == "gome" || st == "meo" || st == "cat") TestDisplay::setEmojiStyle(3);
       else TestDisplay::setEmojiStyle(0);
     }
 
@@ -162,6 +165,7 @@ namespace ApiHardware {
     bat["voltage"] = serialized(String(TestSensors::getBatteryVoltage(), 2));
     bat["millivolts"] = TestSensors::getBatteryMilliVolts();
     bat["percent"] = TestSensors::getBatteryPercentage();
+    bat["bars"] = TestSensors::getBatteryBars();
     bat["charging_pin"] = PIN_CHG_STAT;
     bat["is_charging"] = TestSensors::isCharging();
     bat["charging_source"] = TestSensors::isCharging() ? "Vin MH-CD42 (HIGH - Đang Sạc)" : "Pin Lithium 18650 (Vin LOW)";
@@ -227,6 +231,8 @@ namespace ApiHardware {
       else if (action == "next_mode") CobLeds::nextMode();
       else CobLeds::togglePower();
       TestWindmill::setFlowingLeds(CobLeds::isOn());
+    } else if (target == "screen" || target == "display") {
+      if (brightness >= 0) TestDisplay::setBacklightBrightness(brightness);
     }
 
     handleDecorStatus(server);
@@ -412,12 +418,58 @@ namespace ApiHardware {
     server.on("/api/emoji_preview", HTTP_GET, [&server]() {
       int style = server.hasArg("style") ? server.arg("style").toInt() : 1;
       String name = server.hasArg("name") ? server.arg("name") : "happy";
+      if (style == 3) {
+        String pJpg = "/emojis/gome/" + name + ".jpg";
+        String pPng = "/emojis/gome/" + name + ".png";
+        if (LittleFS.exists(pJpg)) {
+          File f = LittleFS.open(pJpg, "r");
+          server.sendHeader("Cache-Control", "public, max-age=86400");
+          server.streamFile(f, "image/jpeg");
+          f.close();
+          return;
+        } else if (LittleFS.exists(pPng)) {
+          File f = LittleFS.open(pPng, "r");
+          server.sendHeader("Cache-Control", "public, max-age=86400");
+          server.streamFile(f, "image/png");
+          f.close();
+          return;
+        }
+        pJpg = "/gome/" + name + ".jpg";
+        pPng = "/gome/" + name + ".png";
+        if (LittleFS.exists(pJpg)) {
+          File f = LittleFS.open(pJpg, "r");
+          server.sendHeader("Cache-Control", "public, max-age=86400");
+          server.streamFile(f, "image/jpeg");
+          f.close();
+          return;
+        } else if (LittleFS.exists(pPng)) {
+          File f = LittleFS.open(pPng, "r");
+          server.sendHeader("Cache-Control", "public, max-age=86400");
+          server.streamFile(f, "image/png");
+          f.close();
+          return;
+        }
+
+        // Thu tiep tren the nho SD
+        if (TestSDCard::isMounted()) {
+          pJpg = "/emojis/gome/" + name + ".jpg";
+          if (SD.exists(pJpg)) {
+            File f = SD.open(pJpg, "r");
+            server.sendHeader("Cache-Control", "public, max-age=86400");
+            server.streamFile(f, "image/jpeg");
+            f.close();
+            return;
+          }
+        }
+      }
       size_t len = 0;
       const uint8_t* data = nullptr;
       if (style == 1) {
         data = BuiltinEmojis::getCuteGirlJpg(name, len);
-      } else {
+      } else if (style == 2) {
         data = BuiltinEmojis::getDoiMatJpg(name, len);
+      } else if (style == 3) {
+        data = BuiltinEmojis::getGomeJpg(name, len);
       }
       if (data && len > 0) {
         server.sendHeader("Content-Type", "image/jpeg");

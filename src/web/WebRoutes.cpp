@@ -39,6 +39,10 @@ size_t WebRoutes::trimMemory() {
 static void handleRoot() {
   if (LittleFS.exists("/index.html")) {
     File file = LittleFS.open("/index.html", "r");
+    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    server.sendHeader("Pragma", "no-cache");
+    server.sendHeader("Expires", "0");
+    server.sendHeader("Connection", "close");
     server.setContentLength(CONTENT_LENGTH_UNKNOWN);
     server.send(200, "text/html", "");
     uint8_t buf[1024];
@@ -55,6 +59,7 @@ static void handleRoot() {
     server.sendContent_P(KEYPAD_PAGE_INJECT_SCRIPT);
     server.sendContent_P(TELEMETRY_WEATHER_INJECT_SCRIPT);
     server.sendContent_P(AUTH_FACTORY_INJECT_SCRIPT);
+    server.sendContent_P(EMOJI_STYLE_INJECT_SCRIPT);
     server.sendContent("");
   } else {
     server.send(404, "text/plain", "Chưa tìm thấy index.html trên LittleFS!");
@@ -180,6 +185,68 @@ void WebRoutes::begin() {
   }
 }
 
+static unsigned long s_lastClientActiveMs = 0;
+static bool s_clientWasActive = false;
+static IPAddress s_lastKnownIp = IPAddress(0, 0, 0, 0);
+static unsigned long s_lastPeriodicHealthCheckMs = 0;
+
+void WebRoutes::onWifiConnected() {
+  IPAddress currentIp = WiFi.localIP();
+  if (currentIp != s_lastKnownIp && currentIp != IPAddress(0, 0, 0, 0)) {
+    s_lastKnownIp = currentIp;
+    recoverServer();
+  }
+}
+
+void WebRoutes::recoverServer() {
+  Serial.println("🌐 [WEB WATCHDOG] Tái khởi động WebServer & mDNS để làm mới socket lwIP...");
+  server.close();
+  server.begin();
+  MDNS.end();
+  if (MDNS.begin(MDNS_HOSTNAME)) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.printf("🌐 mDNS ready: http://%s.local\n", MDNS_HOSTNAME);
+  }
+}
+
 void WebRoutes::handleClient() {
+  unsigned long now = millis();
+
+  // 1. Giám sát thay đổi IP khi Wi-Fi được cấp phát lại
+  if (WiFi.status() == WL_CONNECTED) {
+    IPAddress curIp = WiFi.localIP();
+    if (curIp != s_lastKnownIp && curIp != IPAddress(0, 0, 0, 0)) {
+      s_lastKnownIp = curIp;
+      recoverServer();
+    }
+  }
+
+  // 2. Client Watchdog: Diệt các kết nối client bị zombie / treo quá 4.5 giây
+  WiFiClient c = server.client();
+  if (c && c.connected()) {
+    if (!s_clientWasActive) {
+      s_clientWasActive = true;
+      s_lastClientActiveMs = now;
+    } else if (now - s_lastClientActiveMs > 4500) {
+      Serial.println("⚠️ [WEB WATCHDOG] Client chiếm giữ kết nối quá 4.5s -> Cưỡng bức giải phóng socket!");
+      c.stop();
+      s_clientWasActive = false;
+    }
+  } else {
+    s_clientWasActive = false;
+  }
+
+  // 3. Phục vụ request WebServer bình thường
   server.handleClient();
+
+  // 4. Tự động làm mới socket mỗi 30 phút khi trạm nhàn rỗi (không có client đang kết nối)
+  // để loại bỏ mọi trạng thái treo ngầm hoặc backlog đầy của lwIP
+  if (now - s_lastPeriodicHealthCheckMs > 30 * 60 * 1000) {
+    s_lastPeriodicHealthCheckMs = now;
+    WiFiClient current = server.client();
+    if (!current || !current.connected()) {
+      server.close();
+      server.begin();
+    }
+  }
 }

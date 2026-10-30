@@ -161,6 +161,7 @@ namespace ApiSystem {
     doc["battery_v"] = serialized(String(TestSensors::getBatteryVoltage(), 2));
     doc["battery_mv"] = TestSensors::getBatteryMilliVolts();
     doc["battery_pct"] = TestSensors::getBatteryPercentage();
+    doc["battery_bars"] = TestSensors::getBatteryBars();
     doc["is_charging"] = TestSensors::isCharging();
     doc["edison_l_mode"] = TestWindmill::getEdisonLeftMode();
     doc["edison_l_name"] = TestWindmill::getEdisonLeftModeName();

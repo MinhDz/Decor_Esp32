@@ -15,19 +15,55 @@ namespace DisplayDriver {
   static volatile bool s_isScreenSleeping = false;
   static volatile bool s_wakeUpRequested = false;
 
+  static bool s_isLedcAttached = false;
+  static uint8_t s_ledcChannel = 0;
+  static double s_ledcFreq = 2000.0;
+  static uint8_t s_ledcRes = 8;
+
+  static void applyBacklightHardware() {
+    if (s_isScreenSleeping) {
+      if (s_isLedcAttached) {
+        ledcDetachPin(PIN_BL);
+        s_isLedcAttached = false;
+      }
+      pinMode(PIN_BL, OUTPUT);
+      digitalWrite(PIN_BL, LOW);
+      return;
+    }
+
+    if (s_screenBrightnessPct >= 100) {
+      // 100% độ sáng: Chuyển sang DC HIGH phẳng tuyệt đối (3.3V tĩnh).
+      // Loại bỏ hoàn toàn tổn hao đóng cắt PWM (switching loss) trên transistor đèn nền,
+      // giúp màn hình sáng tối đa phần cứng và triệt tiêu mọi hiện tượng nhấp nháy quang học!
+      if (s_isLedcAttached) {
+        ledcDetachPin(PIN_BL);
+        s_isLedcAttached = false;
+      }
+      pinMode(PIN_BL, OUTPUT);
+      digitalWrite(PIN_BL, HIGH);
+    } else {
+      // Khi dimming (< 100%): Sử dụng xung PWM tần số 2000 Hz dứt khoát
+      if (!s_isLedcAttached) {
+        ledcSetup(s_ledcChannel, s_ledcFreq, s_ledcRes);
+        ledcAttachPin(PIN_BL, s_ledcChannel);
+        s_isLedcAttached = true;
+      }
+      uint32_t duty = (uint32_t)((s_screenBrightnessPct * 255) / 100);
+      ledcWrite(s_ledcChannel, duty);
+    }
+  }
+
   void initBacklight(uint8_t channel, double freq, uint8_t resolution) {
-    ledcSetup(channel, freq, resolution);
-    ledcAttachPin(PIN_BL, channel);
+    s_ledcChannel = channel;
+    s_ledcFreq = freq;
+    s_ledcRes = resolution;
     pinMode(PIN_TOUCH, INPUT_PULLDOWN);
-    setBrightness(s_screenBrightnessPct);
+    applyBacklightHardware();
   }
 
   void setBrightness(int pct) {
     s_screenBrightnessPct = constrain(pct, 10, 100);
-    if (!s_isScreenSleeping) {
-      uint32_t duty = (uint32_t)((s_screenBrightnessPct * 255) / 100);
-      ledcWrite(0, duty);
-    }
+    applyBacklightHardware();
   }
 
   int getBrightness() {
@@ -44,6 +80,7 @@ namespace DisplayDriver {
 
   void setSleeping(bool sleeping) {
     s_isScreenSleeping = sleeping;
+    applyBacklightHardware();
   }
 
   volatile bool& getSleepingRef() {
@@ -69,8 +106,7 @@ namespace DisplayDriver {
   void wakeUpScreenFromTask() {
     if (!s_isScreenSleeping) return;
     s_isScreenSleeping = false;
-    uint32_t duty = (uint32_t)((s_screenBrightnessPct * 255) / 100);
-    ledcWrite(0, duty);
+    applyBacklightHardware();
     s_wakeUpRequested = true;
     Serial.println("🔆 [TASK WAKEUP] Đã đánh thức màn hình tức thì từ FreeRTOS KeypadTask!");
   }

@@ -27,6 +27,7 @@ namespace SensorDriver {
   int   getBatteryMilliVolts();
   int   getBatteryPercentage();
   int   getBatteryRawAdc();
+  int   getBatteryBars(); // 0..4 mốc vạch pin Nokia S40
   bool  isCharging();
 
   // In báo cáo trạng thái cảm biến & quét I2C ra Serial Monitor ('t', 'g', 'p')

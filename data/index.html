@@ -2004,6 +2004,7 @@
         <button class="emoji-style-pill active" onclick="setEmojiStyle(0, true)">⚡ Mắt Neon</button>
         <button class="emoji-style-pill" onclick="setEmojiStyle(1, true)">👧 Cô Bé Chibi</button>
         <button class="emoji-style-pill" onclick="setEmojiStyle(2, true)">🤖 Đôi Mắt Robot</button>
+        <button class="emoji-style-pill" onclick="setEmojiStyle(3, true)">🐱 Mèo Gome</button>
       </div>
 
       <!-- Emoji Sub-selector -->
@@ -2530,6 +2531,14 @@
             <button class="hud-style-pill" onclick="setHudStyle('matrix', true)">⚡ Ma Trận Số</button>
           </div>
 
+          <!-- AI Emoji Style Selector on Tab 2 -->
+          <div class="emoji-style-bar" id="chat-emoji-style-controls" style="margin-top: 4px; margin-bottom: 8px; justify-content: flex-start;">
+            <button class="emoji-style-pill active" onclick="setEmojiStyle(0, true)">⚡ Mắt Neon</button>
+            <button class="emoji-style-pill" onclick="setEmojiStyle(1, true)">👧 Cô Bé Chibi</button>
+            <button class="emoji-style-pill" onclick="setEmojiStyle(2, true)">🤖 Đôi Mắt Robot</button>
+            <button class="emoji-style-pill" onclick="setEmojiStyle(3, true)">🐱 Mèo Gome</button>
+          </div>
+
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
             <div class="control-label-heading" style="margin-bottom:0;">🎭 BIỂU CẢM MẪU (CHẠM ĐỔI TỰ NHIÊN)</div>
             <span id="auto-roam-tag" style="font-size:0.68rem; color:#10b981; display:flex; align-items:center; gap:4px;" title="Sau 12-15s không tương tác, mắt sẽ tự động liếc nhìn và nháy mắt sinh động">
@@ -3034,6 +3043,7 @@
 
   function setScreenMode(mode, pushToEsp = true) {
     if (mode === 'pc_hud') mode = 'pchud';
+    if (mode === 'xiaozhi') mode = 'emoji';
     currentScreenMode = mode;
     if (pushToEsp) {
       const payload = { mode: mode === 'pchud' ? 'pc_hud' : mode };
@@ -3045,7 +3055,8 @@
     // Đồng bộ nút chọn chế độ trên toàn bộ ứng dụng
     document.querySelectorAll('.mode-btn').forEach(btn => {
       const oc = btn.getAttribute('onclick') || '';
-      btn.classList.toggle('active', oc.includes(`'${mode}'`));
+      const isMatch = oc.includes(`'${mode}'`) || (mode === 'emoji' && oc.includes("'xiaozhi'"));
+      btn.classList.toggle('active', isMatch);
     });
     
     // 1. Màn hình ảo trên Tab 1
@@ -3074,6 +3085,8 @@
     if (e2) e2.style.display = (mode === 'emoji') ? 'flex' : 'none';
     if (p2) p2.style.display = (mode === 'pchud') ? 'flex' : 'none';
     if (hudSub2) hudSub2.style.display = (mode === 'pchud') ? 'flex' : 'none';
+    const chatStCtrl = document.getElementById('chat-emoji-style-controls');
+    if (chatStCtrl) chatStCtrl.style.display = (mode === 'emoji') ? 'flex' : 'none';
 
     if (badge2) {
       if (mode === 'standby') {
@@ -3141,12 +3154,12 @@
     }, 115);
   }
 
-  let currentEmojiStyle = 0; // 0: Neon Vector, 1: Cute Girl, 2: Doi Mat Robot
+  var currentEmojiStyle = 0; window.currentEmojiStyle = 0; // 0: Neon Vector, 1: Cute Girl, 2: Doi Mat Robot, 3: Meo Gome
 
   function setEmojiStyle(styleIndex, pushToEsp = true) {
-    currentEmojiStyle = Number(styleIndex) % 3;
+    currentEmojiStyle = Number(styleIndex) % 4;
     document.querySelectorAll('.emoji-style-pill').forEach((btn, idx) => {
-      btn.classList.toggle('active', idx === currentEmojiStyle);
+      btn.classList.toggle('active', (idx % 4) === currentEmojiStyle);
     });
     renderEmojiDom(currentEmoji, false);
     if (pushToEsp) {

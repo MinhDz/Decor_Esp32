@@ -179,7 +179,7 @@ namespace TestDisplay {
   static bool lastWifiState = false;
   static uint8_t eyeState = 0;
   static String s40AiEmotionTag = "IDLE";
-  static uint8_t s_emojiStyle = 0; // 0: Neon Cyberpunk (Mặc định), 1: Cô bé Chibi (128x128), 2: Đôi mắt Robot (240x240)
+  static uint8_t s_emojiStyle = 0; // 0: Neon Cyberpunk (Mặc định), 1: Cô bé Chibi (128x128), 2: Đôi mắt Robot (240x240), 3: Mèo Gome (128x128)
   static uint8_t s_doiMatFrameIdx = 0;
   static unsigned long lastExternalEmojiSync = 0;
   static bool isAutoBlinkActive = false;
@@ -196,8 +196,8 @@ namespace TestDisplay {
   }
 
   String getEmojiStyleName() {
-    static const char* styleNames[] = { "Mắt Neon", "Cô bé Chibi", "Đôi mắt động" };
-    return styleNames[s_emojiStyle % 3];
+    static const char* styleNames[] = { "Mắt Neon", "Cô bé Chibi", "Đôi mắt động", "Mèo Gome" };
+    return styleNames[s_emojiStyle % 4];
   }
 
   uint8_t getEmojiStyle() {
@@ -896,6 +896,64 @@ namespace TestDisplay {
     }
   }
 
+  // Vẽ biểu tượng pin chuẩn phong cách Nokia S40 theo mốc vạch analog
+  static void drawS40BatteryIcon(int x, int y, uint16_t bgCol = C_HEADER_BG) {
+    if (!tft) return;
+
+    bool charging = TestSensors::isCharging();
+    int bars = TestSensors::getBatteryBars(); // 0..4 mốc vạch
+
+    uint16_t frameCol = C_NEON_GREEN;
+    uint16_t barCol   = C_NEON_GREEN;
+
+    if (charging) {
+      frameCol = C_NEON_GREEN;
+      barCol   = C_NEON_CYAN;
+    } else {
+      if (bars >= 3) {
+        frameCol = C_NEON_GREEN;
+        barCol   = C_NEON_GREEN;
+      } else if (bars == 2) {
+        frameCol = C_YELLOW;
+        barCol   = C_YELLOW;
+      } else if (bars == 1) {
+        frameCol = C_NEON_AMBER;
+        barCol   = C_NEON_PINK;
+      } else {
+        frameCol = ((millis() / 500) % 2 == 0) ? C_NEON_PINK : C_BLACK;
+        barCol   = C_NEON_PINK;
+      }
+    }
+
+    // Tia sét sạc mini (x - 7 .. x - 1)
+    if (charging) {
+      int lx = x - 6, ly = y + 1;
+      tft->drawLine(lx + 2, ly,     lx,     ly + 4, C_YELLOW);
+      tft->drawLine(lx,     ly + 4, lx + 3, ly + 4, C_YELLOW);
+      tft->drawLine(lx + 1, ly + 4, lx,     ly + 8, C_YELLOW);
+    } else {
+      tft->fillRect(x - 7, y, 6, 10, bgCol);
+    }
+
+    // Thân pin chữ nhật (16x10) + núm cực dương bên phải (2x6)
+    tft->drawRect(x, y, 16, 10, frameCol);
+    tft->fillRect(x + 16, y + 2, 2, 6, frameCol);
+    tft->fillRect(x + 1, y + 1, 14, 8, bgCol);
+
+    // 4 Vạch nấc pin (Nokia S40 style)
+    int fillBars = bars;
+    if (charging) {
+      // Hiệu ứng nạp pin luân phiên 1->4 vạch (chu kỳ 350ms)
+      fillBars = ((millis() / 350) % 4) + 1;
+    }
+
+    for (int i = 0; i < 4; i++) {
+      if (i < fillBars) {
+        tft->fillRect(x + 2 + i * 3, y + 2, 2, 6, barCol);
+      }
+    }
+  }
+
   // Vẽ thanh trạng thái đặc cho các màn hình Emoji / PC HUD / Diagnostic
   static void drawTopStatusBar() {
     if (!tft) return;
@@ -918,12 +976,7 @@ namespace TestDisplay {
       tft->print("AP: TramVuTru-Config");
     }
 
-    tft->drawRect(w - 38, 6, 26, 12, C_NEON_GREEN);
-    tft->fillRect(w - 12, 9, 3, 6, C_NEON_GREEN);
-    tft->fillRect(w - 36, 8, 22, 8, C_NEON_GREEN);
-    tft->setTextColor(C_BLACK, C_NEON_GREEN);
-    tft->setCursor(w - 34, 8);
-    tft->print("5V");
+    drawS40BatteryIcon(w - 24, 7, C_CARD_BG);
   }
 
   // ============================================================================
@@ -1290,6 +1343,35 @@ namespace TestDisplay {
           rendered = (TJpgDec.drawJpg(imgX, imgY, bData, bLen) == JDR_OK);
         }
       }
+    } else if (s_emojiStyle == 3) {
+      // 3. Meo Gome: 128x128 JPEG can giua co dinh tuyet doi (Center Anchor)
+      int imgX = boxX + (boxW - 128) / 2;
+      int imgY = boxY + (boxH - 128) / 2;
+      String fld = "/emojis/gome/";
+      String altFld = "/gome/";
+      String tag = s40AiEmotionTag;
+      tag.toLowerCase();
+      tag.trim();
+      if (tag.length() > 0 && tag != "idle") {
+        rendered = drawEmojiWithAliases(imgX, imgY, fld, tag) || drawEmojiWithAliases(imgX, imgY, altFld, tag);
+      }
+      if (!rendered) {
+        rendered = drawEmojiWithAliases(imgX, imgY, fld, canonical) || drawEmojiWithAliases(imgX, imgY, altFld, canonical);
+      }
+      if (!rendered) {
+        // Fallback nap truc tiep tu Flash PROGMEM (Khong phu thuoc the SD hay LittleFS)
+        size_t bLen = 0;
+        const uint8_t* bData = (tag.length() > 0 && tag != "idle") ? BuiltinEmojis::getGomeJpg(tag, bLen) : nullptr;
+        if (!bData || bLen == 0) {
+          bData = BuiltinEmojis::getGomeJpg(canonical, bLen);
+        }
+        if (bData && bLen > 0) {
+          TJpgDec.setCallback(jpgEmojiClipRenderCallback);
+          TJpgDec.setSwapBytes(false);
+          TJpgDec.setJpgScale(1);
+          rendered = (TJpgDec.drawJpg(imgX, imgY, bData, bLen) == JDR_OK);
+        }
+      }
     }
 
     if (!rendered) {
@@ -1385,6 +1467,29 @@ namespace TestDisplay {
     // Đẩy duy nhất dải 240x44 ra màn hình SPI -> Mượt 100%, giữ nguyên ảnh nền phía dưới!
     tft->drawRGBBitmap(0, activeClockStripY, clockCanvas->getBuffer(), CLOCK_STRIP_W, CLOCK_STRIP_H);
     commitFrame();
+
+    // Cập nhật pill pin góc phải ở Màn hình Chờ Standby
+    static bool s_lastStandbyCharging = false;
+    static int s_lastStandbyBars = -1;
+    bool curCharging = TestSensors::isCharging();
+    int curBars = TestSensors::getBatteryBars();
+    if (forceFullClock || (second % 5 == 0) || (curCharging != s_lastStandbyCharging) || (curBars != s_lastStandbyBars)) {
+      s_lastStandbyCharging = curCharging;
+      s_lastStandbyBars = curBars;
+      tft->fillRoundRect(158, 8, 74, 20, 8, 0x10A2);
+      tft->drawRoundRect(158, 8, 74, 20, 8, 0x39E7);
+      drawS40BatteryIcon(166, 13, 0x10A2);
+      tft->setTextSize(1);
+      if (curCharging) {
+        tft->setTextColor(C_YELLOW, 0x10A2);
+        tft->setCursor(190, 14);
+        tft->print("SAC");
+      } else {
+        tft->setTextColor(C_WHITE, 0x10A2);
+        tft->setCursor(190, 14);
+        tft->printf("%.1fV", TestSensors::getBatteryVoltage());
+      }
+    }
   }
 
   // Vẽ riêng viên thuốc kính mờ thời tiết ở đáy Màn Hình Chờ (tránh giật hình/flicker toàn màn hình)
@@ -1452,7 +1557,17 @@ namespace TestDisplay {
 
     tft->fillRoundRect(158, 8, 74, 20, 8, 0x10A2);
     tft->drawRoundRect(158, 8, 74, 20, 8, 0x39E7);
-    drawShadowText(168, 14, "ESP32-S3", C_NEON_CYAN, 1);
+    drawS40BatteryIcon(166, 13, 0x10A2);
+    tft->setTextSize(1);
+    if (TestSensors::isCharging()) {
+      tft->setTextColor(C_YELLOW, 0x10A2);
+      tft->setCursor(190, 14);
+      tft->print("SAC");
+    } else {
+      tft->setTextColor(C_WHITE, 0x10A2);
+      tft->setCursor(190, 14);
+      tft->printf("%.1fV", TestSensors::getBatteryVoltage());
+    }
 
     // Bước 3: Vẽ Đồng hồ số trung tâm (nổi trong suốt trên ảnh nền) + Ngày tháng bên dưới
     lastDrawnMinute = -1;
@@ -2075,11 +2190,8 @@ namespace TestDisplay {
     tft->setCursor(w - 64, 8);
     tft->printf("%02d:%02d", hr, mn);
 
-    // Vạch pin / Độ sáng GPIO7
-    tft->drawRect(w - 26, 7, 18, 10, C_NEON_GREEN);
-    tft->fillRect(w - 8, 9, 2, 6, C_NEON_GREEN);
-    int batFill = (screenBrightnessPct * 14) / 100;
-    tft->fillRect(w - 24, 9, batFill, 6, C_NEON_GREEN);
+    // Biểu tượng pin chuẩn Nokia S40 theo mốc vạch analog & hiệu ứng sạc
+    drawS40BatteryIcon(w - 24, 7, C_HEADER_BG);
 
     // 2. Thanh Softkey Symbian S40 ở đáy (y=298..320)
     tft->fillRect(0, h - 22, w, 22, C_HEADER_BG);
@@ -2130,6 +2242,9 @@ namespace TestDisplay {
     } else {
       tft->printf("%02d %02d", hr, mn);
     }
+
+    // Cập nhật biểu tượng pin S40 (bao gồm hiệu ứng sạc chạy vạch)
+    drawS40BatteryIcon(w - 24, 7, C_HEADER_BG);
   }
 
   void showSymbianToast(const String& msg, unsigned long durationMs) {
@@ -2744,11 +2859,18 @@ namespace TestDisplay {
       snprintf(mBuf, sizeof(mBuf), "%02d", mm);
 
       if (fullClear || minChanged) {
-        // Biểu tượng pin tối giản mờ ở góc trên
+        // Biểu tượng pin tối giản mờ ở góc trên theo mốc thực tế
         int batX = W - 32 + shiftX;
         tft->drawRect(batX, 14 + shiftY, 18, 9, C_AOD_DIM);
         tft->fillRect(batX + 18, 16 + shiftY, 2, 5, C_AOD_DIM);
-        tft->fillRect(batX + 2, 16 + shiftY, 12, 5, C_AOD_COLON);
+        int aodBars = TestSensors::getBatteryBars();
+        if (TestSensors::isCharging()) {
+          tft->fillRect(batX + 2, 16 + shiftY, 14, 5, C_AOD_COLON);
+        } else {
+          for (int b = 0; b < aodBars; b++) {
+            tft->fillRect(batX + 2 + b * 3, 16 + shiftY, 2, 5, C_AOD_COLON);
+          }
+        }
 
         // Số Giờ cỡ 5 màu xám bạc mờ
         tft->setTextSize(5);
@@ -8501,6 +8623,7 @@ namespace TestDisplay {
     char sdBuf[24];
     if (sdOk) {
       snprintf(sdBuf, sizeof(sdBuf), "FAT32 %uMB", (unsigned)TestSDCard::getCardSizeMB());
+      BuiltinEmojis::syncGomeToSdCard();
     } else {
       snprintf(sdBuf, sizeof(sdBuf), "SPI D5-D8 Ready");
     }
@@ -8535,7 +8658,7 @@ namespace TestDisplay {
     loadSystemSettingsPrefsIfNeeded();
     Preferences pEmoji;
     if (pEmoji.begin("s40_sys", true)) {
-      s_emojiStyle = pEmoji.getUChar("ai_emoji_style", 0) % 3;
+      s_emojiStyle = pEmoji.getUChar("ai_emoji_style", 0) % 4;
       pEmoji.end();
     }
     loadClockSuitePrefsIfNeeded();
@@ -8676,7 +8799,7 @@ namespace TestDisplay {
   }
 
   void setEmojiStyle(uint8_t style) {
-    s_emojiStyle = style % 3;
+    s_emojiStyle = style % 4;
     Preferences p;
     if (p.begin("s40_sys", false)) {
       p.putUChar("ai_emoji_style", s_emojiStyle);
@@ -8689,7 +8812,7 @@ namespace TestDisplay {
   }
 
   void cycleEmojiStyle(int dir) {
-    setEmojiStyle((s_emojiStyle + dir + 3) % 3);
+    setEmojiStyle((s_emojiStyle + dir + 4) % 4);
   }
 
   void setHudStyle(const String& style) {

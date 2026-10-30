@@ -269,7 +269,15 @@ namespace SensorDriver {
       int pinMv = (int)(sumMv / 8);
 
       // Cầu phân áp 100k/100k (tỉ lệ 2.0x)
-      currentBatteryMv = pinMv * 2;
+      int rawBatMv = pinMv * 2;
+      static float s_filteredMv = 0.0f;
+      if (s_filteredMv < 100.0f) {
+        s_filteredMv = (float)rawBatMv;
+      } else {
+        // Lọc số thực IIR 85% cũ + 15% mới để loại bỏ dao động tức thời từ tải ngoại vi
+        s_filteredMv = s_filteredMv * 0.85f + (float)rawBatMv * 0.15f;
+      }
+      currentBatteryMv = (int)roundf(s_filteredMv);
       currentBatteryV  = currentBatteryMv / 1000.0f;
 
       // Tính phần trăm dung lượng pin Lithium 18650 (3.00V -> 0%, 4.20V -> 100%)
@@ -292,6 +300,20 @@ namespace SensorDriver {
   int   getBatteryPercentage() { return currentBatteryPct; }
   int   getBatteryRawAdc() { return currentBatteryRaw; }
   bool  isCharging() { return currentCharging; }
+
+  int   getBatteryBars() {
+    // Ước lượng 4 mốc vạch pin chuẩn Nokia S40 theo điện áp pin Lithium 18650:
+    // 4 vạch (Đầy / ~80-100%): >= 3.95V (3950 mV)
+    // 3 vạch (Khá / ~50-80%): 3.75V - 3.94V (3750 - 3949 mV)
+    // 2 vạch (Trung bình / ~25-50%): 3.55V - 3.74V (3550 - 3749 mV)
+    // 1 vạch (Yếu / ~10-25%): 3.35V - 3.54V (3350 - 3549 mV)
+    // 0 vạch (Cạn / <10%): < 3.35V (<3350 mV)
+    if (currentBatteryMv >= 3950) return 4;
+    if (currentBatteryMv >= 3750) return 3;
+    if (currentBatteryMv >= 3550) return 2;
+    if (currentBatteryMv >= 3350) return 1;
+    return 0;
+  }
 
   bool handleSerial(char cmd) {
     if (cmd == 'g' || cmd == 'G') {

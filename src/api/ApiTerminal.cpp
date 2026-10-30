@@ -433,6 +433,13 @@ void handleExec(WebServer& server) {
     TestDisplay::setScreenMode(args);
     out = "Đã chuyển chế độ màn hình ST7789 sang: " + args;
   }
+  // 10b. BRIGHT <10-100>
+  else if (verb == "bright" || verb == "brightness") {
+    int b = args.toInt();
+    if (b < 10) b = 10; if (b > 100) b = 100;
+    TestDisplay::setBacklightBrightness(b);
+    out = "Đã đặt độ sáng màn hình LCD ST7789: " + String(b) + "%";
+  }
   // 11. MOTOR <0-100|off|on>
   else if (verb == "motor") {
     String low = args; low.toLowerCase();

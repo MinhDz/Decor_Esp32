@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <Arduino.h>
 
 static const char SD_CONVERTER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
@@ -239,7 +239,7 @@ static const char SD_CONVERTER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   // Vòng lặp đồng bộ thời gian thực (mỗi 1.5 giây) từ ESP32 -> Web UI:
   // Bất cứ khi nào người dùng bấm nút đổi Ảnh nền hoặc đổi chế độ Gradient/Nền đen dưới ESP32, Web tự động cập nhật ngay!
   async function pollEspStandbyConfig() {
-    if (isWebSaving) return;
+    if (isWebSaving || document.hidden) return;
     try {
       const res = await fetch('/api/screen/standby', { cache: 'no-store' });
       if (!res.ok) return;
@@ -1886,6 +1886,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
   // Vẽ Canvas 224x82 trên Web giống 100% với màn hình ST7789 trên ESP32
   function renderWebMediaVisualizerFrame() {
+    if (document.hidden) return;
     const canvas = document.getElementById('web-media-vis-canvas');
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
@@ -2242,6 +2243,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
   // Đồng bộ định kỳ trạng thái Trình phát nhạc từ ESP32 -> Web (1.2 giây/lần)
   window.pollMediaStatus = async function() {
+    if (document.hidden) return;
     try {
       const res = await fetch('/api/media/status', { cache: 'no-store' });
       if (!res.ok) return;
@@ -2257,6 +2259,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
   // Tải thông số phần cứng & phần mềm của hệ thống
   window.loadSystemInfo = async function() {
+    if (document.hidden) return;
     try {
       let res = await fetch('/api/system_info');
       if (!res.ok) res = await fetch('/api/system/status');
@@ -3150,6 +3153,7 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   }
 
   async function pollXiaoZhiStatus() {
+    if (document.hidden) return;
     const chatTab = document.getElementById('tab-chat');
     if (chatTab && chatTab.classList.contains('active')) {
       try {
@@ -4776,6 +4780,7 @@ static const char DECOR_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   }
 
   window.fetchDecorStatus = async function() {
+    if (document.hidden) return;
     try {
       const res = await fetch('/api/decor/status');
       if (res.ok) {
@@ -6402,6 +6407,7 @@ static const char TELEMETRY_WEATHER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   };
 
   window.fetchWeatherStatus = function() {
+    if (document.hidden) return;
     fetch('/api/weather')
       .then(r => r.json())
       .then(d => {
@@ -6689,31 +6695,49 @@ static const char AUTH_FACTORY_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 }
 .spaceos-input-wrap {
   position: relative;
-  display: flex;
-  align-items: center;
+  display: block;
+  width: 100%;
 }
 .spaceos-input-wrap span.icon {
   position: absolute;
-  left: 12px;
-  font-size: 0.95rem;
-  color: #64748b;
+  left: 14px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 1.1rem;
+  line-height: 1;
+  color: #94a3b8;
   pointer-events: none;
+  z-index: 5;
 }
-.spaceos-auth-input {
-  width: 100%;
-  padding: 10px 12px 10px 38px;
-  background: #090d16;
-  border: 1px solid #334155;
-  border-radius: 8px;
-  color: #f8fafc;
-  font-size: 0.88rem;
-  outline: none;
-  transition: border-color 0.2s, box-shadow 0.2s;
-  box-sizing: border-box;
+.spaceos-input-wrap input.spaceos-auth-input,
+input.spaceos-auth-input[type="text"],
+input.spaceos-auth-input[type="password"] {
+  width: 100% !important;
+  height: 44px !important;
+  padding: 10px 14px 10px 46px !important;
+  background: #090d16 !important;
+  border: 1px solid #334155 !important;
+  border-radius: 8px !important;
+  color: #f8fafc !important;
+  font-size: 0.95rem !important;
+  outline: none !important;
+  box-sizing: border-box !important;
+  transition: border-color 0.2s, box-shadow 0.2s !important;
 }
-.spaceos-auth-input:focus {
-  border-color: #38bdf8;
-  box-shadow: 0 0 10px rgba(56, 189, 248, 0.3);
+.spaceos-input-wrap input.spaceos-auth-input:focus,
+input.spaceos-auth-input[type="text"]:focus,
+input.spaceos-auth-input[type="password"]:focus {
+  border-color: #38bdf8 !important;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.4) !important;
+}
+.spaceos-input-wrap input.spaceos-auth-input:-webkit-autofill,
+.spaceos-input-wrap input.spaceos-auth-input:-webkit-autofill:hover, 
+.spaceos-input-wrap input.spaceos-auth-input:-webkit-autofill:focus,
+.spaceos-input-wrap input.spaceos-auth-input:-webkit-autofill:active {
+  -webkit-text-fill-color: #f8fafc !important;
+  -webkit-box-shadow: 0 0 0px 1000px #090d16 inset !important;
+  box-shadow: 0 0 0px 1000px #090d16 inset !important;
+  transition: background-color 50000s ease-in-out 0s !important;
 }
 .spaceos-auth-btn {
   width: 100%;
@@ -6916,6 +6940,15 @@ static const char AUTH_FACTORY_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     if (ov) ov.classList.add('hidden');
   };
 
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      if (typeof window.loadSystemInfo === 'function') window.loadSystemInfo();
+      if (typeof window.fetchWeatherStatus === 'function') window.fetchWeatherStatus();
+      if (typeof window.fetchDecorStatus === 'function') window.fetchDecorStatus();
+      if (typeof window.pollMediaStatus === 'function') window.pollMediaStatus();
+    }
+  });
+
   window.checkAuthStatus = function() {
     fetch('/api/auth/status')
       .then(r => r.json())
@@ -7113,3 +7146,160 @@ static const char AUTH_FACTORY_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 </script>
 )rawliteral";
 
+
+// ---------------- INJECT SCRIPT: AI EMOJI STYLE SYNC & GOME EXTENSION ----------------
+static const char EMOJI_STYLE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
+<script>
+(function() {
+  window.currentEmojiStyle = window.currentEmojiStyle || 0;
+  window.currentEmoji = window.currentEmoji || 'neutral';
+
+  // Override renderEmojiDom to reliably display avatar images for style 1, 2, 3
+  window.renderEmojiDom = function(state, pushToEsp = true) {
+    window.currentEmoji = state || 'neutral';
+    const styleIdx = Number(window.currentEmojiStyle || 0) % 4;
+    const isNeon = (styleIdx === 0);
+
+    [1, 2].forEach(num => {
+      const box = document.getElementById(num === 1 ? 'emoji-box' : 'chat-emoji-box');
+      const img = document.getElementById(num === 1 ? 'emoji-avatar-1' : 'emoji-avatar-2');
+      if (!box || !img) return;
+
+      if (isNeon) {
+        box.style.display = 'flex';
+        img.style.display = 'none';
+        box.className = 'emoji-eyes';
+        const leftEye = box.children[0];
+        const rightEye = box.children[1];
+        if (leftEye && rightEye) {
+          leftEye.innerHTML = '';
+          rightEye.innerHTML = '';
+          if (state === 'left') box.classList.add('emoji-look-left');
+          else if (state === 'right') box.classList.add('emoji-look-right');
+          else if (state === 'up' || state === 'thinking') box.classList.add('emoji-look-up');
+          else if (state === 'down' || state === 'sad') box.classList.add('emoji-look-down');
+          else if (state === 'blink' || state === 'winking') box.classList.add('emoji-blink');
+          else if (state === 'wink-left') box.classList.add('emoji-wink-left');
+          else if (state === 'wink-right') box.classList.add('emoji-wink-right');
+          else if (state === 'angry') box.classList.add('emoji-angry');
+          else if (state === 'confused') {
+            box.classList.add('emoji-confused');
+            leftEye.innerText = '@';
+            rightEye.innerText = '@';
+          } else if (state === 'happy') box.classList.add('emoji-happy');
+          else if (state === 'sleepy') box.classList.add('emoji-sleepy');
+          else if (state === 'listen') box.classList.add('emoji-listen');
+          else if (state === 'speak') box.classList.add('emoji-speak');
+        }
+      } else {
+        box.style.display = 'none';
+        img.style.display = 'block';
+        img.src = '/api/emoji_preview?style=' + styleIdx + '&name=' + encodeURIComponent(state || 'neutral');
+      }
+    });
+
+    const stateList = ['neutral', 'happy', 'angry', 'sad', 'thinking', 'confused', 'winking', 'sleepy'];
+    let canon = state;
+    if (canon === 'idle') canon = 'neutral';
+    if (canon === 'blink') canon = 'winking';
+    document.querySelectorAll('.emoji-pill').forEach((p, idx) => {
+      p.classList.toggle('active', stateList[idx] === canon);
+    });
+    document.querySelectorAll('.palette-btn').forEach(btn => {
+      const oc = btn.getAttribute('onclick') || '';
+      btn.classList.toggle('active', oc.includes("'" + state + "'"));
+    });
+
+    if (pushToEsp && window.currentScreenMode === 'emoji' && state !== window.lastSyncedEmoji) {
+      if (typeof window.syncScreenToEsp === 'function') {
+        window.syncScreenToEsp({ emoji: state });
+      }
+    }
+  };
+
+  // Override setEmojiStyle
+  window.setEmojiStyle = function(styleIndex, pushToEsp = true) {
+    const s = Number(styleIndex) % 4;
+    window.currentEmojiStyle = s;
+    document.querySelectorAll('.emoji-style-pill').forEach(btn => {
+      const st = btn.getAttribute('data-style');
+      btn.classList.toggle('active', Number(st) === s);
+    });
+    window.renderEmojiDom(window.currentEmoji || 'neutral', false);
+    if (pushToEsp && typeof window.syncScreenToEsp === 'function') {
+      window.syncScreenToEsp({ emoji_style: s });
+    }
+  };
+
+  function setupEmojiBars() {
+    // Tab 1 setup
+    const ctrl1 = document.getElementById('emoji-style-controls');
+    if (ctrl1) {
+      const pills = ctrl1.querySelectorAll('.emoji-style-pill');
+      pills.forEach((p, idx) => p.setAttribute('data-style', String(idx)));
+      let hasGome = false;
+      pills.forEach(p => { if (p.innerText.includes('Gome')) hasGome = true; });
+      if (!hasGome) {
+        const btn = document.createElement('button');
+        btn.className = 'emoji-style-pill';
+        btn.setAttribute('data-style', '3');
+        btn.onclick = function() { window.setEmojiStyle(3, true); };
+        btn.innerHTML = '🐱 Mèo Gome';
+        ctrl1.appendChild(btn);
+      }
+    }
+
+    // Tab 2 setup
+    const chatControls = document.querySelector('.chat-preview-controls');
+    if (chatControls && !document.getElementById('chat-emoji-style-controls')) {
+      const modeBar = chatControls.querySelector('.preview-mode-bar');
+      if (modeBar) {
+        const bar = document.createElement('div');
+        bar.className = 'emoji-style-bar';
+        bar.id = 'chat-emoji-style-controls';
+        bar.style.cssText = 'margin-top: 4px; margin-bottom: 8px; justify-content: flex-start; display: flex; gap: 6px; flex-wrap: wrap;';
+        bar.innerHTML = `
+          <button class="emoji-style-pill" data-style="0" onclick="window.setEmojiStyle(0, true)">⚡ Mắt Neon</button>
+          <button class="emoji-style-pill" data-style="1" onclick="window.setEmojiStyle(1, true)">👧 Cô Bé Chibi</button>
+          <button class="emoji-style-pill" data-style="2" onclick="window.setEmojiStyle(2, true)">🤖 Đôi Mắt Robot</button>
+          <button class="emoji-style-pill" data-style="3" onclick="window.setEmojiStyle(3, true)">🐱 Mèo Gome</button>
+        `;
+        modeBar.parentNode.insertBefore(bar, modeBar.nextSibling);
+      }
+    }
+
+    // Assign data-style and click handlers to any pills
+    document.querySelectorAll('.emoji-style-pill').forEach(btn => {
+      const text = btn.innerText;
+      if (text.includes('Neon')) btn.setAttribute('data-style', '0');
+      else if (text.includes('Chibi')) btn.setAttribute('data-style', '1');
+      else if (text.includes('Robot')) btn.setAttribute('data-style', '2');
+      else if (text.includes('Gome')) btn.setAttribute('data-style', '3');
+      const st = Number(btn.getAttribute('data-style'));
+      btn.onclick = function() { window.setEmojiStyle(st, true); };
+      btn.classList.toggle('active', st === window.currentEmojiStyle);
+    });
+
+    window.renderEmojiDom(window.currentEmoji || 'neutral', false);
+  }
+
+  // Hook into setScreenMode
+  const oldSetScreenMode = window.setScreenMode;
+  window.setScreenMode = function(mode, pushToEsp = true) {
+    if (mode === 'xiaozhi') mode = 'emoji';
+    if (oldSetScreenMode) oldSetScreenMode(mode, pushToEsp);
+    const chatSt = document.getElementById('chat-emoji-style-controls');
+    if (chatSt) chatSt.style.display = (mode === 'emoji') ? 'flex' : 'none';
+  };
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', setupEmojiBars);
+  } else {
+    setupEmojiBars();
+  }
+  setTimeout(setupEmojiBars, 200);
+  setTimeout(setupEmojiBars, 600);
+  setTimeout(setupEmojiBars, 1200);
+})();
+</script>
+)rawliteral";

@@ -722,6 +722,13 @@ static bool executeLocalVoiceIntent(const String& rawText) {
     Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm sang Đôi Mắt Robot!");
     return true;
   }
+  if (s.indexOf("doi sang meo gome") >= 0 || s.indexOf("meo gome") >= 0 ||
+      s.indexOf("chu meo gome") >= 0 || s.indexOf("bieu cam meo") >= 0 ||
+      s.indexOf("mat meo") >= 0 || s.indexOf("gome") >= 0) {
+    TestDisplay::setEmojiStyle(3);
+    Serial.println("✨ [VOICE INTENT] Đã đổi biểu cảm sang Mèo Gome!");
+    return true;
+  }
   if (s.indexOf("doi sang mat neon") >= 0 || s.indexOf("mat neon") >= 0 ||
       s.indexOf("bieu cam mac dinh") >= 0 || s.indexOf("mat mac dinh") >= 0) {
     TestDisplay::setEmojiStyle(0);
@@ -837,12 +844,12 @@ static void handleMcpMessage(const JsonDocument& doc) {
     {
       JsonObject t = tools.add<JsonObject>();
       t["name"] = "self.screen.set_emoji_style";
-      t["description"] = "Thay doi phong cach bieu cam cua tro ly XiaoZhi tren man hinh: 'neon' (doi mat vector neon cyberpunk mac dinh), 'cute_girl' (co be anime chibi de thuong), 'doi_mat' (doi mat robot song dong)";
+      t["description"] = "Thay doi phong cach bieu cam cua tro ly XiaoZhi tren man hinh: 'neon' (doi mat vector neon cyberpunk mac dinh), 'cute_girl' (co be anime chibi de thuong), 'doi_mat' (doi mat robot song dong), 'gome' (chu meo gome hai huoc dang yeu)";
       JsonObject schema = t["inputSchema"].to<JsonObject>();
       schema["type"] = "object";
       JsonObject props = schema["properties"].to<JsonObject>();
       props["style"]["type"] = "string";
-      props["style"]["description"] = "'neon', 'cute_girl', hoac 'doi_mat'";
+      props["style"]["description"] = "'neon', 'cute_girl', 'doi_mat', hoac 'gome'";
     }
 
     String resStr;
@@ -944,6 +951,9 @@ static void handleMcpMessage(const JsonDocument& doc) {
       } else if (st == "doi_mat" || st == "robot" || st == "eyes" || st == "dong") {
         TestDisplay::setEmojiStyle(2);
         replyText = "Đã chuyển biểu cảm sang phong cách Đôi Mắt Robot sống động!";
+      } else if (st == "gome" || st == "meo" || st == "cat") {
+        TestDisplay::setEmojiStyle(3);
+        replyText = "Đã chuyển biểu cảm sang phong cách Mèo Gome đáng yêu!";
       } else {
         TestDisplay::setEmojiStyle(0);
         replyText = "Đã chuyển biểu cảm về phong cách Mắt Neon mặc định!";
