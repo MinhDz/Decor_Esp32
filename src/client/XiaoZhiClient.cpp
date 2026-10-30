@@ -647,11 +647,65 @@ String XiaoZhiClient::transcribeMicAudioPcm16(const int16_t* pcmSamples, size_t 
 // XIAOZHI MCP (MODEL CONTEXT PROTOCOL) & IOT TOOL CALLING
 // -------------------------------------------------------------
 
-static bool executeLocalVoiceIntent(const String& rawText) {
+// Hàm điều khiển vật lý phần cứng ĐÈN DECOR (Đèn ống Edison L/R + LED COB Nước chảy sao băng)
+static void executeHardwareLightControl(bool turnOn) {
+  if (turnOn) {
+    Serial.println("💡 [HARDWARE LIGHT] -> BẬT TẤT CẢ ĐÈN TRẠM (Edison Tubes + COB Leds)!");
+    MotorDriver::setEdisonBothMode(5); // Mode 5: Lò phản ứng & PC HUD lung linh
+    MotorDriver::setEdisonBrightness(80);
+    CobLeds::turnOn();
+    MotorDriver::setFlowingLeds(true);
+  } else {
+    Serial.println("🌑 [HARDWARE LIGHT] -> TẮT TOÀN BỘ ĐÈN TRẠM (Edison Tubes + COB Leds)!");
+    MotorDriver::setEdisonBothMode(0); // Mode 0: Tắt hoàn toàn
+    MotorDriver::setEdisonBrightness(0);
+    ledcWrite(4, 0); // Kênh 4 PWM Edison Trái
+    ledcWrite(5, 0); // Kênh 5 PWM Edison Phải
+    pinMode(PIN_EDISON_TUBE_L, OUTPUT);
+    digitalWrite(PIN_EDISON_TUBE_L, LOW);
+    pinMode(PIN_EDISON_TUBE_R, OUTPUT);
+    digitalWrite(PIN_EDISON_TUBE_R, LOW);
+    
+    CobLeds::turnOff();
+    MotorDriver::setFlowingLeds(false);
+    pinMode(PIN_FLOWING_LED_L, OUTPUT);
+    digitalWrite(PIN_FLOWING_LED_L, LOW);
+    pinMode(PIN_FLOWING_LED_R, OUTPUT);
+    digitalWrite(PIN_FLOWING_LED_R, LOW);
+  }
+}
+
+// Hàm điều khiển vật lý phần cứng CỐI XAY GIÓ / QUẠT
+static void executeHardwareFanControl(bool turnOn, uint8_t speed = 60) {
+  if (turnOn) {
+    Serial.printf("🌀 [HARDWARE FAN] -> BẬT CỐI XAY GIÓ (%d%%)!\n", speed);
+    MotorDriver::setMotorSpeed(speed);
+    MotorDriver::setMode(2); // 60%
+  } else {
+    Serial.println("🛑 [HARDWARE FAN] -> TẮT CỐI XAY GIÓ!");
+    MotorDriver::setMotorSpeed(0);
+    MotorDriver::setMode(0);
+    ledcWrite(2, 0); // Kênh 2 PWM Motor
+    pinMode(PIN_L298N_IN1_MOTOR, OUTPUT);
+    digitalWrite(PIN_L298N_IN1_MOTOR, LOW);
+  }
+}
+
+static bool executeLocalVoiceIntent(const String& rawText, bool isFromAi = false) {
   String s = XiaoZhiClient::stripVietnameseToAscii(rawText);
   s.toLowerCase();
   s.trim();
   if (s.length() == 0) return false;
+
+  // Nếu là câu thoại từ AI nhưng lại là câu hỏi xác nhận ("bạn có muốn tắt đèn không?", "tắt đèn nhé?") -> bỏ qua
+  if (isFromAi) {
+    if (s.indexOf("khong?") >= 0 || s.indexOf("chua?") >= 0 || s.indexOf("nhe?") >= 0 || s.indexOf("ha?") >= 0) {
+      return false;
+    }
+  }
+
+  static unsigned long s_lastIntentActionMs = 0;
+  unsigned long now = millis();
 
   bool handled = false;
   String replyMsg = "";
@@ -659,58 +713,49 @@ static bool executeLocalVoiceIntent(const String& rawText) {
   // 1. Quạt / Cối xay gió L298N
   if (s.indexOf("bat coi xay") >= 0 || s.indexOf("quay coi xay") >= 0 || s.indexOf("chay coi xay") >= 0 ||
       s.indexOf("bat quat") >= 0 || s.indexOf("chay quat") >= 0 || s.indexOf("quay quat") >= 0 ||
-      s.indexOf("cho quat quay") >= 0 || s.indexOf("cho coi xay quay") >= 0) {
-    MotorDriver::setMode(2); // 60%
+      s.indexOf("cho quat quay") >= 0 || s.indexOf("cho coi xay quay") >= 0 ||
+      (isFromAi && (s.indexOf("da bat quat") >= 0 || s.indexOf("da bat coi xay") >= 0))) {
+    executeHardwareFanControl(true, 60);
     replyMsg = "Da bat coi xay gio!";
     handled = true;
   } else if (s.indexOf("tat coi xay") >= 0 || s.indexOf("dung coi xay") >= 0 || s.indexOf("ngung coi xay") >= 0 ||
-             s.indexOf("tat quat") >= 0 || s.indexOf("dung quat") >= 0 || s.indexOf("ngung quat") >= 0) {
-    MotorDriver::setMode(0);
+             s.indexOf("tat quat") >= 0 || s.indexOf("dung quat") >= 0 || s.indexOf("ngung quat") >= 0 ||
+             (isFromAi && (s.indexOf("da tat quat") >= 0 || s.indexOf("da dung quat") >= 0 ||
+                           s.indexOf("da tat coi xay") >= 0 || s.indexOf("da dung coi xay") >= 0))) {
+    executeHardwareFanControl(false);
     replyMsg = "Da dung coi xay gio!";
     handled = true;
   }
 
-  // 2. Tắt đèn (kiểm tra trước để bắt chính xác các biến thể tắt đèn)
-  else if (s.indexOf("tat het den") >= 0 || s.indexOf("tat tat ca den") >= 0 || s.indexOf("tat ca den") >= 0) {
-    MotorDriver::setEdisonBrightness(0);
-    CobLeds::turnOff();
+  // 2. Tắt đèn (Kiểm tra cả khẩu lệnh người dùng và câu xác nhận của AI XiaoZhi)
+  else if (s.indexOf("tat het den") >= 0 || s.indexOf("tat tat ca den") >= 0 || s.indexOf("tat ca den") >= 0 ||
+           s.indexOf("tat den edison") >= 0 || s.indexOf("tat den ong") >= 0 || s.indexOf("tat den cob") >= 0 ||
+           s.indexOf("tat den sao bang") >= 0 || s.indexOf("tat led cob") >= 0 || s.indexOf("tat den") >= 0 ||
+           s.indexOf("tat led") >= 0 || s.indexOf("tat sang") >= 0 || s.indexOf("toi den") >= 0 ||
+           s.indexOf("tat bot den") >= 0 || s.indexOf("tat den di") >= 0 || s.indexOf("tat bong den") >= 0 ||
+           s.indexOf("tat den phong") >= 0 || s.indexOf("tat den ngu") >= 0 ||
+           (isFromAi && (s.indexOf("da tat den") >= 0 || s.indexOf("toi da tat den") >= 0 ||
+                         s.indexOf("tat den roi") >= 0 || s.indexOf("se tat den") >= 0 ||
+                         s.indexOf("da tat sang") >= 0 || s.indexOf("tat den cho ban") >= 0 ||
+                         s.indexOf("da tat led") >= 0 || s.indexOf("tat toan bo den") >= 0))) {
+    executeHardwareLightControl(false);
     replyMsg = "Da tat toan bo den cua tram!";
-    handled = true;
-  } else if (s.indexOf("tat den edison") >= 0 || s.indexOf("tat den ong") >= 0) {
-    MotorDriver::setEdisonBrightness(0);
-    replyMsg = "Da tat den ong Edison!";
-    handled = true;
-  } else if (s.indexOf("tat den cob") >= 0 || s.indexOf("tat den sao bang") >= 0 || s.indexOf("tat led cob") >= 0) {
-    CobLeds::turnOff();
-    replyMsg = "Da tat den LED COB!";
-    handled = true;
-  } else if (s.indexOf("tat den") >= 0 || s.indexOf("tat led") >= 0 || s.indexOf("tat sang") >= 0 ||
-             s.indexOf("toi den") >= 0 || s.indexOf("tat bot den") >= 0 || s.indexOf("tat den di") >= 0) {
-    MotorDriver::setEdisonBrightness(0);
-    CobLeds::turnOff();
-    replyMsg = "Da tat den cho ban roi nhe!";
     handled = true;
   }
 
-  // 3. Bật đèn
-  else if (s.indexOf("bat het den") >= 0 || s.indexOf("bat tat ca den") >= 0 || s.indexOf("bat ca den") >= 0) {
-    MotorDriver::setEdisonBrightness(80);
-    CobLeds::turnOn();
-    replyMsg = "Da bat toan bo den cua tram!";
-    handled = true;
-  } else if (s.indexOf("bat den edison") >= 0 || s.indexOf("bat den ong") >= 0) {
-    MotorDriver::setEdisonBrightness(80);
-    replyMsg = "Da bat den ong Edison!";
-    handled = true;
-  } else if (s.indexOf("bat den cob") >= 0 || s.indexOf("bat den sao bang") >= 0 || s.indexOf("bat led cob") >= 0) {
-    CobLeds::turnOn();
-    replyMsg = "Da bat den LED COB!";
-    handled = true;
-  } else if (s.indexOf("bat den") >= 0 || s.indexOf("mo den") >= 0 || s.indexOf("sang den") >= 0 ||
-             s.indexOf("bat sang") >= 0 || s.indexOf("bat led") >= 0 || s.indexOf("thap den") >= 0 ||
-             s.indexOf("bat den ngu") >= 0 || s.indexOf("bat den len") >= 0 || s.indexOf("bat den di") >= 0) {
-    MotorDriver::setEdisonBrightness(80);
-    CobLeds::turnOn();
+  // 3. Bật đèn (Kiểm tra cả khẩu lệnh người dùng và câu xác nhận của AI XiaoZhi)
+  else if (s.indexOf("bat het den") >= 0 || s.indexOf("bat tat ca den") >= 0 || s.indexOf("bat ca den") >= 0 ||
+           s.indexOf("bat den edison") >= 0 || s.indexOf("bat den ong") >= 0 || s.indexOf("bat den cob") >= 0 ||
+           s.indexOf("bat den sao bang") >= 0 || s.indexOf("bat led cob") >= 0 || s.indexOf("bat den") >= 0 ||
+           s.indexOf("mo den") >= 0 || s.indexOf("sang den") >= 0 || s.indexOf("bat sang") >= 0 ||
+           s.indexOf("bat led") >= 0 || s.indexOf("thap den") >= 0 || s.indexOf("bat den ngu") >= 0 ||
+           s.indexOf("bat den len") >= 0 || s.indexOf("bat den di") >= 0 || s.indexOf("bat bong den") >= 0 ||
+           s.indexOf("bat den phong") >= 0 ||
+           (isFromAi && (s.indexOf("da bat den") >= 0 || s.indexOf("toi da bat den") >= 0 ||
+                         s.indexOf("bat den roi") >= 0 || s.indexOf("se bat den") >= 0 ||
+                         s.indexOf("da mo den") >= 0 || s.indexOf("da bat sang") >= 0 ||
+                         s.indexOf("bat den cho ban") >= 0 || s.indexOf("da bat led") >= 0))) {
+    executeHardwareLightControl(true);
     replyMsg = "Da bat den cho ban roi nhe!";
     handled = true;
   }
@@ -774,12 +819,14 @@ static bool executeLocalVoiceIntent(const String& rawText) {
 
   if (handled) {
     s_localIntentHandled = true;
-    s_localIntentHandledMs = millis();
+    s_localIntentHandledMs = now;
     s_localIntentReplyText = replyMsg;
     s_lastAiFullReply = replyMsg;
     s_lastEmotion = "happy";
-    Serial.printf("⚡ [VOICE INTENT EXECUTED]: \"%s\" -> %s\n", rawText.c_str(), replyMsg.c_str());
-    TestAudio::playOkChime();
+    Serial.printf("⚡ [VOICE/AI INTENT EXECUTED]: \"%s\" (fromAi=%d) -> %s\n", rawText.c_str(), isFromAi, replyMsg.c_str());
+    if (!isFromAi) {
+      TestAudio::playOkChime();
+    }
     return true;
   }
 
@@ -916,22 +963,22 @@ static void handleMcpMessage(const JsonDocument& doc) {
 
     if (toolName == "self.windmill.set") {
       if (args["state"].is<bool>() && !args["state"].as<bool>()) {
-        MotorDriver::setMode(0);
+        executeHardwareFanControl(false);
         replyText = "Đã tắt motor cối xay gió.";
       } else if (args["speed"].is<int>()) {
         int spd = constrain(args["speed"].as<int>(), 0, 100);
-        MotorDriver::setMotorSpeed(spd);
+        executeHardwareFanControl(spd > 0, spd);
         replyText = "Đã bật cối xay gió tốc độ " + String(spd) + "%.";
       } else if (args["mode"].is<const char*>()) {
         String m = args["mode"].as<String>();
-        if (m == "breath") MotorDriver::setMode(4);
-        else if (m == "high") MotorDriver::setMode(3);
-        else if (m == "medium") MotorDriver::setMode(2);
-        else if (m == "low") MotorDriver::setMode(1);
-        else MotorDriver::setMode(0);
+        if (m == "breath") { MotorDriver::setMode(4); executeHardwareFanControl(true, 50); }
+        else if (m == "high") { executeHardwareFanControl(true, 85); MotorDriver::setMode(3); }
+        else if (m == "medium") { executeHardwareFanControl(true, 60); MotorDriver::setMode(2); }
+        else if (m == "low") { executeHardwareFanControl(true, 35); MotorDriver::setMode(1); }
+        else { executeHardwareFanControl(false); }
         replyText = "Đã chỉnh chế độ cối xay: " + m;
       } else {
-        MotorDriver::setMode(2); // 60%
+        executeHardwareFanControl(true, 60);
         replyText = "Đã bật motor cối xay gió.";
       }
     } else if (toolName == "self.edison_lights.set") {
@@ -940,16 +987,26 @@ static void handleMcpMessage(const JsonDocument& doc) {
       bool breath = args["breathing"] | false;
       String side = args["side"] | "both";
       if (!st) {
-        if (side == "left") MotorDriver::setEdisonLeftBrightness(0);
-        else if (side == "right") MotorDriver::setEdisonRightBrightness(0);
-        else MotorDriver::setEdisonBrightness(0);
+        if (side == "left") {
+          MotorDriver::setEdisonLeftBrightness(0);
+          pinMode(PIN_EDISON_TUBE_L, OUTPUT);
+          digitalWrite(PIN_EDISON_TUBE_L, LOW);
+        } else if (side == "right") {
+          MotorDriver::setEdisonRightBrightness(0);
+          pinMode(PIN_EDISON_TUBE_R, OUTPUT);
+          digitalWrite(PIN_EDISON_TUBE_R, LOW);
+        } else {
+          executeHardwareLightControl(false);
+        }
         replyText = "Đã tắt đèn ống Edison.";
       } else {
-        if (side == "left") MotorDriver::setEdisonLeftBrightness(br, breath);
-        else if (side == "right") MotorDriver::setEdisonRightBrightness(br, breath);
-        else {
+        if (side == "left") {
           MotorDriver::setEdisonLeftBrightness(br, breath);
+        } else if (side == "right") {
           MotorDriver::setEdisonRightBrightness(br, breath);
+        } else {
+          executeHardwareLightControl(true);
+          MotorDriver::setEdisonBrightness(br);
         }
         replyText = "Đã bật đèn Edison " + side + " độ sáng " + String(br) + "%.";
       }
@@ -961,9 +1018,15 @@ static void handleMcpMessage(const JsonDocument& doc) {
         replyText = "Đã chuyển chế độ đèn nước chảy COB.";
       } else if (!st) {
         CobLeds::turnOff();
+        MotorDriver::setFlowingLeds(false);
+        pinMode(PIN_FLOWING_LED_L, OUTPUT);
+        digitalWrite(PIN_FLOWING_LED_L, LOW);
+        pinMode(PIN_FLOWING_LED_R, OUTPUT);
+        digitalWrite(PIN_FLOWING_LED_R, LOW);
         replyText = "Đã tắt đèn nước chảy COB.";
       } else {
         CobLeds::turnOn();
+        MotorDriver::setFlowingLeds(true);
         replyText = "Đã bật đèn nước chảy COB.";
       }
     } else if (toolName == "self.telemetry.get") {
@@ -1128,6 +1191,8 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                     s_lastEmotion = emoFromTxt;
                     Serial.printf("🎭 [XIAOZHI EMOTION FROM LLM TEXT]: %s\n", s_lastEmotion.c_str());
                   }
+                  // Kích hoạt ngay lệnh điều khiển phần cứng nếu AI XiaoZhi phản hồi văn bản LLM
+                  executeLocalVoiceIntent(s_lastLlmText, true);
                 }
               }
             } else if (strcmp(type, "tts") == 0) {
@@ -1162,6 +1227,8 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                         s_lastEmotion = emoFromTxt;
                         Serial.printf("🎭 [XIAOZHI EMOTION FROM TTS]: %s\n", s_lastEmotion.c_str());
                       }
+                      // Kích hoạt ngay lệnh điều khiển phần cứng khi XiaoZhi Cloud phát ngôn ("Đã tắt đèn cho bạn", v.v.)
+                      executeLocalVoiceIntent(String(txt), true);
                     }
                   }
                 }
@@ -1184,30 +1251,36 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               Serial.printf("🛠️ [XIAOZHI IOT CMD]: Device=\"%s\" | Method=\"%s\"\n", dName.c_str(), dMethod.c_str());
               if (dName.equalsIgnoreCase("Light") || dName.equalsIgnoreCase("edison_lights") || dName.equalsIgnoreCase("cob_leds")) {
                 if (dMethod.equalsIgnoreCase("TurnOn") || dMethod.equalsIgnoreCase("on")) {
-                  MotorDriver::setEdisonBrightness(80);
-                  CobLeds::turnOn();
-                  s_lastAiFullReply = "Da bat den cho ban roi nhe!";
+                  executeHardwareLightControl(true);
+                  s_lastAiFullReply = "Đã bật toàn bộ đèn của trạm!";
                   s_lastEmotion = "happy";
                   TestAudio::playOkChime();
                 } else if (dMethod.equalsIgnoreCase("TurnOff") || dMethod.equalsIgnoreCase("off")) {
-                  MotorDriver::setEdisonBrightness(0);
-                  CobLeds::turnOff();
-                  s_lastAiFullReply = "Da tat toan bo den!";
+                  executeHardwareLightControl(false);
+                  s_lastAiFullReply = "Đã tắt toàn bộ đèn của trạm!";
                   s_lastEmotion = "happy";
                   TestAudio::playOkChime();
                 }
               } else if (dName.equalsIgnoreCase("Fan") || dName.equalsIgnoreCase("windmill")) {
                 if (dMethod.equalsIgnoreCase("TurnOn") || dMethod.equalsIgnoreCase("on")) {
-                  MotorDriver::setMode(2);
-                  s_lastAiFullReply = "Da bat coi xay gio!";
+                  executeHardwareFanControl(true, 60);
+                  s_lastAiFullReply = "Đã bật cối xay gió!";
                   s_lastEmotion = "happy";
                   TestAudio::playOkChime();
                 } else if (dMethod.equalsIgnoreCase("TurnOff") || dMethod.equalsIgnoreCase("off")) {
-                  MotorDriver::setMode(0);
-                  s_lastAiFullReply = "Da dung coi xay gio!";
+                  executeHardwareFanControl(false);
+                  s_lastAiFullReply = "Đã dừng cối xay gió!";
                   s_lastEmotion = "happy";
                   TestAudio::playOkChime();
                 }
+              }
+              // Gửi gói tin states phản hồi XiaoZhi IoT Cloud
+              if (s_sessionId.length() > 0) {
+                String stateResp = "{\"session_id\":\"" + s_sessionId + "\",\"type\":\"iot\",\"states\":["
+                  "{\"name\":\"Light\",\"state\":{\"power\":" + String((MotorDriver::getEdisonBrightness() > 0 || MotorDriver::getEdisonLeftBrightness() > 0) ? "true" : "false") + "}},"
+                  "{\"name\":\"Fan\",\"state\":{\"power\":" + String(MotorDriver::getMotorSpeed() > 0 ? "true" : "false") + "}}"
+                  "]}";
+                esp_websocket_client_send_text(s_wsClient, stateResp.c_str(), stateResp.length(), pdMS_TO_TICKS(1000));
               }
             } else if (strcmp(type, "mcp") == 0 || doc["payload"].is<JsonObjectConst>()) {
               if (doc["payload"].is<JsonObjectConst>() || doc["method"].is<const char*>()) {
@@ -1217,10 +1290,6 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
           }
         } else if (data->op_code == 0x02) { // Binary frame: Opus compressed audio từ XiaoZhi TTS
           if (data->data_len > 0 && data->data_ptr != nullptr) {
-            // Nếu khẩu lệnh cục bộ đã được thực thi và chuông xác nhận đã phát, bỏ qua luồng audio từ chối của server
-            if (s_localIntentHandled && (millis() - s_localIntentHandledMs < 5000)) {
-              break;
-            }
             static uint32_t s_binFrames = 0;
             s_binFrames++;
 
