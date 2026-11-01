@@ -15,4 +15,6 @@ namespace PeripheralControlService {
   PeripheralControlResult switchScreen(const String& mode);
   PeripheralControlResult setAudioVolume(int volumePct);
   PeripheralControlResult setEmojiStyle(const String& style);
+  PeripheralControlResult setPowerProfile(const String& profile, bool autoSwitch = false);
+  PeripheralControlResult getPowerStatus();
 }

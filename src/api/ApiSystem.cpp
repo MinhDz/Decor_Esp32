@@ -1,4 +1,5 @@
 #include "api/ApiSystem.h"
+#include "services/PowerManagementService.h"
 #include "Config.h"
 #include "HardwareManager.h"
 #include "WifiManager.h"
@@ -163,6 +164,10 @@ namespace ApiSystem {
     doc["battery_pct"] = TestSensors::getBatteryPercentage();
     doc["battery_bars"] = TestSensors::getBatteryBars();
     doc["is_charging"] = TestSensors::isCharging();
+    doc["power_profile"] = PowerManagementService::getProfileName();
+    doc["power_profile_idx"] = (uint8_t)PowerManagementService::getProfile();
+    doc["cpu_mhz"] = getCpuFrequencyMhz();
+    doc["battery_fully_charged"] = PowerManagementService::isBatteryFullyCharged();
     doc["edison_l_mode"] = TestWindmill::getEdisonLeftMode();
     doc["edison_l_name"] = TestWindmill::getEdisonLeftModeName();
     doc["edison_l_pct"] = TestWindmill::getEdisonLeftBrightness();
@@ -570,6 +575,49 @@ namespace ApiSystem {
     server.send(200, "application/json", out);
   }
 
+  // --- QUẢN LÝ NĂNG LƯỢNG & POWER PROFILES ---
+  void handlePowerStatus(WebServer& server) {
+    JsonDocument doc;
+    PowerManagementService::getStatusJson(doc);
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json", out);
+  }
+
+  void handlePowerProfile(WebServer& server) {
+    if (!server.hasArg("plain")) {
+      server.send(400, "application/json", "{\"error\":\"Missing body\"}");
+      return;
+    }
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (err) {
+      server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+      return;
+    }
+    if (!doc["profile"].isNull()) {
+      String profStr = doc["profile"].as<String>();
+      profStr.toLowerCase();
+      PowerProfile prof = POWER_BALANCED;
+      if (profStr == "performance" || profStr == "0") prof = POWER_PERFORMANCE;
+      else if (profStr == "saver" || profStr == "battery_saver" || profStr == "2") prof = POWER_SAVER;
+      else prof = POWER_BALANCED;
+      PowerManagementService::setProfile(prof, true);
+    }
+    if (!doc["auto_switch"].isNull()) {
+      PowerManagementService::setAutoSwitch(doc["auto_switch"].as<bool>());
+    }
+    if (!doc["sleep_timeout_ms"].isNull()) {
+      PowerManagementService::setScreenSleepTimeoutMs(doc["sleep_timeout_ms"].as<unsigned long>());
+    }
+
+    JsonDocument resp;
+    PowerManagementService::getStatusJson(resp);
+    String out;
+    serializeJson(resp, out);
+    server.send(200, "application/json", out);
+  }
+
   // --- ĐĂNG KÝ ROUTE VÀO WEBSERVER ---
   void registerRoutes(WebServer& server) {
     server.on("/api/auth/status", HTTP_GET, [&server]() { handleAuthStatus(server); });
@@ -600,6 +648,9 @@ namespace ApiSystem {
     server.on("/api/memory/status", HTTP_GET, [&server]() { handleMemoryStatus(server); });
     server.on("/api/memory/scavenge", HTTP_POST, [&server]() { handleMemoryScavenge(server); });
     server.on("/api/memory/config", HTTP_POST, [&server]() { handleMemoryConfig(server); });
+
+    server.on("/api/power/status", HTTP_GET, [&server]() { handlePowerStatus(server); });
+    server.on("/api/power/profile", HTTP_POST, [&server]() { handlePowerProfile(server); });
 
     server.on("/api/audio/play_tune", HTTP_POST, [&server]() { handleAudioPlayTune(server); });
   }

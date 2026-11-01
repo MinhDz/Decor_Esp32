@@ -21,10 +21,13 @@ namespace AudioDriver {
 
   static bool micDriverInstalled = false;
   static bool spkDriverInstalled = false;
+  static volatile bool spkSuspended = false;
+  static volatile bool micSuspended = false;
+  static unsigned long s_lastSpkActivityMs = 0;
   static uint8_t currentTxPin = PIN_I2S_SPK_DIN;
 
   // Mặc định BẬT sẵn thu âm Mic INMP441 để màn hình Test hiển thị sóng âm ngay lập tức!
-  static bool micMonitorEnabled = true;
+  static bool micMonitorEnabled = false;
 
   // Quản lý âm lượng chuyên biệt 3 phân hệ (0 - 100%)
   static int notifyVolumePct  = 70; // Âm thông báo / Chuông / Phím bấm (Mặc định 70%)
@@ -152,6 +155,8 @@ namespace AudioDriver {
     }
     i2s_zero_dma_buffer(I2S_PORT_SPK);
     spkDriverInstalled = true;
+    spkSuspended = false;
+    s_lastSpkActivityMs = millis();
     currentTxPin = PIN_I2S_SPK_DIN;
     Serial.printf("✅ [MAX98357A] Đã khởi tạo I2S1 TX DAC (BCLK=GPIO %d, LRC=GPIO %d, DIN=GPIO %d) @ %u Hz!\n",
                   PIN_I2S_SPK_BCLK, PIN_I2S_SPK_LRC, PIN_I2S_SPK_DIN, sampleRate);
@@ -193,9 +198,50 @@ namespace AudioDriver {
       return false;
     }
     micDriverInstalled = true;
+    micSuspended = false;
     Serial.printf("✅ [INMP441] Đã khởi tạo I2S0 RX (BCLK=GPIO %d, WS=GPIO %d, SD=GPIO %d) @ %u Hz!\n",
                   PIN_I2S_MIC_BCLK, PIN_I2S_MIC_WS, PIN_I2S_MIC_SD, SAMPLE_RATE);
     return true;
+  }
+
+
+
+  void resumeSpeaker() {
+    s_lastSpkActivityMs = millis();
+    if (spkDriverInstalled && spkSuspended) {
+      i2s_start(I2S_PORT_SPK);
+      spkSuspended = false;
+    }
+  }
+
+  void suspendSpeaker() {
+    if (spkDriverInstalled && !spkSuspended) {
+      i2s_zero_dma_buffer(I2S_PORT_SPK);
+      i2s_stop(I2S_PORT_SPK);
+      spkSuspended = true;
+    }
+  }
+
+  bool isSpeakerSuspended() {
+    return spkSuspended;
+  }
+
+  void resumeMic() {
+    if (micDriverInstalled && micSuspended) {
+      i2s_start(I2S_PORT_MIC);
+      micSuspended = false;
+    }
+  }
+
+  void suspendMic() {
+    if (micDriverInstalled && !micSuspended) {
+      i2s_stop(I2S_PORT_MIC);
+      micSuspended = true;
+    }
+  }
+
+  bool isMicSuspended() {
+    return micSuspended;
   }
 
   // Phát sóng Sine chuẩn 16-bit Stereo mượt mà ra Loa MAX98357A (có sườn Attack/Release triệt tiêu tiếng tách/click)
@@ -208,6 +254,7 @@ namespace AudioDriver {
     if (!installSpeakerTx(16000)) return;
     if (audioPlayRunning) return; // Không can thiệp nếu đang chạy tác vụ phát nhạc nền
     if (WebStreamManager::isAudioStreaming()) return; // Tuyệt đối không chen tiếng bíp phá vỡ luồng stream I2S
+    resumeSpeaker();
 
     i2s_set_sample_rates(I2S_PORT_SPK, 16000);
 
@@ -678,14 +725,21 @@ namespace AudioDriver {
   }
 
   void loop() {
+    // 1. Quản lý tiết kiệm điện Mic INMP441
     if (voiceRecordingActive) {
+      resumeMic();
       pollVoiceRecording();
       return;
     }
-    if (!micMonitorEnabled) return;
-    if (!micDriverInstalled) {
-      if (!installMicRx()) return;
-    }
+    if (!micMonitorEnabled) {
+      if (micDriverInstalled && !micSuspended) {
+        suspendMic();
+      }
+    } else {
+      resumeMic();
+      if (!micDriverInstalled) {
+        if (!installMicRx()) return;
+      }
 
     unsigned long now = millis();
     if (now - lastMicSampleMs < 40) return; // ~25 FPS lấy mẫu sóng âm mượt mà
@@ -809,6 +863,15 @@ namespace AudioDriver {
                     bar,
                     pct);
     }
+    } // Đóng khối else micMonitorEnabled
+
+    // 2. Tự động đưa Loa MAX98357A vào Ultra-Low Power Standby (< 0.02mA) khi im lặng > 1.5s
+    if (spkDriverInstalled && !spkSuspended) {
+      if (!audioPlayRunning && !isStreamPcmAsyncPlaying() && !isVoiceStreamActive() &&
+          !WebStreamManager::isAudioStreaming() && (millis() - s_lastSpkActivityMs > 1500)) {
+        suspendSpeaker();
+      }
+    }
   }
 
   // --- PHÁT LẠI ÂM THANH VỪA THU TỪ MIC QUA I2S DAC MAX98357A (GPIO 15/16/17) ---
@@ -818,6 +881,7 @@ namespace AudioDriver {
       return;
     }
     if (!installSpeakerTx(16000)) return;
+    resumeSpeaker();
     i2s_set_sample_rates(I2S_PORT_SPK, 16000);
 
     // 1. Tìm giá trị đỉnh (Peak) để tự động cân bằng biên độ (Auto Gain Normalization)
@@ -991,6 +1055,7 @@ namespace AudioDriver {
 
     uint32_t currentSampleRate = isWav ? wavSampleRate : 44100;
     installSpeakerTx(currentSampleRate);
+    resumeSpeaker();
     i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
     audioPlayCurSample = 0;
 
@@ -1377,6 +1442,7 @@ namespace AudioDriver {
           continue;
         }
       }
+      resumeSpeaker();
 
       int64_t sumAmp = 0;
       for (size_t k = 0; k < toRead; k += 8) {
@@ -1518,6 +1584,7 @@ namespace AudioDriver {
     if (!spkDriverInstalled) {
       if (!installSpeakerTx(16000)) return;
     } else {
+      resumeSpeaker();
       static uint32_t s_lastStreamHz = 0;
       if (s_lastStreamHz != 16000) {
         i2s_set_sample_rates(I2S_PORT_SPK, 16000);

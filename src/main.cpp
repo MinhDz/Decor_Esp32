@@ -16,6 +16,7 @@
 #include "SystemLogger.h"
 #include "TimeManager.h"
 #include "MemoryScavenger.h"
+#include "services/PowerManagementService.h"
 
 void setup() {
   Serial.begin(115200);
@@ -62,6 +63,9 @@ void setup() {
   // 2. Khởi chạy Hệ thống 4 Màn hình ST7789 + Mic INMP441 + Cảm biến SHT31 + 7 Phím Bấm DIO
   SystemCoordinator::init();
 
+  // 2B. Khởi tạo Dịch vụ Quản lý Năng lượng Toàn Trạm (CPU Clock Scaling, Wi-Fi Modem-Sleep, Sạc bão hòa)
+  PowerManagementService::init();
+
   // 3. Khởi tạo Wi-Fi (SoftAP cứu hộ & Tự động kết nối Smart Wi-Fi)
   WifiManager::begin();
 
@@ -86,6 +90,9 @@ void loop() {
 
   // Vòng lặp phát hiện đồng bộ giờ thực tế trên Core 1
   TimeManager::loop();
+
+  // Vòng lặp quản lý năng lượng, tự động chuyển cấu hình nguồn & auto screen sleep
+  PowerManagementService::loop();
 
   // 1. Vòng lặp cập nhật 4 Màn hình ST7789, Mic INMP441, Cảm biến SHT31 & 7 Phím DIO
   TaskProfiler::start(PROF_MODULES);

@@ -57,6 +57,13 @@ void appendDefinitions(JsonArray tools) {
   addTool(tools, "self.screen.set_emoji_style", "Đổi phong cách biểu cảm: neon, cute_girl, doi_mat hoặc gome.");
   tool = tools[tools.size() - 1].as<JsonObject>();
   addProperty(tool, "style", "string", "neon, cute_girl, doi_mat hoặc gome.");
+
+  addTool(tools, "self.power.set_profile", "Đặt cấu hình quản lý nguồn: performance (tối đa), balanced (cân bằng) hoặc saver (tiết kiệm pin).");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "profile", "string", "performance, balanced hoặc saver.");
+  addProperty(tool, "auto_switch", "boolean", "Tự động chuyển cấu hình theo trạng thái sạc và pin (tùy chọn).");
+
+  addTool(tools, "self.power.get_status", "Lấy thông tin quản lý nguồn: cấu hình, tần số CPU, pin, trạng thái sạc và bão hòa.");
 }
 
 PeripheralControlResult execute(const String& name, JsonObjectConst args) {
@@ -133,6 +140,16 @@ PeripheralControlResult execute(const String& name, JsonObjectConst args) {
   if (name == "self.screen.set_emoji_style") {
     if (!args["style"].is<const char*>()) return invalidArguments("cần style dạng chuỗi.");
     return PeripheralControlService::setEmojiStyle(args["style"].as<String>());
+  }
+
+  if (name == "self.power.set_profile") {
+    if (!args["profile"].is<const char*>()) return invalidArguments("cần profile dạng chuỗi (performance, balanced hoặc saver).");
+    bool autoSw = args["auto_switch"].is<bool>() ? args["auto_switch"].as<bool>() : false;
+    return PeripheralControlService::setPowerProfile(args["profile"].as<String>(), autoSw);
+  }
+
+  if (name == "self.power.get_status") {
+    return PeripheralControlService::getPowerStatus();
   }
 
   return {false, "Không tìm thấy công cụ MCP: " + name};

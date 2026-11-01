@@ -22,6 +22,10 @@ namespace SensorDriver {
   float getHumidityPct();
   bool isTouchPressed();
 
+  // Chu kỳ đo cảm biến SHT31 linh hoạt (quản lý bởi PowerManagementService)
+  void     setSampleInterval(uint32_t intervalMs);
+  uint32_t getSampleInterval();
+
   // Đo điện áp pin 18650 (GPIO 2 - ADC1_CH1) & Trạng thái sạc Vin MH-CD42 (GPIO 46)
   float getBatteryVoltage();
   int   getBatteryMilliVolts();

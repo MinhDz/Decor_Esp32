@@ -1,4 +1,5 @@
 #include "services/PeripheralControlService.h"
+#include "services/PowerManagementService.h"
 
 #include "drivers/CobLedDriver.h"
 #include "drivers/DisplayDriver.h"
@@ -112,6 +113,39 @@ PeripheralControlResult setEmojiStyle(const String& requestedStyle) {
     return {true, "Đã chọn phong cách Mèo Gome."};
   }
   return {false, "Phong cách biểu cảm không được hỗ trợ: " + requestedStyle};
+}
+
+PeripheralControlResult setPowerProfile(const String& profileStr, bool autoSwitch) {
+  String p = profileStr;
+  p.toLowerCase();
+  PowerProfile prof = POWER_BALANCED;
+  if (p == "performance" || p == "hieu_nang" || p == "max" || p == "0") prof = POWER_PERFORMANCE;
+  else if (p == "saver" || p == "battery_saver" || p == "tiet_kiem" || p == "save" || p == "2") prof = POWER_SAVER;
+  else if (p == "balanced" || p == "can_bang" || p == "1") prof = POWER_BALANCED;
+  else return {false, "Profile nguồn phải là: performance, balanced hoặc saver."};
+
+  PowerManagementService::setProfile(prof, true);
+  if (autoSwitch) {
+    PowerManagementService::setAutoSwitch(true);
+  }
+  return {true, "Đã chuyển sang cấu hình nguồn " + String(PowerManagementService::getProfileName()) +
+                (autoSwitch ? " (Tự động chuyển: BẬT)" : " (Cố định profile)")};
+}
+
+PeripheralControlResult getPowerStatus() {
+  const char* prof = PowerManagementService::getProfileName();
+  uint32_t cpu = getCpuFrequencyMhz();
+  int bat = SensorDriver::getBatteryPercentage();
+  float vbat = SensorDriver::getBatteryVoltage();
+  bool chg = SensorDriver::isCharging();
+  bool full = PowerManagementService::isBatteryFullyCharged();
+  bool autoSw = PowerManagementService::isAutoSwitchEnabled();
+
+  String msg = "Cấu hình nguồn: " + String(prof) + " (CPU " + String(cpu) + "MHz), Pin: " +
+               String(bat) + "% (" + String(vbat, 2) + "V), " +
+               (chg ? (full ? "Đã sạc đầy 100% bão hòa" : "Đang cắm sạc") : "Đang chạy pin") +
+               ", Tự động chuyển: " + (autoSw ? "BẬT" : "TẮT") + ".";
+  return {true, msg};
 }
 
 } // namespace PeripheralControlService

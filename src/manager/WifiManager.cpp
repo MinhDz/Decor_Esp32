@@ -1,4 +1,5 @@
 ﻿#include "WifiManager.h"
+#include "services/PowerManagementService.h"
 #include "Config.h"
 #include "HardwareManager.h"
 #include "SystemLogger.h"
@@ -256,6 +257,7 @@ bool WifiManager::smartConnect() {
       TestDisplay::onWifiConnectedSuccess(target.ssid, WiFi.localIP().toString());
       TimeManager::onWifiConnected();
       WebRoutes::onWifiConnected();
+      PowerManagementService::onWifiConnected();
       return true;
     } else {
       Serial.printf("❌ [Smart-WiFi] Không thể kết nối tới '%s'. Thử mạng tiếp theo...\n", target.ssid.c_str());
@@ -318,6 +320,7 @@ bool WifiManager::connectDirect(const String& ssid, const String& password, bool
     TestDisplay::onWifiConnectedSuccess(ssid, WiFi.localIP().toString());
     TimeManager::onWifiConnected();
     WebRoutes::onWifiConnected();
+      PowerManagementService::onWifiConnected();
     s_isManualConnecting = false;
     return true;
   } else {
@@ -511,6 +514,7 @@ void WifiManager::loop() {
       TestAudio::playOkChime();
       TestDisplay::onWifiConnectedSuccess(WiFi.SSID(), WiFi.localIP().toString());
       WebRoutes::onWifiConnected();
+      PowerManagementService::onWifiConnected();
     } else if (millis() - s_autoConnectStartTime > 12000) {
       // Hết timeout 12s không kết nối được
       Serial.println("⚠️ [Smart-WiFi] Auto-Reconnect timeout (12s). Chờ chu kỳ quét tiếp theo.");

@@ -1,4 +1,5 @@
 #include "drivers/SensorDriver.h"
+#include "services/PowerManagementService.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestAudio.h"
 #include "WebStreamManager.h"
@@ -21,6 +22,15 @@ namespace SensorDriver {
   static bool waitingMeasurement = false;
   static unsigned long cmdSentTime = 0;
   static unsigned long lastMeasureCycle = 0;
+  static uint32_t s_customSampleInterval = 0;
+
+  void setSampleInterval(uint32_t intervalMs) {
+    s_customSampleInterval = intervalMs;
+  }
+
+  uint32_t getSampleInterval() {
+    return s_customSampleInterval > 0 ? s_customSampleInterval : (sht31Online ? 2500 : 4500);
+  }
 
   // Trạng thái cảm biến chạm TTP223 (GPIO 20)
   static bool touchModeEnabled = true;
@@ -202,13 +212,15 @@ namespace SensorDriver {
       bool touched = (digitalRead(PIN_TOUCH_TTP223) == HIGH);
       if (touched && !lastTouchState) {
         touchCount++;
+        PowerManagementService::notifyUserActivity();
       }
       lastTouchState = touched;
     }
 
     // ================= 2. XỬ LÝ CẢM BIẾN NHIỆT/ẨM SHT31 (GPIO 8, 9) =================
     if (!waitingMeasurement) {
-      unsigned long interval = sht31Online ? 2500 : 4500;
+      unsigned long baseInterval = s_customSampleInterval > 0 ? s_customSampleInterval : (sht31Online ? 2500 : 4500);
+      unsigned long interval = sht31Online ? baseInterval : max(baseInterval, 4500UL);
       if (now - lastMeasureCycle >= interval) {
         lastMeasureCycle = now;
         if (!sht31Online) {

@@ -1,5 +1,6 @@
 #include "drivers/KeypadDriver.h"
 #include "tests/TestDisplay.h"
+#include "services/PowerManagementService.h"
 #include "Config.h"
 
 namespace KeypadDriver {
@@ -214,6 +215,7 @@ namespace KeypadDriver {
     if (s_keypadQueue != nullptr) {
       int keyIdx;
       while (xQueueReceive(s_keypadQueue, &keyIdx, 0) == pdTRUE) {
+        PowerManagementService::notifyUserActivity();
         TestDisplay::onKeypadEvent(keyIdx);
       }
     }

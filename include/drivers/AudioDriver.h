@@ -101,6 +101,15 @@ namespace AudioDriver {
   bool hasAllocatedRecBuffer();
 
   // Xử lý phím tắt từ Serial Monitor ('m': Sóng Âm, 'p': Nghe Lại Loa, 't': Test Bíp, 'a': Chime, 'n': Nokia, '+','-': Vol)
+  // --- QUẢN LÝ TIẾT KIỆM NĂNG LƯỢNG I2S LOA & MIC (POWER MANAGEMENT) ---
+  void suspendSpeaker();
+  void resumeSpeaker();
+  bool isSpeakerSuspended();
+
+  void suspendMic();
+  void resumeMic();
+  bool isMicSuspended();
+
   bool handleSerial(char cmd);
 }
 
