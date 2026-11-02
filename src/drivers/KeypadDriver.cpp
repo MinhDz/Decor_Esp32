@@ -91,6 +91,7 @@ namespace KeypadDriver {
                   activeAdcPin, spec.name, spec.resistorLabel, mv / 1000.0f, mv, raw);
 
     // 1. Nếu màn hình đang ngủ (AOD hoặc Sleep), đánh thức màn hình NGAY LẬP TỨC từ task nền!
+    PowerManagementService::notifyUserActivity();
     if (TestDisplay::isSleeping()) {
       TestDisplay::wakeUpScreenFromTask();
       // Nhấn nút đầu tiên để bật sáng màn hình -> tiêu thụ phím tránh bấm nhầm menu
@@ -150,6 +151,7 @@ namespace KeypadDriver {
         s_lastTtpCheckMs = now;
         s_lastTtpTaskState = ttpNow;
         if (ttpNow && TestDisplay::isSleeping()) {
+          PowerManagementService::notifyUserActivity();
           TestDisplay::wakeUpScreenFromTask();
         }
       }
@@ -315,6 +317,7 @@ namespace KeypadDriver {
     Serial.printf("🌐 [WEB VIRTUAL KEYPAD] Nhận lệnh bấm phím từ Web: %-13s | Trở: %-11s | Mô phỏng: %.2fV (%4dmV)\n",
                   spec.name, spec.resistorLabel, lastAdcMv / 1000.0f, lastAdcMv);
 
+    PowerManagementService::notifyUserActivity();
     if (TestDisplay::isSleeping()) {
       TestDisplay::wakeUpScreenFromTask();
       return;

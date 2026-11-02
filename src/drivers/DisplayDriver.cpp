@@ -87,6 +87,16 @@ namespace DisplayDriver {
     return s_isScreenSleeping;
   }
 
+  void setAodBacklight() {
+    s_isScreenSleeping = true;
+    if (!s_isLedcAttached) {
+      ledcSetup(s_ledcChannel, s_ledcFreq, s_ledcRes);
+      ledcAttachPin(PIN_BL, s_ledcChannel);
+      s_isLedcAttached = true;
+    }
+    ledcWrite(s_ledcChannel, 4); // Dim xuống ~1.5% độ sáng cho Always On Display
+  }
+
   bool isWakeUpRequested() {
     return s_wakeUpRequested;
   }
@@ -104,7 +114,6 @@ namespace DisplayDriver {
   }
 
   void wakeUpScreenFromTask() {
-    if (!s_isScreenSleeping) return;
     s_isScreenSleeping = false;
     applyBacklightHardware();
     s_wakeUpRequested = true;

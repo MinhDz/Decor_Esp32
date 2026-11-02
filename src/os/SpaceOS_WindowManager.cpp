@@ -40,6 +40,7 @@
 #include "SpaceOS_Settings.h"
 #include "BuiltinEmojis.h"
 #include "drivers/DisplayDriver.h"
+#include "services/PowerManagementService.h"
 #include "SpaceOS_VnGfx.h"
 
 namespace TestDisplay {
@@ -533,7 +534,12 @@ namespace TestDisplay {
   }
 
   void wakeUpScreenFromTask() {
+    lastUserActivityMs = millis();
+    isScreenSleeping = false;
+    currentMode = 0;
     DisplayDriver::wakeUpScreenFromTask();
+    setBacklightBrightness(screenBrightnessPct);
+    PowerManagementService::notifyUserActivity();
   }
 
   // Lấy thời gian hiện tại (từ NTP nếu đã đồng bộ, hoặc đếm từ mốc mặc định)
@@ -6663,10 +6669,11 @@ namespace TestDisplay {
     if (!tft) return;
     if (isScreenSleeping) {
       if (alwaysOnDisplayEnabled) {
+        DisplayDriver::setAodBacklight();
         drawAlwaysOnDisplayScreen(true);
       } else {
+        DisplayDriver::setSleeping(true);
         tft->fillScreen(C_BLACK);
-        ledcWrite(0, 0);
       }
       return;
     }
@@ -6931,6 +6938,7 @@ namespace TestDisplay {
   // ============================================================================
   void onKeypadEvent(int keyIndex) {
     lastUserActivityMs = millis();
+    PowerManagementService::notifyUserActivity();
 
     // 0. Nếu đang hiển thị THÔNG BÁO ĐẨY TOÀN MÀN HÌNH (Báo thức đến giờ / Hết giờ hẹn):
     if (SpaceOS_ClockSuite::isPushAlertActive()) {
@@ -6942,6 +6950,7 @@ namespace TestDisplay {
     // Nếu màn hình đang ở chế độ AOD hoặc Sleep -> Bấm phím bất kỳ sẽ đánh thức màn hình ngay!
     if (isScreenSleeping) {
       isScreenSleeping = false;
+      currentMode = 0;
       setBacklightBrightness(screenBrightnessPct);
       Serial.println("💡 [WAKEUP] Đã đánh thức màn hình từ chế độ AOD / Sleep bằng phím bấm!");
       refreshActiveScreen();
@@ -7067,13 +7076,13 @@ namespace TestDisplay {
         // Đang ở Màn hình chờ (Mode 0) bấm EXIT -> Khóa màn hình nhanh vào Always On Display (AOD) hoặc Sleep!
         isScreenSleeping = true;
         if (alwaysOnDisplayEnabled) {
-          ledcWrite(0, 4);
+          DisplayDriver::setAodBacklight();
           tft->fillScreen(C_BLACK);
           drawAlwaysOnDisplayScreen(true);
           Serial.println("🌙 [AOD] Khóa màn hình nhanh vào Always On Display (AOD) bằng phím EXIT!");
         } else {
+          DisplayDriver::setSleeping(true);
           tft->fillScreen(C_BLACK);
-          ledcWrite(0, 0);
           Serial.println("🌙 [SLEEP] Tắt màn hình nhanh bằng phím EXIT!");
         }
         return;
@@ -8719,6 +8728,8 @@ namespace TestDisplay {
   }
 
   void cycleScreenMode() {
+    lastUserActivityMs = millis();
+    PowerManagementService::notifyUserActivity();
     if (isScreenSleeping) {
       isScreenSleeping = false;
       setBacklightBrightness(screenBrightnessPct);
@@ -8749,6 +8760,12 @@ namespace TestDisplay {
   }
 
   void setScreenMode(const String& mode) {
+    lastUserActivityMs = millis();
+    PowerManagementService::notifyUserActivity();
+    if (isScreenSleeping) {
+      isScreenSleeping = false;
+      setBacklightBrightness(screenBrightnessPct);
+    }
     uint8_t newMode = currentMode;
     if (mode == "standby") newMode = 0;
     else if (mode == "emoji" || mode == "xiaozhi" || mode == "assistant") newMode = 1;
@@ -8967,6 +8984,11 @@ namespace TestDisplay {
     // Nếu có yêu cầu thức màn hình từ task nền FreeRTOS: Vẽ lại màn hình ngay
     if (s_wakeUpRequested) {
       s_wakeUpRequested = false;
+      lastUserActivityMs = now;
+      isScreenSleeping = false;
+      currentMode = 0;
+      setBacklightBrightness(screenBrightnessPct);
+      PowerManagementService::notifyUserActivity();
       refreshActiveScreen();
     }
 
@@ -8987,8 +9009,10 @@ namespace TestDisplay {
       lastTtp223State = ttpNow;
       if (ttpNow) { // Phát hiện sườn lên (Chạm ngón tay vào TTP223)
         lastUserActivityMs = now;
+        PowerManagementService::notifyUserActivity();
         if (isScreenSleeping) {
           isScreenSleeping = false;
+          currentMode = 0;
           setBacklightBrightness(screenBrightnessPct);
           Serial.println("👆 [TTP223 GPIO20] Đã đánh thức màn hình từ chế độ AOD / Sleep bằng cảm biến chạm!");
           refreshActiveScreen();
@@ -9049,14 +9073,14 @@ namespace TestDisplay {
         isScreenSleeping = true;
         if (alwaysOnDisplayEnabled) {
           // Chế độ Always On Display (AOD): Nền đen tuyệt đối 100%, hạ đèn nền xuống siêu mờ ~1.5% (PWM = 4)
-          ledcWrite(0, 4);
+          DisplayDriver::setAodBacklight();
           tft->fillScreen(C_BLACK);
           drawAlwaysOnDisplayScreen(true);
           Serial.printf("🌙 [AOD MODE] Chuyển sang Always On Display (Đèn nền siêu mờ PWM=4) sau %u giây.\n", (unsigned)timeoutSec);
         } else {
           // Chế độ Sleep: Xóa đen màn hình và tắt hoàn toàn đèn nền (PWM=0)
+          DisplayDriver::setSleeping(true);
           tft->fillScreen(C_BLACK);
-          ledcWrite(0, 0);
           Serial.printf("🌙 [SLEEP MODE] Đã tắt hoàn toàn màn hình sau %u giây.\n", (unsigned)timeoutSec);
         }
       }
@@ -9681,6 +9705,7 @@ namespace TestDisplay {
 
   bool handleSerial(char cmd) {
     lastUserActivityMs = millis();
+    PowerManagementService::notifyUserActivity();
     if (isScreenSleeping) {
       isScreenSleeping = false;
       setBacklightBrightness(screenBrightnessPct);

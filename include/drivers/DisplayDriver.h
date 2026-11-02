@@ -30,6 +30,7 @@ namespace DisplayDriver {
   bool isSleeping();
   void setSleeping(bool sleeping);
   volatile bool& getSleepingRef();
+  void setAodBacklight();
 
   bool isWakeUpRequested();
   void clearWakeUpRequest();
