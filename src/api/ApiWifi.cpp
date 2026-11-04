@@ -2,6 +2,7 @@
 #include "WifiManager.h"
 #include "WeatherManager.h"
 #include "WebAuth.h"
+#include "drivers/SensorDriver.h"
 #include <ArduinoJson.h>
 
 namespace ApiWifi {
@@ -105,6 +106,9 @@ namespace ApiWifi {
     doc["windSpeed"] = w.windSpeed;
     doc["iconType"] = (int)w.iconType;
     doc["iconStr"] = WeatherManager::getIconTypeString();
+    doc["indoorTemp"] = SensorDriver::getTemperatureC();
+    doc["indoorHumidity"] = SensorDriver::getHumidityPct();
+    doc["indoorOnline"] = SensorDriver::isSht31Connected();
     doc["lastUpdateEpoch"] = w.lastUpdateEpoch;
     doc["lastFetchMs"] = w.lastFetchMs;
 

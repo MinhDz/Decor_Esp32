@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Arduino.h>
 
 static const char SD_CONVERTER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
@@ -4440,14 +4440,9 @@ static const char DECOR_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     const navTabs = document.getElementById('nav-tabs');
     if (!navTabs || document.getElementById('tab-btn-decor')) return;
 
-    // 1. Cập nhật thanh Status Bar ở đầu trang web để hiển thị thông số Pin & Sạc
-    const statusBar = document.querySelector('.status-bar .status-left');
-    if (statusBar && !document.getElementById('st-bat-box')) {
-      const batSpan = document.createElement('span');
-      batSpan.id = 'st-bat-box';
-      batSpan.innerHTML = 'Nguồn: <strong id="st-bat-txt" style="color:#10b981;">🔋 --V (--%)</strong>';
-      statusBar.appendChild(batSpan);
-    }
+    // 1. Dọn dẹp thẻ hiển thị pin trùng lặp trong status-bar (index.html đã có st-bat-txt chuẩn)
+    const dupBat = document.getElementById('st-bat-box');
+    if (dupBat) dupBat.remove();
 
     // 2. Thêm nút Tab "✨ Hiệu Ứng Decor & Nguồn"
     const btn = document.createElement('button');
@@ -6266,6 +6261,22 @@ static const char TELEMETRY_WEATHER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
   `;
   document.head.appendChild(style);
 
+  // Helper hàm cập nhật thông số nhiệt độ & độ ẩm phòng (SHT31) vào Weather Pill
+  window.updateIndoorWeatherPill = function(temp, hum, online) {
+    const inEl  = document.getElementById('wp-indoor');
+    const inSep = document.getElementById('wp-indoor-sep');
+    if (!inEl) return;
+    if (online && temp !== undefined && temp > -40 && temp < 85) {
+      const humStr = (hum !== undefined && hum > 0) ? ` (${Number(hum).toFixed(0)}%)` : '';
+      inEl.innerText = `Phòng: ${Number(temp).toFixed(1)}°C${humStr}`;
+      inEl.style.display = 'inline';
+      if (inSep) inSep.style.display = 'inline';
+    } else {
+      inEl.style.display = 'none';
+      if (inSep) inSep.style.display = 'none';
+    }
+  };
+
   // 2. Chèn Weather Pill vào Status Bar
   function injectWeatherPill() {
     const statusBar = document.querySelector('.status-bar');
@@ -6278,8 +6289,9 @@ static const char TELEMETRY_WEATHER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       <span class="weather-tag" id="wp-icon">🌤️</span>
       <span style="font-weight:700; color:#38bdf8" id="wp-city">Hà Nội</span>
       <span id="wp-outdoor" style="color:#f8fafc">--°C (--%)</span>
+      <span id="wp-indoor-sep" style="color:#475569; display:none;">|</span>
+      <span id="wp-indoor" style="color:#10b981; display:none;">Phòng: --°C</span>
       <span style="color:#475569">|</span>
-      <span id="wp-indoor" style="color:#10b981">Phòng: --°C</span>
       <span id="wp-cond" style="color:#94a3b8; font-size:0.72rem">--</span>
       <button class="weather-refresh-btn" id="btn-wp-refresh" onclick="window.refreshWeatherApi()" title="Cập nhật thời tiết Open-Meteo">🔄 Cập nhật</button>
     `;
@@ -6430,6 +6442,10 @@ static const char TELEMETRY_WEATHER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
         } else {
           if (cityEl) cityEl.innerText = 'Trạm ESP32';
           if (outEl) outEl.innerText = 'Đang đồng bộ Open-Meteo...';
+        }
+
+        if (typeof window.updateIndoorWeatherPill === 'function') {
+          window.updateIndoorWeatherPill(d.indoorTemp, d.indoorHumidity, d.indoorOnline);
         }
       })
       .catch(e => console.error(e));

@@ -2972,6 +2972,23 @@
         if (dh1) dh1.innerText = hStr;
         if (dt2) dt2.innerText = tStr;
         if (dh2) dh2.innerText = hStr;
+
+        if (typeof window.updateIndoorWeatherPill === 'function') {
+          window.updateIndoorWeatherPill(data.temperature_c, data.humidity_pct, data.sht31_online);
+        } else {
+          const inEl = document.getElementById('wp-indoor');
+          const inSep = document.getElementById('wp-indoor-sep');
+          if (inEl) {
+            if (data.sht31_online && Number(data.temperature_c) > -40 && Number(data.temperature_c) < 85) {
+              inEl.innerText = `Phòng: ${Number(data.temperature_c).toFixed(1)}°C (${data.humidity_pct}%)`;
+              inEl.style.display = 'inline';
+              if (inSep) inSep.style.display = 'inline';
+            } else {
+              inEl.style.display = 'none';
+              if (inSep) inSep.style.display = 'none';
+            }
+          }
+        }
       }
     } catch (e) {
       console.warn("Chế độ Demo / Offline:", e);
