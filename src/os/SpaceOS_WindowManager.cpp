@@ -6948,12 +6948,17 @@ namespace TestDisplay {
     }
 
     // Nếu màn hình đang ở chế độ AOD hoặc Sleep -> Bấm phím bất kỳ sẽ đánh thức màn hình ngay!
+    static unsigned long s_lastWakeupMs = 0;
     if (isScreenSleeping) {
       isScreenSleeping = false;
-      currentMode = 0;
+      s_lastWakeupMs = millis();
       setBacklightBrightness(screenBrightnessPct);
       Serial.println("💡 [WAKEUP] Đã đánh thức màn hình từ chế độ AOD / Sleep bằng phím bấm!");
       refreshActiveScreen();
+      return;
+    }
+    // Chặn phím rò rỉ ngay sau khi vừa thức dậy (debouncing 350ms tránh nhảy sang menu/thoát)
+    if (millis() - s_lastWakeupMs < 350) {
       return;
     }
 
@@ -9068,7 +9073,7 @@ namespace TestDisplay {
 
     // 3. Kiểm tra hết thời gian sáng màn hình (Screen Timeout) -> Chuyển sang AOD hoặc Sleep
     uint16_t timeoutSec = TIMEOUT_SECONDS_LIST[screenTimeoutIdx % 6];
-    if (timeoutSec > 0 && !isScreenSleeping) {
+    if (timeoutSec > 0 && !isScreenSleeping && currentMode == 0) {
       if (now - lastUserActivityMs >= (unsigned long)timeoutSec * 1000UL) {
         isScreenSleeping = true;
         if (alwaysOnDisplayEnabled) {

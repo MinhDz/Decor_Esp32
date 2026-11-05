@@ -2,6 +2,7 @@
 #include "client/McpTools.h"
 #include "Config.h"
 #include "tests/TestAudio.h"
+#include "SystemLogger.h"
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <HTTPClient.h>
@@ -841,6 +842,7 @@ static void handleMcpMessage(const JsonDocument& doc) {
   String sid = doc["session_id"] | s_sessionId;
 
   Serial.printf("[XIAOZHI MCP] method=%s id=%d\n", method.c_str(), reqId);
+  SystemLogger::log(LOG_LVL_INFO, "MCP", "Nhan MCP: method=%s id=%d", method.c_str(), reqId);
 
   JsonDocument resDoc;
   resDoc["session_id"] = sid;
@@ -849,9 +851,22 @@ static void handleMcpMessage(const JsonDocument& doc) {
   responsePayload["jsonrpc"] = "2.0";
   responsePayload["id"] = reqId;
 
-  if (method == "tools/list") {
+  if (method == "initialize") {
+    JsonObject result = responsePayload["result"].to<JsonObject>();
+    result["protocolVersion"] = "2024-11-05";
+    JsonObject caps = result["capabilities"].to<JsonObject>();
+    caps["tools"].to<JsonObject>();
+    JsonObject sInfo = result["serverInfo"].to<JsonObject>();
+    sInfo["name"] = "ESP32-S3-DecorStation";
+    sInfo["version"] = "1.0.0";
+    SystemLogger::log(LOG_LVL_INFO, "MCP", "Da phan hoi MCP initialize thanh cong");
+  } else if (method == "notifications/initialized") {
+    // Thong bao khoi tao MCP thanh cong tu server, khong can tra loi
+    return;
+  } else if (method == "tools/list") {
     JsonArray tools = responsePayload["result"]["tools"].to<JsonArray>();
     McpTools::appendDefinitions(tools);
+    SystemLogger::log(LOG_LVL_INFO, "MCP", "Da dang ky %u cong cu MCP len Cloud", (unsigned)tools.size());
   } else if (method == "tools/call") {
     JsonObjectConst params = payload["params"].as<JsonObjectConst>();
     String toolName = params["name"] | "";
@@ -865,6 +880,7 @@ static void handleMcpMessage(const JsonDocument& doc) {
     item["text"] = outcome.message;
     result["isError"] = !outcome.success;
     Serial.printf("[XIAOZHI MCP] %s -> %s\n", toolName.c_str(), outcome.message.c_str());
+    SystemLogger::log(LOG_LVL_INFO, "MCP", "Execute %s -> %s", toolName.c_str(), outcome.success ? "OK" : "FAIL");
   } else {
     return;
   }
@@ -940,10 +956,11 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 String iotDesc = "{\"session_id\":\"" + s_sessionId + "\",\"type\":\"iot\",\"descriptors\":["
                   "{\"name\":\"Light\",\"description\":\"He thong den trang tri tram vu tru gom den Edison va LED COB\",\"properties\":{\"power\":{\"type\":\"boolean\"},\"brightness\":{\"type\":\"integer\"}},\"methods\":{\"TurnOn\":{\"description\":\"Bat den\"},\"TurnOff\":{\"description\":\"Tat den\"}}},"
                   "{\"name\":\"Fan\",\"description\":\"Coi xay gio trang tri tram\",\"properties\":{\"power\":{\"type\":\"boolean\"},\"speed\":{\"type\":\"integer\"}},\"methods\":{\"TurnOn\":{\"description\":\"Bat coi xay\"},\"TurnOff\":{\"description\":\"Tat coi xay\"}}},"
-                  "{\"name\":\"Speaker\",\"description\":\"Loa phat am thanh\",\"properties\":{\"volume\":{\"type\":\"integer\"}},\"methods\":{\"SetVolume\":{\"description\":\"Chinh am luong loa\"}}}"
+                  "{\"name\":\"Speaker\",\"description\":\"Loa phat am thanh\",\"properties\":{\"volume\":{\"type\":\"integer\"}},\"methods\":{\"SetVolume\":{\"description\":\"Chinh am luong loa\"}}},"
+                  "{\"name\":\"News\",\"description\":\"Ban tin thoi su ngay hom nay tu bao dien tu VNExpress\",\"properties\":{},\"methods\":{\"get_daily_news\":{\"description\":\"Doc ban tin thoi su moi nhat trong ngay\"}}}"
                   "]}";
                 esp_websocket_client_send_text(s_wsClient, iotDesc.c_str(), iotDesc.length(), pdMS_TO_TICKS(1500));
-                Serial.println("📡 [XIAOZHI IOT] Đã đăng ký thành công IoT Descriptors (Light, Fan, Speaker) lên Cloud!");
+                Serial.println("📡 [XIAOZHI IOT] Đã đăng ký thành công IoT Descriptors (Light, Fan, Speaker, News) lên Cloud!");
               }
               if (doc["audio_params"]["format"].is<const char*>()) {
                 Serial.printf("🎧 [XIAOZHI SERVER AUDIO]: Format=%s | Rate=%d Hz\n",

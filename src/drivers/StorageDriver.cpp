@@ -115,7 +115,7 @@ namespace StorageDriver {
   }
 
   bool isHealthy() {
-    return sdMounted && !s_healthStats.circuitBreakerTripped && (s_healthStats.health == SD_HEALTH_OK);
+    return sdMounted && !s_healthStats.circuitBreakerTripped;
   }
 
   SdCardHealth getHealthState() {
@@ -268,6 +268,7 @@ namespace StorageDriver {
   }
 
   static bool tryMountFatFilesystem(uint8_t sck, uint8_t miso, uint8_t mosi, uint8_t cs) {
+    detachJtagFromSdPins();
     SD.end();
     if (sdSpi) {
       sdSpi->end();

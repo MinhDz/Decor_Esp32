@@ -1,6 +1,7 @@
 #include "api/ApiTerminal.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <SD.h>
 #include <esp_system.h>
 #include "WebAuth.h"
 #include "SystemLogger.h"
@@ -202,7 +203,10 @@ void handleExec(WebServer& server) {
       }
       out += "Bản tóm tắt I2C    : " + TestSensors::getDiagSummary() + "\n";
     }
-    else if (sub == "sd" || sub == "sdcard" || sub == "card") {
+    else if (sub == "sd" || sub == "sdcard" || sub == "card" || sub.startsWith("sd mount") || sub.startsWith("sd remount")) {
+      if (sub.indexOf("mount") >= 0) {
+        TestSDCard::runFullElectricalAndSpiProbe();
+      }
       out = "=== [CHẨN ĐOÁN & SỨC KHỎE THẺ NHỚ MICROSD (SPI)] ===\n";
       bool mounted = TestSDCard::isMounted();
       bool healthy = TestSDCard::isHealthy();
@@ -492,6 +496,40 @@ void handleExec(WebServer& server) {
   else if (verb == "clear") {
     resp["clear"] = true;
     out = "Màn hình Terminal đã được xóa sạch.";
+  }
+  // 14b. LS / DIR
+  else if (verb == "ls" || verb == "dir") {
+    String p = args.length() > 0 ? args : "/";
+    if (!p.startsWith("/")) p = "/" + p;
+    out = "Danh muc tap tin: " + p + "\n";
+    if (TestSDCard::isMounted()) {
+      if (StorageDriver::lock(pdMS_TO_TICKS(500))) {
+        File dir = SD.open(p);
+        if (dir && dir.isDirectory()) {
+          File f = dir.openNextFile();
+          int cnt = 0;
+          while (f) {
+            cnt++;
+            out += String(f.isDirectory() ? "[DIR]  " : "[FILE] ") + String(f.name()) + " (" + String(f.size()) + " B)\n";
+            f.close();
+            f = dir.openNextFile();
+          }
+          dir.close();
+          out += "Tong cong: " + String(cnt) + " muc tren the SD.\n";
+          StorageDriver::notifyIoSuccess();
+        } else if (dir) {
+          out += "[FILE] " + p + " (" + String(dir.size()) + " bytes)\n";
+          dir.close();
+        } else {
+          out += "Khong the mo thu muc SD: " + p + "\n";
+        }
+        StorageDriver::unlock();
+      } else {
+        out += "SD Card dang ban (Mutex timeout).\n";
+      }
+    } else {
+      out += "The nho SD chua duoc mount!\n";
+    }
   }
   // 15. REBOOT
   else if (verb == "reboot" || verb == "restart") {
