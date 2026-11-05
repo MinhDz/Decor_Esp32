@@ -17,4 +17,5 @@ namespace PeripheralControlService {
   PeripheralControlResult setEmojiStyle(const String& style);
   PeripheralControlResult setPowerProfile(const String& profile, bool autoSwitch = false);
   PeripheralControlResult getPowerStatus();
+  PeripheralControlResult getDailyNews(int limit = 5);
 }

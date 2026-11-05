@@ -64,6 +64,10 @@ void appendDefinitions(JsonArray tools) {
   addProperty(tool, "auto_switch", "boolean", "Tự động chuyển cấu hình theo trạng thái sạc và pin (tùy chọn).");
 
   addTool(tools, "self.power.get_status", "Lấy thông tin quản lý nguồn: cấu hình, tần số CPU, pin, trạng thái sạc và bão hòa.");
+
+  addTool(tools, "get_daily_news", "Lấy danh sách các bản tin tức mới nhất trong ngày từ báo điện tử để tóm tắt và đọc cho người dùng nghe (tin tức hôm nay, thời sự, điểm tin buổi sáng/tối, tin mới nhất).");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "limit", "integer", "Số lượng tin tức muốn lấy (mặc định 5, từ 1 đến 5).");
 }
 
 PeripheralControlResult execute(const String& name, JsonObjectConst args) {
@@ -150,6 +154,12 @@ PeripheralControlResult execute(const String& name, JsonObjectConst args) {
 
   if (name == "self.power.get_status") {
     return PeripheralControlService::getPowerStatus();
+  }
+
+  if (name == "get_daily_news" || name == "self.get_daily_news" || name == "self.news.get_daily" || name == "self.news.get") {
+    int limit = 5;
+    if (args["limit"].is<int>()) limit = args["limit"].as<int>();
+    return PeripheralControlService::getDailyNews(limit);
   }
 
   return {false, "Không tìm thấy công cụ MCP: " + name};

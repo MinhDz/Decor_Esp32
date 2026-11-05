@@ -3,6 +3,7 @@
 #include "WifiManager.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestAudio.h"
+#include "services/PeripheralControlService.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 
@@ -112,6 +113,17 @@ namespace ApiXiaoZhi {
     handleXiaoZhiChatStatus(server);
   }
 
+  void handleGetDailyNews(WebServer& server) {
+    int limit = server.hasArg("limit") ? server.arg("limit").toInt() : 5;
+    PeripheralControlResult res = PeripheralControlService::getDailyNews(limit);
+    JsonDocument doc;
+    doc["status"] = res.success ? "success" : "error";
+    doc["message"] = res.message;
+    String out;
+    serializeJson(doc, out);
+    server.send(res.success ? 200 : 500, "application/json; charset=utf-8", out);
+  }
+
   void registerRoutes(WebServer& server) {
     server.on("/api/config/ai", HTTP_GET, [&server]() { handleGetAIConfig(server); });
     server.on("/api/config/ai", HTTP_POST, [&server]() { handleSaveAIConfig(server); });
@@ -121,7 +133,8 @@ namespace ApiXiaoZhi {
     server.on("/api/xiaozhi/unbind", HTTP_POST, [&server]() { handleXiaoZhiUnbind(server); });
     server.on("/api/xiaozhi/chat_status", HTTP_GET, [&server]() { handleXiaoZhiChatStatus(server); });
     server.on("/api/xiaozhi/action", HTTP_POST, [&server]() { handleXiaoZhiAction(server); });
+    server.on("/api/news", HTTP_GET, [&server]() { handleGetDailyNews(server); });
+    server.on("/api/daily_news", HTTP_GET, [&server]() { handleGetDailyNews(server); });
   }
 
 } // namespace ApiXiaoZhi
-

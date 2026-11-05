@@ -7,6 +7,12 @@
 #include "drivers/AudioDriver.h"
 #include "drivers/SensorDriver.h"
 #include "tests/TestDisplay.h"
+#include "SystemLogger.h"
+
+#include <WiFi.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
+#include <ArduinoJson.h>
 
 namespace PeripheralControlService {
 
@@ -146,6 +152,80 @@ PeripheralControlResult getPowerStatus() {
                (chg ? (full ? "Đã sạc đầy 100% bão hòa" : "Đang cắm sạc") : "Đang chạy pin") +
                ", Tự động chuyển: " + (autoSw ? "BẬT" : "TẮT") + ".";
   return {true, msg};
+}
+
+PeripheralControlResult getDailyNews(int limit) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return {false, "Thiết bị chưa kết nối Wi-Fi, không thể lấy tin tức."};
+  }
+
+  SystemLogger::log(LOG_LVL_INFO, "NEWS", "Dang tai tin tuc tu Cloudflare Worker...");
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(6000);
+
+  HTTPClient http;
+  http.setTimeout(6000);
+
+  const char* newsUrl = "https://daily-news-feed.chicanemthoi96.workers.dev/";
+  if (!http.begin(client, newsUrl)) {
+    SystemLogger::log(LOG_LVL_ERROR, "NEWS", "Loi khoi tao HTTP client");
+    return {false, "Không thể kết nối tới máy chủ tin tức."};
+  }
+
+  http.addHeader("User-Agent", "ESP32-S3-DecorStation/1.0");
+  int httpCode = http.GET();
+  if (httpCode != HTTP_CODE_OK) {
+    http.end();
+    SystemLogger::log(LOG_LVL_WARN, "NEWS", "HTTP GET that bai, ma phan hoi: %d", httpCode);
+    return {false, "Lấy tin tức thất bại (mã phản hồi: " + String(httpCode) + ")."};
+  }
+
+  String payload = http.getString();
+  http.end();
+
+  if (payload.length() == 0) {
+    return {false, "Phản hồi từ máy chủ tin tức rỗng."};
+  }
+
+  JsonDocument doc;
+  DeserializationError error = deserializeJson(doc, payload);
+  if (error) {
+    SystemLogger::log(LOG_LVL_ERROR, "NEWS", "deserializeJson that bai: %s", error.c_str());
+    return {false, "Không thể giải mã dữ liệu tin tức JSON."};
+  }
+
+  JsonArrayConst newsArr = doc["news"].as<JsonArrayConst>();
+  if (newsArr.isNull() || newsArr.size() == 0) {
+    return {false, "Hiện tại không có tin tức mới."};
+  }
+
+  int maxCount = (limit > 0 && limit <= 5) ? limit : 5;
+  int count = 0;
+  String result = "Bản tin tức hôm nay gồm các tin nổi bật sau:\n";
+
+  for (JsonObjectConst item : newsArr) {
+    const char* title = item["title"] | "";
+    const char* summary = item["summary"] | "";
+    if (strlen(title) == 0) continue;
+
+    count++;
+    result += String(count) + ". " + title;
+    if (strlen(summary) > 0) {
+      result += ": " + String(summary);
+    }
+    result += "\n";
+
+    if (count >= maxCount) break;
+  }
+
+  if (count == 0) {
+    return {false, "Không tìm thấy nội dung tin tức hợp lệ."};
+  }
+
+  SystemLogger::log(LOG_LVL_INFO, "NEWS", "Da lay thanh cong %d ban tin", count);
+  return {true, result};
 }
 
 } // namespace PeripheralControlService
