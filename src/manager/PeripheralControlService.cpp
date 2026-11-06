@@ -154,50 +154,90 @@ PeripheralControlResult getPowerStatus() {
   return {true, msg};
 }
 
+static String s_cachedNewsResult = "";
+static unsigned long s_cachedNewsMs = 0;
+static const unsigned long NEWS_CACHE_TTL_MS = 15 * 60 * 1000UL; // 15 phut
+
 PeripheralControlResult getDailyNews(int limit) {
+  unsigned long now = millis();
+  // Neu da co ban tin cache trong vong 15 phut va noi dung hop le, tra ve ngay tuc thi (0ms latency)!
+  if (s_cachedNewsResult.length() > 0 && (now - s_cachedNewsMs < NEWS_CACHE_TTL_MS)) {
+    SystemLogger::log(LOG_LVL_INFO, "NEWS", "Tra ve ban tin tu RAM cache (TTL con lai: %lu giay)",
+                      (unsigned long)((NEWS_CACHE_TTL_MS - (now - s_cachedNewsMs)) / 1000UL));
+    return {true, s_cachedNewsResult};
+  }
+
   if (WiFi.status() != WL_CONNECTED) {
+    if (s_cachedNewsResult.length() > 0) {
+      return {true, s_cachedNewsResult + "\n(Lưu ý: Thiết bị đang mất mạng, đây là bản tin đã lưu trước đó)."};
+    }
     return {false, "Thiết bị chưa kết nối Wi-Fi, không thể lấy tin tức."};
   }
 
   SystemLogger::log(LOG_LVL_INFO, "NEWS", "Dang tai tin tuc tu Cloudflare Worker...");
 
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(6000);
+  String payload = "";
+  int httpCode = -1;
 
-  HTTPClient http;
-  http.setTimeout(6000);
-
-  const char* newsUrl = "https://daily-news-feed.chicanemthoi96.workers.dev/";
-  if (!http.begin(client, newsUrl)) {
-    SystemLogger::log(LOG_LVL_ERROR, "NEWS", "Loi khoi tao HTTP client");
-    return {false, "Không thể kết nối tới máy chủ tin tức."};
+  // 1. Uu tien dung HTTP cong 80 (WiFiClient sieu nhe, chi ton ~1KB RAM, khong chiem heap SSL cua XiaoZhi)
+  {
+    WiFiClient client;
+    client.setTimeout(5000);
+    HTTPClient http;
+    http.setTimeout(5000);
+    const char* newsUrlHttp = "http://daily-news-feed.chicanemthoi96.workers.dev/";
+    if (http.begin(client, newsUrlHttp)) {
+      http.addHeader("User-Agent", "ESP32-S3-DecorStation/1.0");
+      httpCode = http.GET();
+      if (httpCode == HTTP_CODE_OK) {
+        payload = http.getString();
+      }
+      http.end();
+    }
   }
 
-  http.addHeader("User-Agent", "ESP32-S3-DecorStation/1.0");
-  int httpCode = http.GET();
-  if (httpCode != HTTP_CODE_OK) {
-    http.end();
-    SystemLogger::log(LOG_LVL_WARN, "NEWS", "HTTP GET that bai, ma phan hoi: %d", httpCode);
-    return {false, "Lấy tin tức thất bại (mã phản hồi: " + String(httpCode) + ")."};
+  // 2. Neu HTTP that bai, fallback sang HTTPS (WiFiClientSecure) voi bo dem TLS thu nho
+  if (httpCode != HTTP_CODE_OK || payload.length() == 0) {
+    SystemLogger::log(LOG_LVL_WARN, "NEWS", "HTTP GET port 80 failed (%d). Thu lai qua HTTPS...", httpCode);
+    WiFiClientSecure secureClient;
+    secureClient.setInsecure();
+    secureClient.setTimeout(5000);
+
+    HTTPClient http;
+    http.setTimeout(5000);
+    const char* newsUrlHttps = "https://daily-news-feed.chicanemthoi96.workers.dev/";
+    if (http.begin(secureClient, newsUrlHttps)) {
+      http.addHeader("User-Agent", "ESP32-S3-DecorStation/1.0");
+      httpCode = http.GET();
+      if (httpCode == HTTP_CODE_OK) {
+        payload = http.getString();
+      } else {
+        SystemLogger::log(LOG_LVL_WARN, "NEWS", "HTTPS GET that bai, ma: %d", httpCode);
+      }
+      http.end();
+    }
   }
 
-  String payload = http.getString();
-  http.end();
-
+  // 3. Neu ca 2 deu khong lay duoc payload nhung co cache cu, su dung cache cu thay vi bao loi
   if (payload.length() == 0) {
-    return {false, "Phản hồi từ máy chủ tin tức rỗng."};
+    if (s_cachedNewsResult.length() > 0) {
+      SystemLogger::log(LOG_LVL_WARN, "NEWS", "Khong the lay tin moi, su dung ban tin cache cu");
+      return {true, s_cachedNewsResult};
+    }
+    return {false, "Lấy tin tức thất bại (mã phản hồi: " + String(httpCode) + ")."};
   }
 
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, payload);
   if (error) {
     SystemLogger::log(LOG_LVL_ERROR, "NEWS", "deserializeJson that bai: %s", error.c_str());
+    if (s_cachedNewsResult.length() > 0) return {true, s_cachedNewsResult};
     return {false, "Không thể giải mã dữ liệu tin tức JSON."};
   }
 
   JsonArrayConst newsArr = doc["news"].as<JsonArrayConst>();
   if (newsArr.isNull() || newsArr.size() == 0) {
+    if (s_cachedNewsResult.length() > 0) return {true, s_cachedNewsResult};
     return {false, "Hiện tại không có tin tức mới."};
   }
 
@@ -221,10 +261,15 @@ PeripheralControlResult getDailyNews(int limit) {
   }
 
   if (count == 0) {
+    if (s_cachedNewsResult.length() > 0) return {true, s_cachedNewsResult};
     return {false, "Không tìm thấy nội dung tin tức hợp lệ."};
   }
 
-  SystemLogger::log(LOG_LVL_INFO, "NEWS", "Da lay thanh cong %d ban tin", count);
+  // Luu vao cache
+  s_cachedNewsResult = result;
+  s_cachedNewsMs = millis();
+
+  SystemLogger::log(LOG_LVL_INFO, "NEWS", "Da lay thanh cong %d ban tin moi va cap nhat cache", count);
   return {true, result};
 }
 
