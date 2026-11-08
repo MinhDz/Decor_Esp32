@@ -6290,8 +6290,8 @@ static const char TELEMETRY_WEATHER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       <span style="font-weight:700; color:#38bdf8" id="wp-city">Hà Nội</span>
       <span id="wp-outdoor" style="color:#f8fafc">--°C (--%)</span>
       <span id="wp-indoor-sep" style="color:#475569; display:none;">|</span>
-      <span id="wp-indoor" style="color:#10b981; display:none;">Phòng: --°C</span>
-      <span style="color:#475569">|</span>
+      <span id="wp-indoor" style="color:#10b981; display:none;"></span>
+      <span id="wp-cond-sep" style="color:#475569">|</span>
       <span id="wp-cond" style="color:#94a3b8; font-size:0.72rem">--</span>
       <button class="weather-refresh-btn" id="btn-wp-refresh" onclick="window.refreshWeatherApi()" title="Cập nhật thời tiết Open-Meteo">🔄 Cập nhật</button>
     `;

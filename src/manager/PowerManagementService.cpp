@@ -54,7 +54,7 @@ namespace PowerManagementService {
 
       case POWER_BALANCED:
         targetMhz = 160;
-        targetWifiPs = WIFI_PS_MIN_MODEM;
+        targetWifiPs = WIFI_PS_NONE; // Giữ Wi-Fi luôn phản hồi tức thì (<2ms), tránh router ngắt kết nối web khi chạy lâu
         sensorInterval = 30000; // 30 giây
         sleepTimeout = 300000;  // 5 phút
         break;
@@ -193,7 +193,7 @@ namespace PowerManagementService {
   }
 
   void onWifiConnected() {
-    wifi_ps_type_t ps = (s_currentProfile == POWER_PERFORMANCE) ? WIFI_PS_NONE : WIFI_PS_MIN_MODEM;
+    wifi_ps_type_t ps = (s_currentProfile == POWER_SAVER) ? WIFI_PS_MIN_MODEM : WIFI_PS_NONE;
     esp_wifi_set_ps(ps);
     LOG_I("PWR", "Wi-Fi da ket noi, thiet lap Wi-Fi Power Save: %s", (ps == WIFI_PS_NONE ? "NONE" : "MIN_MODEM"));
   }

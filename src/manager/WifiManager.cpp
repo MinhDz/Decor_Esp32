@@ -1,4 +1,4 @@
-﻿#include "WifiManager.h"
+#include "WifiManager.h"
 #include "services/PowerManagementService.h"
 #include "Config.h"
 #include "HardwareManager.h"
@@ -9,6 +9,7 @@
 #include "OtaManager.h"
 #include "WebRoutes.h"
 #include <WiFi.h>
+#include <WiFiUdp.h>
 #include <esp_wifi.h>
 #include <DNSServer.h>
 #include <LittleFS.h>
@@ -483,6 +484,22 @@ void WifiManager::loop() {
     if (WiFi.status() == WL_CONNECTED) {
       WiFi.setSleep(false);
       esp_wifi_set_ps(WIFI_PS_NONE);
+    }
+  }
+
+  // Giữ sống bảng định tuyến ARP trên Router mỗi 45 giây (chống router ngắt / drop kết nối khi trạm chạy lâu)
+  static unsigned long s_lastArpKeepAlive = 0;
+  if (millis() - s_lastArpKeepAlive > 45000) {
+    s_lastArpKeepAlive = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+      IPAddress gw = WiFi.gatewayIP();
+      if (gw != IPAddress(0, 0, 0, 0)) {
+        WiFiUDP udp;
+        if (udp.beginPacket(gw, 9)) {
+          udp.write((uint8_t)0);
+          udp.endPacket();
+        }
+      }
     }
   }
 

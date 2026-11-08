@@ -2,6 +2,7 @@
 #include "Config.h"
 #include "WifiManager.h"
 #include "WebAuth.h"
+#include "SystemLogger.h"
 #include "tests/TestSDCard.h"
 #include "drivers/StorageDriver.h"
 
@@ -185,10 +186,7 @@ void WebRoutes::begin() {
   }
 }
 
-static unsigned long s_lastClientActiveMs = 0;
-static bool s_clientWasActive = false;
 static IPAddress s_lastKnownIp = IPAddress(0, 0, 0, 0);
-static unsigned long s_lastPeriodicHealthCheckMs = 0;
 
 void WebRoutes::onWifiConnected() {
   IPAddress currentIp = WiFi.localIP();
@@ -199,6 +197,7 @@ void WebRoutes::onWifiConnected() {
 }
 
 void WebRoutes::recoverServer() {
+  SystemLogger::log(LOG_LVL_INFO, "WEB", "Tai khoi dong WebServer & mDNS (Lam moi socket lwIP)...");
   Serial.println("🌐 [WEB WATCHDOG] Tái khởi động WebServer & mDNS để làm mới socket lwIP...");
   server.close();
   server.begin();
@@ -210,9 +209,7 @@ void WebRoutes::recoverServer() {
 }
 
 void WebRoutes::handleClient() {
-  unsigned long now = millis();
-
-  // 1. Giám sát thay đổi IP khi Wi-Fi được cấp phát lại
+  // 1. Giám sát thay đổi IP khi Wi-Fi được cấp phát lại DHCP
   if (WiFi.status() == WL_CONNECTED) {
     IPAddress curIp = WiFi.localIP();
     if (curIp != s_lastKnownIp && curIp != IPAddress(0, 0, 0, 0)) {
@@ -221,32 +218,6 @@ void WebRoutes::handleClient() {
     }
   }
 
-  // 2. Client Watchdog: Diệt các kết nối client bị zombie / treo quá 4.5 giây
-  WiFiClient c = server.client();
-  if (c && c.connected()) {
-    if (!s_clientWasActive) {
-      s_clientWasActive = true;
-      s_lastClientActiveMs = now;
-    } else if (now - s_lastClientActiveMs > 4500) {
-      Serial.println("⚠️ [WEB WATCHDOG] Client chiếm giữ kết nối quá 4.5s -> Cưỡng bức giải phóng socket!");
-      c.stop();
-      s_clientWasActive = false;
-    }
-  } else {
-    s_clientWasActive = false;
-  }
-
-  // 3. Phục vụ request WebServer bình thường
+  // 2. Phục vụ request WebServer bình thường (WebServer tự động quản lý timeout và giải phóng socket chuẩn lwIP)
   server.handleClient();
-
-  // 4. Tự động làm mới socket mỗi 30 phút khi trạm nhàn rỗi (không có client đang kết nối)
-  // để loại bỏ mọi trạng thái treo ngầm hoặc backlog đầy của lwIP
-  if (now - s_lastPeriodicHealthCheckMs > 30 * 60 * 1000) {
-    s_lastPeriodicHealthCheckMs = now;
-    WiFiClient current = server.client();
-    if (!current || !current.connected()) {
-      server.close();
-      server.begin();
-    }
-  }
 }
