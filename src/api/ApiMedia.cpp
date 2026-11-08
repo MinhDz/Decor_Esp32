@@ -23,7 +23,7 @@ namespace ApiMedia {
 
   static uint8_t* s_streamJpegUploadBuf = nullptr;
   static size_t s_streamJpegUploadLen = 0;
-  static const size_t MAX_STREAM_JPEG_UPLOAD = 64 * 1024;
+  static const size_t MAX_STREAM_JPEG_UPLOAD = 128 * 1024; // Nâng lên 128KB chống tràn RAM khi gặp mảng màu phức tạp
   static uint32_t s_logVideoFrameCount = 0;
   static uint32_t s_logAudioPcmChunks = 0;
   static int16_t s_audioCarryByte = -1;

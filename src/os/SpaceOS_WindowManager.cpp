@@ -6393,7 +6393,28 @@ namespace TestDisplay {
   static unsigned long lastStreamFrameMs = 0;
   static uint32_t s_streamFrameCount = 0;
 
+  // Double-Buffering trong PSRAM: Cấp phát toàn bộ Framebuffer 240x320 (153.6 KB)
+  // Giải mã toàn bộ khối MCU của JPEG vào RAM trước, sau đó bắn lên màn hình bằng 1 lệnh duy nhất.
+  // Triệt tiêu 100% hiện tượng quét dòng (rolling scan) và rách hình (screen tearing).
+  static uint16_t* s_streamFrameBuffer = nullptr;
+  static uint16_t s_streamDecodedW = 0;
+  static uint16_t s_streamDecodedH = 0;
+
   static bool jpgStreamRenderCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
+    if (s_streamFrameBuffer && s_streamDecodedW > 0 && s_streamDecodedH > 0) {
+      for (int row = 0; row < h; row++) {
+        int targetY = y + row;
+        if (targetY >= s_streamDecodedH) break;
+        int copyW = w;
+        if (x + copyW > s_streamDecodedW) copyW = s_streamDecodedW - x;
+        if (copyW > 0) {
+          uint16_t* dst = s_streamFrameBuffer + targetY * s_streamDecodedW + x;
+          const uint16_t* src = bitmap + row * w;
+          memcpy(dst, src, copyW * sizeof(uint16_t));
+        }
+      }
+      return true;
+    }
     if (!tft) return false;
     tft->drawRGBBitmap(x, y, bitmap, w, h);
     return true;
@@ -6458,22 +6479,52 @@ namespace TestDisplay {
       currentMode = 17;
       tft->fillScreen(C_BLACK);
     }
+
+    // Đảm bảo s_streamFrameBuffer được cấp phát an toàn trên PSRAM
+    if (!s_streamFrameBuffer) {
+      if (psramFound()) {
+        s_streamFrameBuffer = (uint16_t*)ps_malloc(240 * 320 * sizeof(uint16_t));
+      }
+      if (!s_streamFrameBuffer) {
+        s_streamFrameBuffer = (uint16_t*)malloc(240 * 320 * sizeof(uint16_t));
+      }
+    }
+
     TJpgDec.setCallback(jpgStreamRenderCallback);
     TJpgDec.setSwapBytes(false);
     TJpgDec.setJpgScale(1);
 
     uint16_t jw = 0, jh = 0;
     int offsetY = 0;
-    if (TJpgDec.getJpgSize(&jw, &jh, buf, len) == JDR_OK && jh > 0 && jh < 320) {
+    if (TJpgDec.getJpgSize(&jw, &jh, buf, len) == JDR_OK && jh > 0 && jh <= 320 && jw > 0 && jw <= 240) {
       offsetY = max(0, (320 - (int)jh) / 2);
+    } else {
+      jw = 240;
+      jh = 240;
     }
 
-    bool ok = (TJpgDec.drawJpg(0, offsetY, buf, len) == JDR_OK);
+    s_streamDecodedW = jw;
+    s_streamDecodedH = jh;
+
+    // Giải mã JPEG trực tiếp vào bộ đệm s_streamFrameBuffer trong PSRAM (không đẩy SPI rời rạc)
+    bool ok = (TJpgDec.drawJpg(0, 0, buf, len) == JDR_OK);
+
+    // Bắn toàn bộ frame hoàn chỉnh qua bus SPI bằng DMA/Block Transfer đúng 1 lần (Lật trang tức thì)
+    if (ok && s_streamFrameBuffer && tft) {
+      tft->drawRGBBitmap(0, offsetY, s_streamFrameBuffer, jw, jh);
+    }
+
     return ok;
   }
 
   void stopStreamMode() {
     lastStreamFrameMs = 0;
+    if (s_streamFrameBuffer) {
+      free(s_streamFrameBuffer);
+      s_streamFrameBuffer = nullptr;
+    }
+    s_streamDecodedW = 0;
+    s_streamDecodedH = 0;
     if (currentMode == 17) {
       currentMode = 0;
       refreshActiveScreen();

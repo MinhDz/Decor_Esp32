@@ -49,7 +49,7 @@ CONFIG_FILE = SCRIPT_DIR / "transcoder_config.json"
 def load_config():
     defaults = {
         "esp_ip": "192.168.4.1",
-        "fps": 15,
+        "fps": 20,
         "quality": 5,           # FFmpeg q:v (2-31, 5 tương đương ~75% quality)
         "resolution": "240x240",# 240x240 hoặc 240x320
         "volume": 100,          # 0 - 100%
@@ -464,7 +464,7 @@ class StreamSession:
                 while True:
                     soi = raw_stream.find(b'\xff\xd8')
                     if soi == -1:
-                        if len(raw_stream) > 65536:
+                        if len(raw_stream) > 262144:
                             raw_stream.clear()
                         break
                     eoi = raw_stream.find(b'\xff\xd9', soi + 2)

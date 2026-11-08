@@ -3,6 +3,7 @@
 #include "tests/TestAudio.h"
 #include "Config.h"
 #include "minimp3.h"
+#include "services/PowerManagementService.h"
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -30,7 +31,8 @@ namespace {
   static volatile unsigned long s_lastStopMs = 0;
 
   // Buffer video truyền không đồng bộ an toàn từ Core 0 sang Core 1 (tránh xung đột bus SPI ST7789)
-  static const size_t MAX_STREAM_JPG_SIZE = 64 * 1024;
+  // Tăng lên 128KB để chứa đủ các frame video giàu chi tiết/màu sắc phức tạp mà không bị tràn RAM
+  static const size_t MAX_STREAM_JPG_SIZE = 128 * 1024;
   static uint8_t* s_asyncVideoBuf         = nullptr;
   static size_t   s_asyncVideoLen         = 0;
   static volatile bool s_asyncVideoReady  = false;
@@ -393,6 +395,11 @@ void WebStreamManager::loop() {
 
 bool WebStreamManager::queueVideoFrame(const uint8_t* jpegData, size_t len) {
   if (!jpegData || len == 0 || len > MAX_STREAM_JPG_SIZE) return false;
+
+  // Tự động nâng xung nhịp CPU lên 240MHz để giải mã JPEG và phát video mượt nhất
+  if (getCpuFrequencyMhz() < 240) {
+    setCpuFrequencyMhz(240);
+  }
 
   // Chặn frame video tàn dư trong vòng 1.2s sau khi người dùng bấm dừng stream
   if (millis() - s_lastStopMs < 1200) {
@@ -886,6 +893,13 @@ void WebStreamManager::stopAll() {
   s_audioRingTail = 0;
   s_audioRingCount = 0;
   taskEXIT_CRITICAL(&s_audioRingMux);
+
+  // Khôi phục tần số CPU về cấu hình nguồn tương ứng (tránh lãng phí pin sau khi stream)
+  PowerProfile prof = PowerManagementService::getProfile();
+  uint32_t targetMhz = (prof == POWER_PERFORMANCE) ? 240 : ((prof == POWER_BALANCED) ? 160 : 80);
+  if (getCpuFrequencyMhz() != targetMhz) {
+    setCpuFrequencyMhz(targetMhz);
+  }
 }
 
 bool WebStreamManager::isStreamSessionActive() {
