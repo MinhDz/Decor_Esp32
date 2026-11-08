@@ -413,15 +413,30 @@ class StreamSession:
 
         # Thử mở kết nối TCP Video tốc độ cao tới ESP32 (Port 12346)
         tcp_video_sock = None
-        try:
-            tcp_video_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            tcp_video_sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-            tcp_video_sock.settimeout(2.0)
-            tcp_video_sock.connect((self.esp_ip, 12346))
-            logger.info(f"⚡ Đã kết nối luồng Video TCP tốc độ cao (Port 12346): {self.esp_ip}")
-        except Exception as e:
-            logger.warning(f"Chưa kết nối được TCP 12346 ({e}), dùng HTTP POST fallback.")
-            tcp_video_sock = None
+        last_tcp_attempt = 0
+
+        def get_tcp_sock():
+            nonlocal tcp_video_sock, last_tcp_attempt
+            if tcp_video_sock is not None:
+                return tcp_video_sock
+            now_t = time.time()
+            if now_t - last_tcp_attempt < 1.0:
+                return None
+            last_tcp_attempt = now_t
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                s.settimeout(2.0)
+                s.connect((self.esp_ip, 12346))
+                tcp_video_sock = s
+                logger.info(f"⚡ [TCP VIDEO] Đã kết nối luồng Video TCP tốc độ cao (Port 12346): {self.esp_ip}")
+                return tcp_video_sock
+            except Exception as e:
+                tcp_video_sock = None
+                return None
+
+        # Thử kết nối lần đầu
+        get_tcp_sock()
 
         raw_stream = bytearray()
         frame_idx = 0
@@ -429,6 +444,7 @@ class StreamSession:
         start_time = self.start_time
         fps_frame_count = 0
         fps_timer = time.time()
+        consecutive_drops = 0
 
         logger.info(f"Khởi chạy luồng Video Worker (MJPEG {self.resolution} @ {self.fps} FPS, Master-Clock Synced)...")
 
@@ -470,35 +486,54 @@ class StreamSession:
                     master_clock = self.audio_pts if self.audio_pts > 0 else (now - start_time)
                     drift = video_pts - master_clock
 
+                    # Nếu video bị trễ hơn 250ms (do lag mạng, TCP đứt hoặc buffering), lập tức resync để chống drop dây chuyền!
+                    if drift < -0.25:
+                        start_time = now - (frame_idx / target_fps)
+                        if self.audio_pts > 0:
+                            self.audio_pts = video_pts
+                        drift = 0
+                        consecutive_drops = 0
+
                     # Trường hợp 1: Video bị trễ hơn âm thanh > 50ms (Frame cũ)
-                    # Bỏ qua ngay lập tức trong 0.01ms để vòng lặp đọc nhanh đuổi kịp âm thanh!
                     if drift < -0.05:
-                        self.video_frames_dropped += 1
-                        continue
+                        consecutive_drops += 1
+                        # Nếu drop liên tiếp quá 3 frame: ép gửi ngay frame này và resync
+                        if consecutive_drops > 3:
+                            consecutive_drops = 0
+                            start_time = now - (frame_idx / target_fps)
+                            if self.audio_pts > 0:
+                                self.audio_pts = video_pts
+                        else:
+                            self.video_frames_dropped += 1
+                            continue
+                    else:
+                        consecutive_drops = 0
 
                     # Trường hợp 2: Video chạy nhanh hơn âm thanh > 20ms -> Chờ nhịp âm thanh
                     if drift > 0.02:
-                        time.sleep(drift)
+                        time.sleep(min(drift, 0.2))
 
                     # Trường hợp 3: Khớp nhịp chuẩn -> Gửi frame xuống ESP32
                     sent_ok = False
-                    if tcp_video_sock:
+                    sock = get_tcp_sock()
+                    if sock:
                         try:
                             payload = struct.pack("!I", len(frame_bytes)) + frame_bytes
-                            tcp_video_sock.sendall(payload)
+                            sock.sendall(payload)
                             sent_ok = True
                         except Exception as err:
-                            logger.warning(f"Lỗi socket TCP Video ({err}), chuyển sang HTTP POST")
+                            logger.warning(f"Lỗi socket TCP Video ({err}), đóng socket để tự động kết nối lại...")
                             try:
-                                tcp_video_sock.close()
+                                sock.close()
                             except Exception:
                                 pass
                             tcp_video_sock = None
 
                     if not sent_ok:
                         try:
-                            files = {'f': ('frame.jpg', frame_bytes, 'image/jpeg')}
-                            resp = session.post(target_url, files=files, timeout=1.0)
+                            # Fallback HTTP POST nhanh (gửi raw binary JPEG)
+                            headers = {'Content-Type': 'application/octet-stream'}
+                            resp = session.post(target_url, data=frame_bytes, headers=headers, timeout=0.8)
                             if resp.status_code == 200:
                                 sent_ok = True
                         except Exception:

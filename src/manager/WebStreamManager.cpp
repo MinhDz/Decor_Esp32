@@ -625,6 +625,22 @@ static TaskHandle_t s_videoTcpTaskHandle  = nullptr;
 static volatile bool s_videoTcpRunning    = false;
 static int s_videoTcpServerSock           = -1;
 
+static bool recvAllExact(int sock, uint8_t* dest, size_t targetLen) {
+  size_t got = 0;
+  while (got < targetLen && s_videoTcpRunning) {
+    int n = recv(sock, (char*)(dest + got), targetLen - got, 0);
+    if (n <= 0) {
+      if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        continue;
+      }
+      return false;
+    }
+    got += n;
+  }
+  return (got == targetLen);
+}
+
 static void videoTcpTask(void* param) {
   Serial.println("🎬 [TCP VIDEO] Task lắng nghe Video TCP đã khởi tạo trên Core 0...");
 
@@ -687,33 +703,34 @@ static void videoTcpTask(void* param) {
       int nodelay = 1;
       setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
       struct timeval tv;
-      tv.tv_sec = 4;
+      tv.tv_sec = 10;
       tv.tv_usec = 0;
       setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
       int rcvbuf = 65536;
       setsockopt(clientSock, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
 
+      int keepAlive = 1;
+      int keepIdle = 5;
+      int keepInterval = 2;
+      int keepCount = 3;
+      setsockopt(clientSock, SOL_SOCKET, SO_KEEPALIVE, &keepAlive, sizeof(keepAlive));
+      setsockopt(clientSock, IPPROTO_TCP, TCP_KEEPIDLE, &keepIdle, sizeof(keepIdle));
+      setsockopt(clientSock, IPPROTO_TCP, TCP_KEEPINTVL, &keepInterval, sizeof(keepInterval));
+      setsockopt(clientSock, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(keepCount));
+
       Serial.println("⚡ [TCP VIDEO] Transcoder đã kết nối luồng Video trực tiếp tốc độ cao!");
 
       while (s_videoTcpRunning) {
         uint32_t netLen = 0;
-        int r = recv(clientSock, (char*)&netLen, 4, MSG_WAITALL);
-        if (r != 4) break;
+        if (!recvAllExact(clientSock, (uint8_t*)&netLen, 4)) break;
 
         uint32_t frameLen = ntohl(netLen);
         if (frameLen == 0 || frameLen > MAX_STREAM_JPG_SIZE) {
+          Serial.printf("⚠️ [TCP VIDEO] Kích thước frame không hợp lệ: %u bytes\n", (unsigned)frameLen);
           break;
         }
 
-        size_t totalReceived = 0;
-        bool ok = true;
-        while (totalReceived < frameLen && s_videoTcpRunning) {
-          int n = recv(clientSock, (char*)(tcpFrameBuf + totalReceived), frameLen - totalReceived, 0);
-          if (n <= 0) { ok = false; break; }
-          totalReceived += n;
-        }
-
-        if (!ok) break;
+        if (!recvAllExact(clientSock, tcpFrameBuf, frameLen)) break;
 
         WebStreamManager::queueVideoFrame(tcpFrameBuf, frameLen);
       }

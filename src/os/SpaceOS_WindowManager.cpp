@@ -6456,11 +6456,19 @@ namespace TestDisplay {
     }
     if (currentMode != 17) {
       currentMode = 17;
+      tft->fillScreen(C_BLACK);
     }
     TJpgDec.setCallback(jpgStreamRenderCallback);
     TJpgDec.setSwapBytes(false);
     TJpgDec.setJpgScale(1);
-    bool ok = (TJpgDec.drawJpg(0, 0, buf, len) == JDR_OK);
+
+    uint16_t jw = 0, jh = 0;
+    int offsetY = 0;
+    if (TJpgDec.getJpgSize(&jw, &jh, buf, len) == JDR_OK && jh > 0 && jh < 320) {
+      offsetY = max(0, (320 - (int)jh) / 2);
+    }
+
+    bool ok = (TJpgDec.drawJpg(0, offsetY, buf, len) == JDR_OK);
     return ok;
   }
 
@@ -9137,7 +9145,7 @@ namespace TestDisplay {
 
       if (currentMode == 0) {
         updateStandbyClockDigits(false);
-      } else if (currentMode == 17 && (now - lastStreamFrameMs >= 8000)) {
+      } else if (currentMode == 17 && !WebStreamManager::isAudioStreaming() && (now - lastStreamFrameMs >= 20000)) {
         stopStreamMode();
       } else if (currentMode == 2) {
         drawPcHudScreen(false);

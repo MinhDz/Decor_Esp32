@@ -1,4 +1,4 @@
-#pragma once
+﻿#pragma once
 #include <Arduino.h>
 
 static const char SD_CONVERTER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
@@ -837,7 +837,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           <span style="font-size:0.74rem;color:#f43f5e;font-weight:700;background:rgba(244,63,94,0.15);padding:2px 8px;border-radius:4px;border:1px solid rgba(244,63,94,0.3);">MÈO CHIBI DEFAULT</span>
         </div>
         <div style="font-size:0.78rem;color:#94a3b8;margin-bottom:14px;line-height:1.6;">
-          Khôi phục toàn bộ cài đặt của trạm về nguyên bản ban đầu: Xóa toàn bộ tùy chỉnh người dùng, đặt lại âm lượng thông báo (70%), hiệu ứng đèn LED, mật khẩu quản trị Web về mặc định (<strong>admin / admin</strong>), và tự động kích hoạt giao diện mặc định <strong>MÈO GOME CHIBI</strong> trên màn hình trạm.
+          Khôi phục toàn bộ cài đặt của trạm về nguyên bản ban đầu: Xóa toàn bộ tùy chỉnh người dùng, đặt lại âm lượng thông báo (70%), hiệu ứng đèn LED, mật khẩu quản trị Web về mặc định, và tự động kích hoạt giao diện mặc định <strong>MÈO GOME CHIBI</strong> trên màn hình trạm.
         </div>
         <div style="display:flex;justify-content:flex-end;">
           <button class="btn-primary" style="background:#e11d48;border-color:#f43f5e;width:auto;padding:8px 20px;font-size:0.82rem;font-weight:700;box-shadow:0 0 12px rgba(225,29,72,0.4);" onclick="window.performFactoryResetWeb()">
@@ -1329,7 +1329,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     { cmd: "snapshot", display: "snapshot", type: "ACT", badge: "badge-act", desc: "Ghi bản chụp nhật ký & phần cứng ra thẻ nhớ SD", syntax: "snapshot" },
     { cmd: "clear", display: "clear", type: "CMD", badge: "badge-cmd", desc: "Xóa sạch nội dung hiển thị trên màn hình Terminal Web", syntax: "clear" },
     { cmd: "reboot", display: "reboot", type: "CMD", badge: "badge-cmd", desc: "Khởi động lại vi điều khiển ESP32-S3 từ xa", syntax: "reboot" },
-    { cmd: "factory-reset", display: "factory-reset", type: "ACT", badge: "badge-act", desc: "Khôi phục cài đặt gốc ban đầu (Theme Mèo Chibi và admin/admin)", syntax: "factory-reset" },
+    { cmd: "factory-reset", display: "factory-reset", type: "ACT", badge: "badge-act", desc: "Khôi phục cài đặt gốc ban đầu (Theme Mèo Chibi)", syntax: "factory-reset" },
     { cmd: "help", display: "help", type: "CMD", badge: "badge-cmd", desc: "Xem hướng dẫn chi tiết và danh mục toàn bộ lệnh CLI", syntax: "help" }
   ];
 
@@ -6871,10 +6871,6 @@ input.spaceos-auth-input[type="password"]:focus {
       <button type="submit" id="spaceos-login-btn" class="spaceos-auth-btn">🚀 ĐĂNG NHẬP HỆ THỐNG</button>
     </form>
 
-    <div class="spaceos-auth-hint">
-      💡 Tài khoản ban đầu: <strong>admin</strong> / <strong>admin</strong><br>
-      (Bạn có thể đổi mật khẩu bất kỳ lúc nào sau khi đăng nhập)
-    </div>
   </div>
 </div>
 
@@ -7111,7 +7107,7 @@ input.spaceos-auth-input[type="password"]:focus {
     const cf = confirm('⚠️ CẢNH BÁO KHÔI PHỤC CÀI ĐẶT GỐC:\n\n' +
                      'Toàn bộ tùy chỉnh cá nhân sẽ bị xóa!\n' +
                      '- Giao diện màn hình trạm sẽ chuyển về MÈO GOME CHIBI\n' +
-                     '- Tài khoản đăng nhập Web sẽ khôi phục về admin / admin\n' +
+                     '- Tài khoản đăng nhập Web sẽ khôi phục\n' +
                      '- Đặt lại âm lượng (70%) và cấu hình hệ thống ban đầu.\n\n' +
                      'Bạn có chắc chắn muốn thực hiện không?');
     if (!cf) return;
