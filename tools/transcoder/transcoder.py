@@ -530,16 +530,8 @@ class StreamSession:
                             tcp_video_sock = None
 
                     if not sent_ok:
-                        try:
-                            # Fallback HTTP POST nhanh (gửi raw binary JPEG)
-                            headers = {'Content-Type': 'application/octet-stream'}
-                            resp = session.post(target_url, data=frame_bytes, headers=headers, timeout=0.8)
-                            if resp.status_code == 200:
-                                sent_ok = True
-                        except Exception:
-                            pass
-
-                    if sent_ok:
+                        self.video_frames_dropped += 1
+                    else:
                         self.video_frames_sent += 1
                         fps_frame_count += 1
 

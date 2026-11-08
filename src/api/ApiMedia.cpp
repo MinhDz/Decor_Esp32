@@ -533,6 +533,10 @@ namespace ApiMedia {
   }
 
   void handleStreamVideoFinish(WebServer& server) {
+    if (ESP.getFreeHeap() < 40000) {
+      server.send(503, "text/plain", "Low Heap");
+      return;
+    }
     if (server.hasArg("plain")) {
       const String& body = server.arg("plain");
       if (body.length() > 100) {

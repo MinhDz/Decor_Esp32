@@ -394,11 +394,12 @@ void WebStreamManager::loop() {
 }
 
 bool WebStreamManager::queueVideoFrame(const uint8_t* jpegData, size_t len) {
-  if (!jpegData || len == 0 || len > MAX_STREAM_JPG_SIZE) return false;
+  if (!jpegData || len < 4 || len > MAX_STREAM_JPG_SIZE) return false;
 
-  // Tự động nâng xung nhịp CPU lên 240MHz để giải mã JPEG và phát video mượt nhất
-  if (getCpuFrequencyMhz() < 240) {
-    setCpuFrequencyMhz(240);
+  // Kiểm tra header JPEG (SOI: 0xFF, 0xD8) để loại bỏ ngay frame rác / trống
+  if (jpegData[0] != 0xFF || jpegData[1] != 0xD8) {
+    s_videoFramesDropped++;
+    return false;
   }
 
   // Chặn frame video tàn dư trong vòng 1.2s sau khi người dùng bấm dừng stream
@@ -713,7 +714,7 @@ static void videoTcpTask(void* param) {
       tv.tv_sec = 10;
       tv.tv_usec = 0;
       setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-      int rcvbuf = 65536;
+      int rcvbuf = 16384; // 16KB an toàn, không chiếm dụng cạn kiệt Internal SRAM Heap của ESP32
       setsockopt(clientSock, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
 
       int keepAlive = 1;
@@ -893,13 +894,6 @@ void WebStreamManager::stopAll() {
   s_audioRingTail = 0;
   s_audioRingCount = 0;
   taskEXIT_CRITICAL(&s_audioRingMux);
-
-  // Khôi phục tần số CPU về cấu hình nguồn tương ứng (tránh lãng phí pin sau khi stream)
-  PowerProfile prof = PowerManagementService::getProfile();
-  uint32_t targetMhz = (prof == POWER_PERFORMANCE) ? 240 : ((prof == POWER_BALANCED) ? 160 : 80);
-  if (getCpuFrequencyMhz() != targetMhz) {
-    setCpuFrequencyMhz(targetMhz);
-  }
 }
 
 bool WebStreamManager::isStreamSessionActive() {

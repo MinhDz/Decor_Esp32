@@ -6401,22 +6401,44 @@ namespace TestDisplay {
   static uint16_t s_streamDecodedH = 0;
 
   static bool jpgStreamRenderCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-    if (s_streamFrameBuffer && s_streamDecodedW > 0 && s_streamDecodedH > 0) {
-      for (int row = 0; row < h; row++) {
-        int targetY = y + row;
-        if (targetY >= s_streamDecodedH) break;
-        int copyW = w;
-        if (x + copyW > s_streamDecodedW) copyW = s_streamDecodedW - x;
-        if (copyW > 0) {
-          uint16_t* dst = s_streamFrameBuffer + targetY * s_streamDecodedW + x;
-          const uint16_t* src = bitmap + row * w;
+    if (!s_streamFrameBuffer || !bitmap || w == 0 || h == 0) return false;
+    if (s_streamDecodedW == 0 || s_streamDecodedH == 0) return false;
+
+    // Kích thước tối đa của toàn bộ Framebuffer
+    const int maxW = 240;
+    const int maxH = 320;
+    const size_t maxPixels = (size_t)maxW * maxH;
+
+    // Giới hạn biên an toàn tuyệt đối
+    int stride = s_streamDecodedW;
+    if (stride > maxW) stride = maxW;
+
+    for (int row = 0; row < h; row++) {
+      int targetY = y + row;
+      if (targetY < 0 || targetY >= s_streamDecodedH || targetY >= maxH) continue;
+
+      int startX = x;
+      int srcOffset = row * w;
+      int copyW = w;
+
+      if (startX < 0) {
+        copyW += startX;
+        srcOffset -= startX;
+        startX = 0;
+      }
+      if (startX + copyW > stride) {
+        copyW = stride - startX;
+      }
+
+      if (copyW > 0) {
+        size_t pixelIndex = (size_t)targetY * stride + startX;
+        if (pixelIndex + copyW <= maxPixels) {
+          uint16_t* dst = s_streamFrameBuffer + pixelIndex;
+          const uint16_t* src = bitmap + srcOffset;
           memcpy(dst, src, copyW * sizeof(uint16_t));
         }
       }
-      return true;
     }
-    if (!tft) return false;
-    tft->drawRGBBitmap(x, y, bitmap, w, h);
     return true;
   }
 
@@ -6464,10 +6486,16 @@ namespace TestDisplay {
   }
 
   bool drawStreamJpegFrame(const uint8_t* buf, size_t len) {
-    if (!tft || !buf || len == 0) return false;
+    if (!tft || !buf || len < 4) return false;
     if (currentMode != 17 && !WebStreamManager::isStreamSessionActive()) {
       return false;
     }
+
+    // Kiểm tra header JPEG cơ bản (SOI: 0xFF, 0xD8)
+    if (buf[0] != 0xFF || buf[1] != 0xD8) {
+      return false;
+    }
+
     lastUserActivityMs = millis();
     lastStreamFrameMs = millis();
     s_streamFrameCount++;
@@ -6488,21 +6516,23 @@ namespace TestDisplay {
       if (!s_streamFrameBuffer) {
         s_streamFrameBuffer = (uint16_t*)malloc(240 * 320 * sizeof(uint16_t));
       }
+      if (s_streamFrameBuffer) {
+        memset(s_streamFrameBuffer, 0, 240 * 320 * sizeof(uint16_t));
+      }
     }
+    if (!s_streamFrameBuffer) return false;
 
     TJpgDec.setCallback(jpgStreamRenderCallback);
     TJpgDec.setSwapBytes(false);
     TJpgDec.setJpgScale(1);
 
     uint16_t jw = 0, jh = 0;
-    int offsetY = 0;
-    if (TJpgDec.getJpgSize(&jw, &jh, buf, len) == JDR_OK && jh > 0 && jh <= 320 && jw > 0 && jw <= 240) {
-      offsetY = max(0, (320 - (int)jh) / 2);
-    } else {
-      jw = 240;
-      jh = 240;
+    // BẮT BUỘC getJpgSize PHẢI THÀNH CÔNG! Nếu dữ liệu bị rách/lỗi header, bỏ qua ngay frame này tránh crash
+    if (TJpgDec.getJpgSize(&jw, &jh, buf, len) != JDR_OK || jw == 0 || jh == 0 || jw > 240 || jh > 320) {
+      return false;
     }
 
+    int offsetY = max(0, (320 - (int)jh) / 2);
     s_streamDecodedW = jw;
     s_streamDecodedH = jh;
 
@@ -6519,12 +6549,7 @@ namespace TestDisplay {
 
   void stopStreamMode() {
     lastStreamFrameMs = 0;
-    if (s_streamFrameBuffer) {
-      free(s_streamFrameBuffer);
-      s_streamFrameBuffer = nullptr;
-    }
-    s_streamDecodedW = 0;
-    s_streamDecodedH = 0;
+    // Không free s_streamFrameBuffer ngay lập tức ở đây để tránh race condition khi frame đang decode
     if (currentMode == 17) {
       currentMode = 0;
       refreshActiveScreen();
