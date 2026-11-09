@@ -3436,29 +3436,6 @@ static const char STREAM_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
             </div>
           </div>
 
-          <!-- THẺ 2: STREAM ÂM THANH XUỐNG LOA MAX98357A -->
-          <div class="stream-card">
-            <div class="stream-card-title">
-              <span>🎵 Stream Âm Thanh Ra Loa I2S DAC</span>
-              <span style="font-size:0.72rem;color:#facc15;">MAX98357A (16kHz PCM)</span>
-            </div>
-
-            <div class="stream-btn-grid">
-              <button class="stream-btn" id="btn-stream-mic" onclick="window.startMicAudioStream()">
-                🎙️ Bật Micro / Audio PC
-              </button>
-              <button class="stream-btn btn-stop" id="btn-stream-stop-audio" onclick="window.stopAudioStream()">
-                ⏹️ Dừng Audio Stream
-              </button>
-            </div>
-
-            <div style="display:flex;align-items:center;justify-content:space-between;background:#0b0f19;border-radius:8px;padding:10px;margin-top:8px;">
-              <span style="font-size:0.74rem;color:#94a3b8;">Âm lượng Loa ESP32:</span>
-              <input type="range" id="stream-spk-vol" min="0" max="100" value="75" style="width:140px;" oninput="window.setSpeakerVolume(this.value)">
-              <span id="stream-vol-val" style="color:#10b981;font-weight:700;font-size:0.74rem;">75%</span>
-            </div>
-          </div>
-
           <!-- THẺ 4: TRẠM CHUYỂN MÃ PC (PC TRANSCODER FOR YOUTUBE & WEB LINK) -->
           <div class="stream-card" style="border:1px solid rgba(6,182,212,0.4);background:rgba(6,182,212,0.03);">
             <div class="stream-card-title">

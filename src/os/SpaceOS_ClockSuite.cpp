@@ -1,6 +1,7 @@
 #include "SpaceOS_ClockSuite.h"
 #include "drivers/AudioDriver.h"
 #include "TimeManager.h"
+#include "services/PowerManagementService.h"
 #include <Preferences.h>
 #include <sys/time.h>
 #include <time.h>
@@ -163,6 +164,7 @@ namespace SpaceOS_ClockSuite {
   }
 
   void triggerPushAlert(uint8_t alertType, uint8_t alarmIdx, const String& title, const String& subTitle, const String& bigDigits) {
+    PowerManagementService::notifyUserActivity();
     if (s_shell.wakeScreen) s_shell.wakeScreen();
 
     s40PushAlertActive     = true;

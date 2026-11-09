@@ -12,6 +12,10 @@ public:
   static void onWifiConnected();
   static void recoverServer();
 
+  // Kích hoạt làm mới Web Server khi trạm được đánh thức (TTP223, Keypad, Báo thức, XiaoZhi)
+  static void onStationWakeup();
+  static void markWebActivity();
+
   // Thu hồi bộ nhớ upload JPEG khi nhàn rỗi (Memory Scavenger)
   static size_t trimMemory();
   static bool hasAllocatedUploadBuffer();

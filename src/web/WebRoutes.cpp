@@ -38,6 +38,7 @@ size_t WebRoutes::trimMemory() {
 // ---------------- PHỤC VỤ TRANG GIAO DIỆN CHỦ & SCRIPT INJECTION ----------------
 
 static void handleRoot() {
+  WebRoutes::markWebActivity();
   if (LittleFS.exists("/index.html")) {
     File file = LittleFS.open("/index.html", "r");
     server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
@@ -46,22 +47,35 @@ static void handleRoot() {
     server.sendHeader("Connection", "close");
     server.setContentLength(CONTENT_LENGTH_UNKNOWN);
     server.send(200, "text/html", "");
-    uint8_t buf[1024];
+    uint8_t buf[2048];
     while (file.available()) {
+      if (!server.client().connected()) {
+        file.close();
+        return;
+      }
       size_t n = file.read(buf, sizeof(buf));
       if (n > 0) server.sendContent((const char*)buf, n);
     }
     file.close();
-    server.sendContent_P(SD_CONVERTER_INJECT_SCRIPT);
-    server.sendContent_P(MEDIA_PAGE_INJECT_SCRIPT);
-    server.sendContent_P(XIAOZHI_CHAT_INJECT_SCRIPT);
-    server.sendContent_P(STREAM_PAGE_INJECT_SCRIPT);
-    server.sendContent_P(DECOR_PAGE_INJECT_SCRIPT);
-    server.sendContent_P(KEYPAD_PAGE_INJECT_SCRIPT);
-    server.sendContent_P(TELEMETRY_WEATHER_INJECT_SCRIPT);
-    server.sendContent_P(AUTH_FACTORY_INJECT_SCRIPT);
-    server.sendContent_P(EMOJI_STYLE_INJECT_SCRIPT);
-    server.sendContent("");
+
+    const char* scripts[] = {
+      SD_CONVERTER_INJECT_SCRIPT,
+      MEDIA_PAGE_INJECT_SCRIPT,
+      XIAOZHI_CHAT_INJECT_SCRIPT,
+      STREAM_PAGE_INJECT_SCRIPT,
+      DECOR_PAGE_INJECT_SCRIPT,
+      KEYPAD_PAGE_INJECT_SCRIPT,
+      TELEMETRY_WEATHER_INJECT_SCRIPT,
+      AUTH_FACTORY_INJECT_SCRIPT,
+      EMOJI_STYLE_INJECT_SCRIPT
+    };
+    for (const char* scr : scripts) {
+      if (!server.client().connected()) return;
+      server.sendContent_P(scr);
+    }
+    if (server.client().connected()) {
+      server.sendContent("");
+    }
   } else {
     server.send(404, "text/plain", "Chưa tìm thấy index.html trên LittleFS!");
   }
@@ -187,6 +201,17 @@ void WebRoutes::begin() {
 }
 
 static IPAddress s_lastKnownIp = IPAddress(0, 0, 0, 0);
+static volatile bool s_needWakeupRecovery = false;
+static unsigned long s_lastWebActivityMs = 0;
+static unsigned long s_lastAutoHealCheckMs = 0;
+
+void WebRoutes::markWebActivity() {
+  s_lastWebActivityMs = millis();
+}
+
+void WebRoutes::onStationWakeup() {
+  s_needWakeupRecovery = true;
+}
 
 void WebRoutes::onWifiConnected() {
   IPAddress currentIp = WiFi.localIP();
@@ -209,7 +234,17 @@ void WebRoutes::recoverServer() {
 }
 
 void WebRoutes::handleClient() {
-  // 1. Giám sát thay đổi IP khi Wi-Fi được cấp phát lại DHCP
+  unsigned long now = millis();
+
+  // 1. Nếu có tín hiệu đánh thức trạm từ cảm biến / phím bấm / báo thức: Làm mới socket ngay lập tức!
+  if (s_needWakeupRecovery) {
+    s_needWakeupRecovery = false;
+    SystemLogger::log(LOG_LVL_INFO, "WEB", "Tram duoc danh thuc -> Lam moi WebServer & socket lwIP");
+    Serial.println("🌐 [WEB WAKEUP] Trạm được đánh thức -> Tái tạo WebServer & socket lwIP sẵn sàng phục vụ!");
+    recoverServer();
+  }
+
+  // 2. Giám sát thay đổi IP khi Wi-Fi được cấp phát lại DHCP
   if (WiFi.status() == WL_CONNECTED) {
     IPAddress curIp = WiFi.localIP();
     if (curIp != s_lastKnownIp && curIp != IPAddress(0, 0, 0, 0)) {
@@ -218,6 +253,16 @@ void WebRoutes::handleClient() {
     }
   }
 
-  // 2. Phục vụ request WebServer bình thường (WebServer tự động quản lý timeout và giải phóng socket chuẩn lwIP)
+  // 3. Cơ chế Tuần tra Tự Chữa Lành Định Kỳ (Auto-Heal Watchdog mỗi 20 phút nhàn rỗi)
+  // Ngăn chặn 100% tình trạng rác socket / TIME_WAIT sau nhiều giờ chạy không tải
+  if (now - s_lastAutoHealCheckMs >= 60000) {
+    s_lastAutoHealCheckMs = now;
+    if (s_lastWebActivityMs > 0 && (now - s_lastWebActivityMs >= 1200000)) {
+      s_lastWebActivityMs = now;
+      recoverServer();
+    }
+  }
+
+  // 4. Phục vụ request WebServer bình thường (WebServer tự động quản lý timeout và giải phóng socket chuẩn lwIP)
   server.handleClient();
 }

@@ -9,6 +9,7 @@
 #include "tests/TestDisplay.h"
 #include "WebStreamManager.h"
 #include "XiaoZhiClient.h"
+#include "WebRoutes.h"
 #include <WiFi.h>
 #include <esp_wifi.h>
 #include <Preferences.h>
@@ -183,9 +184,21 @@ namespace PowerManagementService {
 
   void notifyUserActivity() {
     s_lastUserActivityMs = millis();
-    if (DisplayDriver::isSleeping()) {
+    bool wasSleeping = DisplayDriver::isSleeping();
+    if (wasSleeping) {
       DisplayDriver::wakeUpScreenFromTask();
       LOG_I("PWR", "Danh thuc man hinh tu dong do co tuong tac nguoi dung!");
+    }
+
+    // Luôn đưa Wi-Fi về chế độ phản hồi tức thì (<2ms) khi có tương tác người dùng
+    if (WiFi.status() == WL_CONNECTED) {
+      WiFi.setSleep(false);
+      esp_wifi_set_ps(WIFI_PS_NONE);
+    }
+
+    // Đánh thức Web Server & làm mới socket lwIP khi trạm vừa thức dậy từ chế độ ngủ
+    if (wasSleeping) {
+      WebRoutes::onStationWakeup();
     }
   }
 

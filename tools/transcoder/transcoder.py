@@ -73,6 +73,12 @@ def save_config(cfg):
 
 # Tìm kiếm binary FFmpeg và Node.js
 def find_ffmpeg():
+    # 0. Thử ngay thư mục cạnh file .exe hoặc script
+    app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    local_ffmpeg = os.path.join(app_dir, "ffmpeg.exe")
+    if os.path.exists(local_ffmpeg):
+        return local_ffmpeg
+
     # 1. Thử từ imageio_ffmpeg
     try:
         import imageio_ffmpeg
@@ -106,6 +112,11 @@ def find_node():
     return None
 
 def find_yt_dlp_cmd():
+    app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+    local_ytdlp = os.path.join(app_dir, "yt-dlp.exe")
+    if os.path.exists(local_ytdlp):
+        return [local_ytdlp]
+
     import shutil
     sys_ytdlp = shutil.which("yt-dlp")
     if sys_ytdlp:

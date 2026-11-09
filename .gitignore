@@ -43,4 +43,9 @@ assets/drive_sync/*
 # Local logs
 log/
 
+# Python packaging & Companion App
+tools/companion/build/
+tools/companion/dist/
+*.spec
+
 
