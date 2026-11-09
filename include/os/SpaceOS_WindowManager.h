@@ -53,6 +53,9 @@ namespace TestDisplay {
   // Cập nhật nhiệt độ & độ ẩm thực từ cảm biến SHT31 (GPIO 8, 9) lên Màn Hình Chờ
   void updateLiveWeather(float tempC, float humPct);
 
+  // Chuyển sang hình nền tiếp theo / trước đó trong thẻ nhớ SD & LittleFS
+  void cycleStandbyWallpaper(int dir = 1);
+
   // Điều khiển chuyển màn hình / kiểu HUD từ phím cứng & cảm biến chạm TTP223
   void cycleScreenMode();
   void cycleHudStyle(int dir = 1);
@@ -70,6 +73,8 @@ namespace TestDisplay {
   int  getBacklightBrightness();
 
   // --- ĐỒNG BỘ & ĐIỀU KHIỂN TRÌNH PHÁT NHẠC ĐA PHƯƠNG TIỆN (MODE 12 <-> WEB UI) ---
+  void setWaitForAiTtsToPlayMedia(bool wait);
+  bool isWaitingForAiTtsToPlayMedia();
   void getMediaPlayerState(String& trackName, int& trackIdx, int& trackCount, bool& playing,
                            uint8_t& visMode, uint8_t& repeatMode, uint16_t& curSec,
                            uint16_t& totalSec, int& volumePct, bool& fromSd);

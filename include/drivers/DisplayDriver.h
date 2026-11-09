@@ -66,6 +66,13 @@ namespace DisplayDriver {
   SPIClass*& getSpiBusRef();
 
   // ============================================================================
+  // FAST HARDWARE SPI BLOCK TRANSFER (Direct 32-bit Registers & Auto Endian Swap)
+  // Tốc độ cao gấp 3-4 lần drawRGBBitmap mặc định của Adafruit_GFX,
+  // đẩy toàn bộ khối pixel qua SPI hardware 80MHz trong ~11ms cho frame 240x240!
+  // ============================================================================
+  void fastBlockTransfer(int16_t x, int16_t y, const uint16_t* bitmap, int16_t w, int16_t h);
+
+  // ============================================================================
   // LỚP CANVAS 16-BIT RGB565 TOÀN KHUNG HÌNH (240x320) NẰM TRÊN BỘ NHỚ PSRAM
   // Hỗ trợ Double-Buffering 2 tầng, memcpy dòng cực nhanh & SPI 80MHz Non-blocking
   // ============================================================================

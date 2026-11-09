@@ -16,14 +16,17 @@
 #include "drivers/DisplayDriver.h"
 #include "drivers/AudioDriver.h"
 #include "os/SpaceOS_WindowManager.h"
+#include "services/PeripheralControlService.h"
 
 static Preferences sysPrefs;
 static String s_lastAuthCode = "";
 static esp_websocket_client_handle_t s_wsClient = nullptr;
 static bool s_wsConnected = false;
 static uint32_t s_lastWsDisconnectMs = 0;
-static uint32_t s_wsReconnectBackoffMs = 15000;
+static uint32_t s_wsReconnectBackoffMs = 3000;
 static volatile bool s_isRestartingWs = false;
+static bool s_cachedDeviceBound = false;
+static uint32_t s_lastBoundCheckMs = 0;
 static String s_wsUri = "";
 static String s_wsHeaders = "";
 static String s_sessionId = "";
@@ -153,6 +156,7 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
         serializeJson(cfgDoc, f);
         f.close();
       }
+      s_lastBoundCheckMs = 0; // Xóa cache để cập nhật ngay trạng thái bound
 
       // Nếu thiết bị đã liên kết và chưa kết nối WebSocket, tự động khởi chạy WebSocket nền
       if (!isPendingActivation && s_wsClient == nullptr) {
@@ -238,6 +242,7 @@ bool XiaoZhiClient::saveAIConfig(const String& body) {
   file.print(body);
   file.close();
 
+  s_lastBoundCheckMs = 0; // Xóa cache để cập nhật ngay trạng thái bound
   Serial.println("✅ Đã cập nhật cấu hình XiaoZhi AI vào LittleFS!");
   return true;
 }
@@ -247,21 +252,36 @@ String XiaoZhiClient::getLastAuthCode() {
 }
 
 bool XiaoZhiClient::isDeviceBound() {
-  if (s_lastAuthCode.length() > 0) return false;
-  if (!LittleFS.exists(FILE_CONFIG)) return false;
+  if (s_lastAuthCode.length() > 0) {
+    s_cachedDeviceBound = false;
+    return false;
+  }
+  uint32_t now = millis();
+  if (s_lastBoundCheckMs > 0 && (now - s_lastBoundCheckMs < 30000)) {
+    return s_cachedDeviceBound;
+  }
+  s_lastBoundCheckMs = now;
+
+  if (!LittleFS.exists(FILE_CONFIG)) {
+    s_cachedDeviceBound = false;
+    return false;
+  }
   File f = LittleFS.open(FILE_CONFIG, "r");
-  if (!f) return false;
+  if (!f) return s_cachedDeviceBound; // Giữ giá trị cache an toàn nếu LittleFS đang bận
   JsonDocument doc;
   DeserializationError err = deserializeJson(doc, f);
   f.close();
-  if (err) return false;
+  if (err) return s_cachedDeviceBound;
   if (doc["bound"].is<bool>()) {
-    return doc["bound"].as<bool>();
+    s_cachedDeviceBound = doc["bound"].as<bool>();
+    return s_cachedDeviceBound;
   }
   if (doc["token"].is<const char*>()) {
     const char* t = doc["token"];
-    return (t && strlen(t) > 0);
+    s_cachedDeviceBound = (t && strlen(t) > 0);
+    return s_cachedDeviceBound;
   }
+  s_cachedDeviceBound = false;
   return false;
 }
 
@@ -713,29 +733,30 @@ static bool executeLocalVoiceIntent(const String& rawText, bool isFromAi = false
   String replyMsg = "";
 
   // 1. Quạt / Cối xay gió L298N
-  if (s.indexOf("bat coi xay") >= 0 || s.indexOf("quay coi xay") >= 0 || s.indexOf("chay coi xay") >= 0 ||
-      s.indexOf("bat quat") >= 0 || s.indexOf("chay quat") >= 0 || s.indexOf("quay quat") >= 0 ||
-      s.indexOf("cho quat quay") >= 0 || s.indexOf("cho coi xay quay") >= 0 ||
-      (isFromAi && (s.indexOf("da bat quat") >= 0 || s.indexOf("da bat coi xay") >= 0))) {
+  if ((!isFromAi && (s.indexOf("bat coi xay") >= 0 || s.indexOf("quay coi xay") >= 0 || s.indexOf("chay coi xay") >= 0 ||
+                     s.indexOf("bat quat") >= 0 || s.indexOf("chay quat") >= 0 || s.indexOf("quay quat") >= 0 ||
+                     s.indexOf("cho quat quay") >= 0 || s.indexOf("cho coi xay quay") >= 0)) ||
+      (isFromAi && (s.indexOf("da bat quat") >= 0 || s.indexOf("da bat coi xay") >= 0 || s.indexOf("toi da bat quat") >= 0))) {
     executeHardwareFanControl(true, 60);
     replyMsg = "Da bat coi xay gio!";
     handled = true;
-  } else if (s.indexOf("tat coi xay") >= 0 || s.indexOf("dung coi xay") >= 0 || s.indexOf("ngung coi xay") >= 0 ||
-             s.indexOf("tat quat") >= 0 || s.indexOf("dung quat") >= 0 || s.indexOf("ngung quat") >= 0 ||
+  } else if ((!isFromAi && (s.indexOf("tat coi xay") >= 0 || s.indexOf("dung coi xay") >= 0 || s.indexOf("ngung coi xay") >= 0 ||
+                            s.indexOf("tat quat") >= 0 || s.indexOf("dung quat") >= 0 || s.indexOf("ngung quat") >= 0)) ||
              (isFromAi && (s.indexOf("da tat quat") >= 0 || s.indexOf("da dung quat") >= 0 ||
-                           s.indexOf("da tat coi xay") >= 0 || s.indexOf("da dung coi xay") >= 0))) {
+                           s.indexOf("da tat coi xay") >= 0 || s.indexOf("da dung coi xay") >= 0 ||
+                           s.indexOf("toi da tat quat") >= 0))) {
     executeHardwareFanControl(false);
     replyMsg = "Da dung coi xay gio!";
     handled = true;
   }
 
-  // 2. Tắt đèn (Kiểm tra cả khẩu lệnh người dùng và câu xác nhận của AI XiaoZhi)
-  else if (s.indexOf("tat het den") >= 0 || s.indexOf("tat tat ca den") >= 0 || s.indexOf("tat ca den") >= 0 ||
-           s.indexOf("tat den edison") >= 0 || s.indexOf("tat den ong") >= 0 || s.indexOf("tat den cob") >= 0 ||
-           s.indexOf("tat den sao bang") >= 0 || s.indexOf("tat led cob") >= 0 || s.indexOf("tat den") >= 0 ||
-           s.indexOf("tat led") >= 0 || s.indexOf("tat sang") >= 0 || s.indexOf("toi den") >= 0 ||
-           s.indexOf("tat bot den") >= 0 || s.indexOf("tat den di") >= 0 || s.indexOf("tat bong den") >= 0 ||
-           s.indexOf("tat den phong") >= 0 || s.indexOf("tat den ngu") >= 0 ||
+  // 2. Tắt đèn (Chỉ nhận câu lệnh người dùng hoặc câu xác nhận hành động rõ ràng từ AI)
+  else if ((!isFromAi && (s.indexOf("tat het den") >= 0 || s.indexOf("tat tat ca den") >= 0 || s.indexOf("tat ca den") >= 0 ||
+                          s.indexOf("tat den edison") >= 0 || s.indexOf("tat den ong") >= 0 || s.indexOf("tat den cob") >= 0 ||
+                          s.indexOf("tat den sao bang") >= 0 || s.indexOf("tat led cob") >= 0 || s.indexOf("tat den") >= 0 ||
+                          s.indexOf("tat led") >= 0 || s.indexOf("tat sang") >= 0 || s.indexOf("toi den") >= 0 ||
+                          s.indexOf("tat bot den") >= 0 || s.indexOf("tat den di") >= 0 || s.indexOf("tat bong den") >= 0 ||
+                          s.indexOf("tat den phong") >= 0 || s.indexOf("tat den ngu") >= 0)) ||
            (isFromAi && (s.indexOf("da tat den") >= 0 || s.indexOf("toi da tat den") >= 0 ||
                          s.indexOf("tat den roi") >= 0 || s.indexOf("se tat den") >= 0 ||
                          s.indexOf("da tat sang") >= 0 || s.indexOf("tat den cho ban") >= 0 ||
@@ -745,14 +766,14 @@ static bool executeLocalVoiceIntent(const String& rawText, bool isFromAi = false
     handled = true;
   }
 
-  // 3. Bật đèn (Kiểm tra cả khẩu lệnh người dùng và câu xác nhận của AI XiaoZhi)
-  else if (s.indexOf("bat het den") >= 0 || s.indexOf("bat tat ca den") >= 0 || s.indexOf("bat ca den") >= 0 ||
-           s.indexOf("bat den edison") >= 0 || s.indexOf("bat den ong") >= 0 || s.indexOf("bat den cob") >= 0 ||
-           s.indexOf("bat den sao bang") >= 0 || s.indexOf("bat led cob") >= 0 || s.indexOf("bat den") >= 0 ||
-           s.indexOf("mo den") >= 0 || s.indexOf("sang den") >= 0 || s.indexOf("bat sang") >= 0 ||
-           s.indexOf("bat led") >= 0 || s.indexOf("thap den") >= 0 || s.indexOf("bat den ngu") >= 0 ||
-           s.indexOf("bat den len") >= 0 || s.indexOf("bat den di") >= 0 || s.indexOf("bat bong den") >= 0 ||
-           s.indexOf("bat den phong") >= 0 ||
+  // 3. Bật đèn (Chỉ nhận câu lệnh người dùng hoặc câu xác nhận hành động rõ ràng từ AI)
+  else if ((!isFromAi && (s.indexOf("bat het den") >= 0 || s.indexOf("bat tat ca den") >= 0 || s.indexOf("bat ca den") >= 0 ||
+                          s.indexOf("bat den edison") >= 0 || s.indexOf("bat den ong") >= 0 || s.indexOf("bat den cob") >= 0 ||
+                          s.indexOf("bat den sao bang") >= 0 || s.indexOf("bat led cob") >= 0 || s.indexOf("bat den") >= 0 ||
+                          s.indexOf("mo den") >= 0 || s.indexOf("sang den") >= 0 || s.indexOf("bat sang") >= 0 ||
+                          s.indexOf("bat led") >= 0 || s.indexOf("thap den") >= 0 || s.indexOf("bat den ngu") >= 0 ||
+                          s.indexOf("bat den len") >= 0 || s.indexOf("bat den di") >= 0 || s.indexOf("bat bong den") >= 0 ||
+                          s.indexOf("bat den phong") >= 0)) ||
            (isFromAi && (s.indexOf("da bat den") >= 0 || s.indexOf("toi da bat den") >= 0 ||
                          s.indexOf("bat den roi") >= 0 || s.indexOf("se bat den") >= 0 ||
                          s.indexOf("da mo den") >= 0 || s.indexOf("da bat sang") >= 0 ||
@@ -762,17 +783,17 @@ static bool executeLocalVoiceIntent(const String& rawText, bool isFromAi = false
     handled = true;
   }
 
-  // 4. Âm lượng loa
-  else if (s.indexOf("tang am luong") >= 0 || s.indexOf("to len") >= 0 || s.indexOf("cho to") >= 0 ||
-           s.indexOf("noi to") >= 0 || s.indexOf("bat to") >= 0 || s.indexOf("cho to tieng") >= 0) {
+  // 4. Âm lượng loa (CHỈ KHI NGƯỜI DÙNG RA LỆNH QUA MIC - KHÔNG ÁP DỤNG KHI AI NÓI)
+  else if (!isFromAi && (s.indexOf("tang am luong") >= 0 || s.indexOf("to len") >= 0 || s.indexOf("cho to") >= 0 ||
+                         s.indexOf("noi to") >= 0 || s.indexOf("bat to") >= 0 || s.indexOf("cho to tieng") >= 0)) {
     int curV = AudioDriver::getSpeakerVolumePct();
     int newV = min(100, curV + 20);
     AudioDriver::setSpeakerVolumePct(newV);
     AudioDriver::setXiaoZhiVolumePct(newV);
     replyMsg = "Da tang am luong len " + String(newV) + "%";
     handled = true;
-  } else if (s.indexOf("giam am luong") >= 0 || s.indexOf("nho lai") >= 0 || s.indexOf("cho nho") >= 0 ||
-             s.indexOf("noi nho") >= 0 || s.indexOf("bat nho") >= 0 || s.indexOf("cho nho tieng") >= 0) {
+  } else if (!isFromAi && (s.indexOf("giam am luong") >= 0 || s.indexOf("nho lai") >= 0 || s.indexOf("cho nho") >= 0 ||
+                           s.indexOf("noi nho") >= 0 || s.indexOf("bat nho") >= 0 || s.indexOf("cho nho tieng") >= 0)) {
     int curV = AudioDriver::getSpeakerVolumePct();
     int newV = max(10, curV - 20);
     AudioDriver::setSpeakerVolumePct(newV);
@@ -781,39 +802,107 @@ static bool executeLocalVoiceIntent(const String& rawText, bool isFromAi = false
     handled = true;
   }
 
-  // 5. Chuyển chế độ màn hình SpaceOS
-  else if (s.indexOf("man hinh cho") >= 0 || s.indexOf("ve man hinh cho") >= 0 || s.indexOf("dong ho") >= 0) {
+  // 5. Chuyển chế độ màn hình SpaceOS & Ứng dụng chức năng (CHỈ KHI NGƯỜI DÙNG RA LỆNH QUA MIC - KHÔNG ÁP DỤNG KHI AI NÓI/ĐỌC TIN TỨC)
+  else if (!isFromAi && (s.indexOf("man hinh cho") >= 0 || s.indexOf("ve man hinh cho") >= 0 ||
+                         s.indexOf("chuyen ve man hinh cho") >= 0 || s.indexOf("bat man hinh cho") >= 0)) {
     TestDisplay::setScreenMode("standby");
     replyMsg = "Da chuyen ve man hinh cho!";
     handled = true;
-  } else if (s.indexOf("man hinh pc") >= 0 || s.indexOf("thong so pc") >= 0 || s.indexOf("kiem tra may tinh") >= 0 || s.indexOf("pc hud") >= 0) {
+  } else if (!isFromAi && (s.indexOf("man hinh pc") >= 0 || s.indexOf("thong so pc") >= 0 ||
+                           s.indexOf("kiem tra may tinh") >= 0 || s.indexOf("pc hud") >= 0)) {
     TestDisplay::setScreenMode("pchud");
     replyMsg = "Da chuyen sang man hinh PC HUD!";
     handled = true;
-  } else if (s.indexOf("man hinh bieu cam") >= 0 || s.indexOf("man hinh xiaozhi") >= 0 || s.indexOf("man hinh tro ly") >= 0) {
+  } else if (!isFromAi && (s.indexOf("man hinh bieu cam") >= 0 || s.indexOf("man hinh xiaozhi") >= 0 ||
+                           s.indexOf("man hinh tro ly") >= 0)) {
     TestDisplay::setScreenMode("emoji");
     replyMsg = "Da chuyen sang man hinh bieu cam!";
     handled = true;
-  } else if (s.indexOf("man hinh song am") >= 0 || s.indexOf("man hinh cam bien") >= 0 || s.indexOf("chan doan") >= 0) {
+  } else if (!isFromAi && (s.indexOf("man hinh song am") >= 0 || s.indexOf("man hinh cam bien") >= 0 ||
+                           s.indexOf("man hinh chan doan") >= 0)) {
     TestDisplay::setScreenMode("diag");
     replyMsg = "Da chuyen sang man hinh chan doan!";
     handled = true;
+  } else if (!isFromAi && (s.indexOf("mo game") >= 0 || s.indexOf("choi game") >= 0 || s.indexOf("bat game") >= 0 ||
+                           s.indexOf("tro choi") >= 0 || s.indexOf("game center") >= 0 || s.indexOf("trung tam tro choi") >= 0)) {
+    TestDisplay::setScreenMode("games");
+    replyMsg = "Bao cao Thuyen truong: Da mo Trung tam tro choi!";
+    handled = true;
+  } else if (!isFromAi && (s.indexOf("bat nhac") >= 0 || s.indexOf("mo nhac") >= 0 || s.indexOf("phat nhac") >= 0 ||
+                           s.indexOf("trinh phat nhac") >= 0 || s.indexOf("may nghe nhac") >= 0 || s.indexOf("nghe nhac") >= 0 ||
+                           s.indexOf("mo media") >= 0)) {
+    TestDisplay::setScreenMode("media");
+    TestDisplay::controlMediaPlayer("play", 0);
+    replyMsg = "Bao cao Thuyen truong: Da mo Trinh phat nhac!";
+    handled = true;
+  } else if (!isFromAi && (s.indexOf("doi hinh nen") >= 0 || s.indexOf("next hinh nen") >= 0 || s.indexOf("doi anh nen") >= 0 ||
+                           s.indexOf("next anh nen") >= 0 || s.indexOf("chuyen hinh nen") >= 0 || s.indexOf("chuyen anh nen") >= 0 ||
+                           s.indexOf("hinh nen tiep theo") >= 0 || s.indexOf("anh nen tiep theo") >= 0 || s.indexOf("next wallpaper") >= 0)) {
+    PeripheralControlService::cycleWallpaper(1);
+    replyMsg = "Bao cao Thuyen truong: Da chuyen sang hinh nen tiep theo!";
+    handled = true;
+  } else if (!isFromAi && (s.indexOf("mo lich") >= 0 || s.indexOf("xem lich") >= 0 || s.indexOf("lich van nien") >= 0)) {
+    TestDisplay::setScreenMode("calendar");
+    replyMsg = "Bao cao Thuyen truong: Da mo Lich van nien!";
+    handled = true;
+  } else if (!isFromAi && (s.indexOf("mo dong ho") >= 0 || s.indexOf("xem dong ho") >= 0 || s.indexOf("dong ho bao thuc") >= 0)) {
+    TestDisplay::setScreenMode("clock");
+    replyMsg = "Bao cao Thuyen truong: Da mo Dong ho!";
+    handled = true;
   }
 
-  // 6. Đổi phong cách biểu cảm mắt XiaoZhi
-  else if (s.indexOf("co be") >= 0 || s.indexOf("chibi") >= 0 || s.indexOf("bieu cam cute") >= 0) {
+  // 6. Khẩu lệnh tra cứu & Báo cáo trạng thái trạm vũ trụ (Chỉ huy Trạm báo cáo Thuyền trưởng)
+  else if (!isFromAi && (s.indexOf("pin con bao nhieu") >= 0 || s.indexOf("kiem tra pin") >= 0 ||
+                         s.indexOf("may phan tram pin") >= 0 || s.indexOf("tinh trang pin") >= 0 ||
+                         s.indexOf("trang thai pin") >= 0 || s.indexOf("pin con may") >= 0 ||
+                         s.indexOf("pin the nao") >= 0)) {
+    PeripheralControlResult res = PeripheralControlService::getBatteryStatus();
+    replyMsg = res.message;
+    handled = true;
+  } else if (!isFromAi && (s.indexOf("kiem tra wifi") >= 0 || s.indexOf("wifi the nao") >= 0 ||
+                           s.indexOf("tinh trang wifi") >= 0 || s.indexOf("mang the nao") >= 0 ||
+                           s.indexOf("trang thai wifi") >= 0 || s.indexOf("kiem tra mang") >= 0)) {
+    PeripheralControlResult res = PeripheralControlService::getWifiStatus();
+    replyMsg = res.message;
+    handled = true;
+  } else if (!isFromAi && (s.indexOf("kiem tra the nho") >= 0 || s.indexOf("the nho the nao") >= 0 ||
+                           s.indexOf("kiem tra bo nho") >= 0 || s.indexOf("bo nho the nao") >= 0 ||
+                           s.indexOf("dung luong the nho") >= 0 || s.indexOf("dung luong bo nho") >= 0)) {
+    PeripheralControlResult res = PeripheralControlService::getStorageStatus();
+    replyMsg = res.message;
+    handled = true;
+  } else if (!isFromAi && (s.indexOf("hien tai tram the nao") >= 0 || s.indexOf("tram the nao") >= 0 ||
+                           s.indexOf("kiem tra tram") >= 0 || s.indexOf("bao cao tram") >= 0 ||
+                           s.indexOf("tinh trang tram") >= 0 || s.indexOf("bao cao thuyen truong") >= 0 ||
+                           s.indexOf("kiem tra he thong") >= 0 || s.indexOf("bao cao he thong") >= 0 ||
+                           s.indexOf("tong the tram") >= 0)) {
+    PeripheralControlResult res = PeripheralControlService::getStationFullReport();
+    replyMsg = res.message;
+    handled = true;
+  }
+
+  // 7. Đổi phong cách biểu cảm mắt XiaoZhi (CHỈ KHI NGƯỜI DÙNG RA LỆNH QUA MIC - KHÔNG ÁP DỤNG KHI AI NÓI/ĐỌC TIN TỨC)
+  else if (!isFromAi && (s.indexOf("co be chibi") >= 0 || s.indexOf("bieu cam chibi") >= 0 ||
+                         ((s.indexOf("doi") >= 0 || s.indexOf("chuyen") >= 0 || s.indexOf("bat") >= 0 || s.indexOf("thay") >= 0) &&
+                          (s.indexOf("co be") >= 0 || s.indexOf("chibi") >= 0)))) {
     TestDisplay::setEmojiStyle(1);
     replyMsg = "Da doi bieu cam sang Co Be Chibi!";
     handled = true;
-  } else if (s.indexOf("doi mat") >= 0 || s.indexOf("robot") >= 0) {
+  } else if (!isFromAi && (s.indexOf("doi mat robot") >= 0 || s.indexOf("mat robot") >= 0 || s.indexOf("bieu cam robot") >= 0 ||
+                           ((s.indexOf("doi") >= 0 || s.indexOf("chuyen") >= 0 || s.indexOf("bat") >= 0 || s.indexOf("thay") >= 0) &&
+                            (s.indexOf("robot") >= 0 || s.indexOf("mat dong") >= 0)))) {
     TestDisplay::setEmojiStyle(2);
     replyMsg = "Da doi bieu cam sang Doi Mat Robot!";
     handled = true;
-  } else if (s.indexOf("meo") >= 0 || s.indexOf("gome") >= 0) {
+  } else if (!isFromAi && (s.indexOf("meo gome") >= 0 || s.indexOf("bieu cam meo") >= 0 ||
+                           ((s.indexOf("doi") >= 0 || s.indexOf("chuyen") >= 0 || s.indexOf("bat") >= 0 || s.indexOf("thay") >= 0) &&
+                            (s.indexOf("gome") >= 0 || s.indexOf("chu meo") >= 0 || s.indexOf("sang meo") >= 0)))) {
     TestDisplay::setEmojiStyle(3);
     replyMsg = "Da doi bieu cam sang Meo Gome!";
     handled = true;
-  } else if (s.indexOf("mat neon") >= 0 || s.indexOf("mac dinh") >= 0) {
+  } else if (!isFromAi && (s.indexOf("mat neon") >= 0 || s.indexOf("bieu cam neon") >= 0 ||
+                           ((s.indexOf("doi") >= 0 || s.indexOf("chuyen") >= 0 || s.indexOf("bat") >= 0 || s.indexOf("thay") >= 0) &&
+                            (s.indexOf("neon") >= 0 || s.indexOf("mac dinh") >= 0)))) {
     TestDisplay::setEmojiStyle(0);
     replyMsg = "Da doi bieu cam ve Mat Neon mac dinh!";
     handled = true;
@@ -899,7 +988,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
     case WEBSOCKET_EVENT_CONNECTED: {
       s_wsConnected = true;
       s_lastWsDisconnectMs = 0;
-      s_wsReconnectBackoffMs = 15000;
+      s_wsReconnectBackoffMs = 3000;
       ensureOpusDecoder();
       if (s_opusDecoder) {
         opus_decoder_ctl(s_opusDecoder, OPUS_RESET_STATE);
@@ -1110,13 +1199,21 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               }
               TestAudio::playStreamPcmAsync(s_pcmDecodeBuf, (size_t)decodedSamples);
             } else {
-              // Fallback dự phòng nếu khung nhị phân là PCM 16-bit thô
-              size_t sampleCount = data->data_len / sizeof(int16_t);
-              if (s_binFrames <= 3 || s_binFrames % 25 == 0) {
-                Serial.printf("🔊 [XIAOZHI PCM RX] Frame #%u | %d bytes (Opus err=%d) -> %u mẫu PCM -> MAX98357A\n",
-                              s_binFrames, data->data_len, decodedSamples, (unsigned)sampleCount);
+              // Nếu giải mã Opus thất bại (lỗi gói hoặc mất gói Wi-Fi):
+              // Kích hoạt cơ chế che giấu mất gói (Packet Loss Concealment - PLC) của Opus
+              if (s_opusDecoder != nullptr) {
+                int plcSamples = opus_decode(s_opusDecoder, NULL, 0, s_pcmDecodeBuf, 960, 0);
+                if (plcSamples > 0) {
+                  TestAudio::playStreamPcmAsync(s_pcmDecodeBuf, (size_t)plcSamples);
+                  if (s_binFrames <= 5 || s_binFrames % 25 == 0) {
+                    Serial.printf("🛡️ [XIAOZHI OPUS PLC] Khung bị hỏng -> Bù suy hao %d mẫu mượt mà\n", plcSamples);
+                  }
+                }
+              } else if (data->data_len >= 640 && (data->data_len % 2 == 0)) {
+                // Chỉ dự phòng raw PCM nếu kích thước lớn thực sự
+                size_t sampleCount = data->data_len / sizeof(int16_t);
+                TestAudio::playStreamPcmAsync((const int16_t*)data->data_ptr, sampleCount);
               }
-              TestAudio::playStreamPcmAsync((const int16_t*)data->data_ptr, sampleCount);
             }
           }
         }
@@ -1196,11 +1293,16 @@ void XiaoZhiClient::startWebSocket() {
   ws_cfg.user_agent = XIAOZHI_USER_AGENT;
   ws_cfg.cert_pem = XIAOZHI_CA_PEM;
   ws_cfg.skip_cert_common_name_check = true;
-  ws_cfg.ping_interval_sec = 15;
-  ws_cfg.pingpong_timeout_sec = 60;
-  ws_cfg.disable_pingpong_discon = true; // Tránh tự động ngắt kết nối do độ trễ Ping/Pong
+  ws_cfg.ping_interval_sec = 10;
+  ws_cfg.pingpong_timeout_sec = 15;
+  ws_cfg.disable_pingpong_discon = false; // Bật phát hiện mất kết nối qua Ping/Pong
+  ws_cfg.keep_alive_enable = true;        // TCP Keep-Alive chống router/NAT ngắt phiên TCP ngầm
+  ws_cfg.keep_alive_idle = 10;
+  ws_cfg.keep_alive_interval = 5;
+  ws_cfg.keep_alive_count = 3;
   ws_cfg.task_stack = 12288;
-  ws_cfg.buffer_size = 4096;
+  ws_cfg.task_prio = 5;
+  ws_cfg.buffer_size = 8192;              // Bộ đệm 8KB chống nghẽn TLS & gói MCP lớn
 
   Serial.println("\n🚀 [XIAOZHI WS] Đang mở kết nối nền WebSocket tới XiaoZhi Cloud...");
   Serial.printf("🌐 Endpoint : %s\n", s_wsUri.c_str());
@@ -1262,21 +1364,32 @@ static void restartWebSocketAsync() {
 void XiaoZhiClient::loopWebSocket() {
   static uint32_t s_lastWsCheck = 0;
   uint32_t now = millis();
-  if (now - s_lastWsCheck < 5000) return;
+  if (now - s_lastWsCheck < 3000) return;
   s_lastWsCheck = now;
 
-  if (WiFi.status() == WL_CONNECTED && isDeviceBound()) {
+  static uint32_t s_wifiDisconnectStart = 0;
+  if (WiFi.status() != WL_CONNECTED) {
+    if (s_wifiDisconnectStart == 0) s_wifiDisconnectStart = now;
+    // Chỉ đóng socket nếu WiFi rớt liên tục trên 8 giây
+    if (s_wsClient != nullptr && (now - s_wifiDisconnectStart > 8000) && !s_isRestartingWs) {
+      restartWebSocketAsync();
+    }
+    return;
+  }
+  s_wifiDisconnectStart = 0;
+
+  if (isDeviceBound()) {
     if (s_wsClient == nullptr && !s_isRestartingWs) {
       Serial.println("🚀 [XIAOZHI WS] Khởi chạy WebSocket kết nối lần đầu...");
       startWebSocket();
     } else if (!isWebSocketConnected() && !s_isRestartingWs) {
-      // esp_websocket_client tự động reconnect ngầm mỗi 10s.
-      // Chỉ khi mất kết nối liên tục vượt quá backoff (15s -> 30s -> 60s -> max 120s) mới restart async
+      // esp_websocket_client tự động reconnect ngầm.
+      // Nếu sau 3s..10s vẫn chưa kết nối lại được, kích hoạt restartWebSocketAsync để tái tạo socket sạch sẽ
       if (s_lastWsDisconnectMs > 0 && (now - s_lastWsDisconnectMs >= s_wsReconnectBackoffMs)) {
         Serial.printf("🔄 [XIAOZHI WS] Mất kết nối >%u s -> Khởi động lại WebSocket (Async Non-blocking)...\n",
                       (unsigned)(s_wsReconnectBackoffMs / 1000));
-        uint32_t nextBackoff = s_wsReconnectBackoffMs * 2;
-        if (nextBackoff > 120000) nextBackoff = 120000;
+        uint32_t nextBackoff = s_wsReconnectBackoffMs + 2000;
+        if (nextBackoff > 10000) nextBackoff = 10000;
         s_wsReconnectBackoffMs = nextBackoff;
         s_lastWsDisconnectMs = now;
         restartWebSocketAsync();

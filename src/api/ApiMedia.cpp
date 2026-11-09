@@ -510,7 +510,7 @@ namespace ApiMedia {
     if (upload.status == UPLOAD_FILE_START) {
       if (!s_streamJpegUploadBuf) {
         if (psramFound()) s_streamJpegUploadBuf = (uint8_t*)ps_malloc(MAX_STREAM_JPEG_UPLOAD);
-        if (!s_streamJpegUploadBuf) s_streamJpegUploadBuf = (uint8_t*)malloc(MAX_STREAM_JPEG_UPLOAD);
+        if (!s_streamJpegUploadBuf) s_streamJpegUploadBuf = (uint8_t*)malloc(32768);
       }
       s_streamJpegUploadLen = 0;
     } else if (upload.status == UPLOAD_FILE_WRITE) {

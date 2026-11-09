@@ -29,16 +29,383 @@ namespace {
   static TaskHandle_t s_urlStreamTaskHandle = nullptr;
   static volatile bool s_streamSessionActive = false;
   static volatile unsigned long s_lastStopMs = 0;
-
-  // Buffer video truyền không đồng bộ an toàn từ Core 0 sang Core 1 (tránh xung đột bus SPI ST7789)
-  // Tăng lên 128KB để chứa đủ các frame video giàu chi tiết/màu sắc phức tạp mà không bị tràn RAM
-  static const size_t MAX_STREAM_JPG_SIZE = 128 * 1024;
-  static uint8_t* s_asyncVideoBuf         = nullptr;
-  static size_t   s_asyncVideoLen         = 0;
-  static volatile bool s_asyncVideoReady  = false;
+  static uint32_t s_videoFramesDropped    = 0;
   static volatile bool s_isDisplayRendering = false;
-  static uint32_t s_videoFramesDropped     = 0;
-  static portMUX_TYPE s_streamMux         = portMUX_INITIALIZER_UNLOCKED;
+
+  // ---------------- PSRAM VIDEO JITTER RING BUFFER (20 FRAMES = 1.33s @ 15fps) ----------------
+  static const size_t VIDEO_RING_CAPACITY = 20;            // 20 frames buffer trên PSRAM
+  static const size_t MAX_FRAME_SLOT_SIZE = 80 * 1024;     // 80KB max cho mỗi frame JPEG
+  static const size_t VIDEO_PREBUFFER_THRESHOLD = 8;       // Cần tích lũy >= 8 frames video mới phát
+
+  struct QueuedVideoFrame {
+    uint8_t* data;
+    size_t   len;
+    uint32_t pts;
+    uint16_t seq;
+    volatile bool valid;
+  };
+
+  static QueuedVideoFrame s_videoRing[VIDEO_RING_CAPACITY] = {0};
+  static volatile size_t  s_videoHead = 0; // Vị trí ghi của Core 0
+  static volatile size_t  s_videoTail = 0; // Vị trí đọc/vẽ của Core 1
+  static volatile size_t  s_videoRingCount = 0;
+  static portMUX_TYPE     s_videoRingMux = portMUX_INITIALIZER_UNLOCKED;
+
+  // ---------------- MASTER CLOCK & PREBUFFERING STATE ----------------
+  static volatile bool     s_isPrebuffering       = true;
+  static unsigned long     s_firstPacketArrivalMs = 0;
+  static unsigned long     s_playbackStartTimeMs  = 0;
+  static uint32_t          s_playbackStartPts     = 0;
+
+  static bool ensureVideoRingSlots() {
+    if (!psramFound()) return false;
+    for (size_t i = 0; i < VIDEO_RING_CAPACITY; i++) {
+      if (!s_videoRing[i].data) {
+        s_videoRing[i].data = (uint8_t*)ps_malloc(MAX_FRAME_SLOT_SIZE);
+        if (!s_videoRing[i].data) {
+          Serial.printf("❌ [STREAM] Không đủ PSRAM cấp phát slot video #%u\n", (unsigned)i);
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  static void freeVideoRingSlots() {
+    uint8_t* toFree[VIDEO_RING_CAPACITY] = {nullptr};
+
+    taskENTER_CRITICAL(&s_videoRingMux);
+    for (size_t i = 0; i < VIDEO_RING_CAPACITY; i++) {
+      toFree[i] = s_videoRing[i].data;
+      s_videoRing[i].data = nullptr;
+      s_videoRing[i].len = 0;
+      s_videoRing[i].pts = 0;
+      s_videoRing[i].seq = 0;
+      s_videoRing[i].valid = false;
+    }
+    s_videoHead = 0;
+    s_videoTail = 0;
+    s_videoRingCount = 0;
+    taskEXIT_CRITICAL(&s_videoRingMux);
+
+    // Giải phóng bộ nhớ NGOÀI critical section để tránh panic mutex trong FreeRTOS
+    for (size_t i = 0; i < VIDEO_RING_CAPACITY; i++) {
+      if (toFree[i]) {
+        free(toFree[i]);
+      }
+    }
+  }
+
+  // ---------------- PSRAM AUDIO JITTER RING BUFFER (192,000 samples = 384 KB = 12.0s @ 16kHz) ----------------
+  static const size_t AUDIO_RING_CAPACITY = 192000;      // 384 KB PSRAM (~12 giây âm thanh Mono 16kHz)
+  static int16_t* s_audioRingBuf          = nullptr;
+  static volatile size_t s_audioRingHead  = 0; // Vị trí đọc
+  static volatile size_t s_audioRingTail  = 0; // Vị trí ghi
+  static volatile size_t s_audioRingCount = 0;
+  static portMUX_TYPE s_audioRingMux      = portMUX_INITIALIZER_UNLOCKED;
+
+  static TaskHandle_t s_audioPumpTaskHandle = nullptr;
+  static volatile bool s_audioPumpRunning   = false;
+
+  static void audioPumpTask(void* param) {
+    Serial.println("🎧 [AUDIO PUMP TASK] Đã khởi chạy trên Core 0 (PSRAM 384KB Ring Buffer Jitter Absorber)!");
+    const size_t CHUNK = 256; // 16ms âm thanh ở 16kHz
+    int16_t localMono[CHUNK];
+
+    while (s_audioPumpRunning) {
+      // Nếu đang trong giai đoạn Prebuffering: giữ im lặng, không xả ra I2S vội
+      if (s_isPrebuffering) {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        continue;
+      }
+
+      size_t count = 0;
+      taskENTER_CRITICAL(&s_audioRingMux);
+      count = s_audioRingCount;
+      taskEXIT_CRITICAL(&s_audioRingMux);
+
+      if (count >= CHUNK) {
+        taskENTER_CRITICAL(&s_audioRingMux);
+        for (size_t i = 0; i < CHUNK; i++) {
+          localMono[i] = s_audioRingBuf[s_audioRingHead];
+          s_audioRingHead = (s_audioRingHead + 1) % AUDIO_RING_CAPACITY;
+        }
+        s_audioRingCount -= CHUNK;
+        taskEXIT_CRITICAL(&s_audioRingMux);
+
+        TestAudio::playStreamPcm(localMono, CHUNK);
+        taskYIELD();
+      } else if (count > 0) {
+        // Buffer sắp cạn: nếu sau 1000ms không có thêm gói mới từ mạng, phát nốt phần còn lại
+        if (millis() - s_lastAudioPcmMs > 1000) {
+          size_t toPlay = count;
+          taskENTER_CRITICAL(&s_audioRingMux);
+          for (size_t i = 0; i < toPlay; i++) {
+            localMono[i] = s_audioRingBuf[s_audioRingHead];
+            s_audioRingHead = (s_audioRingHead + 1) % AUDIO_RING_CAPACITY;
+          }
+          s_audioRingCount -= toPlay;
+          taskEXIT_CRITICAL(&s_audioRingMux);
+
+          TestAudio::playStreamPcm(localMono, toPlay);
+        } else {
+          vTaskDelay(pdMS_TO_TICKS(2));
+        }
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(5));
+      }
+    }
+
+    s_audioPumpTaskHandle = nullptr;
+    vTaskDelete(NULL);
+  }
+
+  // ---------------- UNIFIED TCP STREAM RECEIVER TASK (Core 0, Port 12345) ----------------
+  static const uint16_t UNIFIED_STREAM_PORT = 12345;
+  static TaskHandle_t s_unifiedStreamTaskHandle = nullptr;
+  static volatile bool s_unifiedStreamRunning = false;
+  static int s_unifiedServerSock = -1;
+
+  static bool recvAllExact(int sock, uint8_t* dest, size_t targetLen) {
+    size_t got = 0;
+    while (got < targetLen && s_unifiedStreamRunning) {
+      int n = recv(sock, (char*)(dest + got), targetLen - got, 0);
+      if (n <= 0) {
+        if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+          vTaskDelay(pdMS_TO_TICKS(2));
+          continue;
+        }
+        return false;
+      }
+      got += n;
+    }
+    return (got == targetLen);
+  }
+
+  static bool drainExact(int sock, size_t bytesToDrain) {
+    uint8_t dummy[512];
+    size_t rem = bytesToDrain;
+    while (rem > 0 && s_unifiedStreamRunning) {
+      size_t chunk = min(rem, sizeof(dummy));
+      int n = recv(sock, (char*)dummy, chunk, 0);
+      if (n <= 0) return false;
+      rem -= n;
+    }
+    return true;
+  }
+
+  static void unifiedStreamTask(void* param) {
+    Serial.printf("🚀 [UNIFIED STREAM] Task lắng nghe TCP đa phương tiện đã khởi tạo trên Core 0 (Port %u)...\n", UNIFIED_STREAM_PORT);
+
+    while (s_unifiedStreamRunning) {
+      if (WiFi.status() != WL_CONNECTED && WiFi.softAPIP() == IPAddress(0, 0, 0, 0)) {
+        vTaskDelay(pdMS_TO_TICKS(500));
+        continue;
+      }
+      vTaskDelay(pdMS_TO_TICKS(200));
+
+      int serverSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+      if (serverSock < 0) {
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        continue;
+      }
+
+      int enable = 1;
+      setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
+
+      struct sockaddr_in serv_addr;
+      memset(&serv_addr, 0, sizeof(serv_addr));
+      serv_addr.sin_family = AF_INET;
+      serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+      serv_addr.sin_port = htons(UNIFIED_STREAM_PORT);
+
+      if (bind(serverSock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
+        close(serverSock);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        continue;
+      }
+
+      if (listen(serverSock, 2) < 0) {
+        close(serverSock);
+        vTaskDelay(pdMS_TO_TICKS(2000));
+        continue;
+      }
+
+      s_unifiedServerSock = serverSock;
+      Serial.printf("✅ [UNIFIED STREAM] Đang lắng nghe trên TCP port %u (Core 0)! Sẵn sàng ghép kênh Audio + Video.\n", UNIFIED_STREAM_PORT);
+
+      const size_t TEMP_AUDIO_MAX = 4096;
+      int16_t* tempAudioBuf = (int16_t*)(psramFound() ? ps_malloc(TEMP_AUDIO_MAX) : malloc(TEMP_AUDIO_MAX));
+
+      while (s_unifiedStreamRunning && (WiFi.status() == WL_CONNECTED || WiFi.softAPIP() != IPAddress(0, 0, 0, 0))) {
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+        int clientSock = accept(serverSock, (struct sockaddr*)&client_addr, &client_len);
+        if (clientSock < 0) {
+          if (!s_unifiedStreamRunning) break;
+          vTaskDelay(pdMS_TO_TICKS(100));
+          continue;
+        }
+
+        int nodelay = 1;
+        setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
+        struct timeval tv;
+        tv.tv_sec = 6;
+        tv.tv_usec = 0;
+        setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
+        int rcvbuf = 16384; // 16KB tối ưu cho TCP Wi-Fi LAN, giải phóng 16KB SRAM quý giá chống tràn Heap
+        setsockopt(clientSock, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+
+        Serial.println("⚡ [UNIFIED STREAM] Transcoder PC đã kết nối luồng SSUP ghép kênh (Audio+Video)!");
+        s_streamSessionActive = true;
+        s_isPrebuffering = true;
+        s_firstPacketArrivalMs = millis();
+        s_videoFramesDropped = 0;
+        ensureVideoRingSlots();
+
+        // Xóa sạch bộ đệm âm thanh khi bắt đầu phiên mới
+        taskENTER_CRITICAL(&s_audioRingMux);
+        s_audioRingHead = 0;
+        s_audioRingTail = 0;
+        s_audioRingCount = 0;
+        taskEXIT_CRITICAL(&s_audioRingMux);
+
+        // Xóa sạch bộ đệm video khi bắt đầu phiên mới
+        taskENTER_CRITICAL(&s_videoRingMux);
+        for (size_t i = 0; i < VIDEO_RING_CAPACITY; i++) {
+          s_videoRing[i].valid = false;
+          s_videoRing[i].len = 0;
+          s_videoRing[i].pts = 0;
+        }
+        s_videoHead = 0;
+        s_videoTail = 0;
+        s_videoRingCount = 0;
+        taskEXIT_CRITICAL(&s_videoRingMux);
+
+        StreamPacketHeader hdr;
+        while (s_unifiedStreamRunning) {
+          // Đọc Header 16 bytes
+          if (!recvAllExact(clientSock, (uint8_t*)&hdr, sizeof(StreamPacketHeader))) {
+            break;
+          }
+
+          // Kiểm tra Magic "USP1"
+          if (memcmp(hdr.magic, "USP1", 4) != 0) {
+            Serial.println("⚠️ [UNIFIED STREAM] Mất đồng bộ byte magic, đang quét khôi phục...");
+            uint8_t b = 0;
+            char search[4] = { hdr.magic[1], hdr.magic[2], hdr.magic[3], 0 };
+            while (s_unifiedStreamRunning) {
+              if (recv(clientSock, (char*)&b, 1, 0) <= 0) break;
+              search[3] = (char)b;
+              if (memcmp(search, "USP1", 4) == 0) {
+                if (recvAllExact(clientSock, ((uint8_t*)&hdr) + 4, sizeof(StreamPacketHeader) - 4)) {
+                  break;
+                }
+              }
+              search[0] = search[1];
+              search[1] = search[2];
+              search[2] = search[3];
+            }
+          }
+
+          uint8_t  type = hdr.type;
+          uint16_t seq = ntohs(hdr.seq);
+          uint32_t pts = ntohl(hdr.pts);
+          uint32_t payloadLen = ntohl(hdr.payloadLen);
+
+          if (type == 1) {
+            // --- AUDIO PACKET ---
+            if (payloadLen > 0 && payloadLen <= TEMP_AUDIO_MAX && tempAudioBuf) {
+              if (!recvAllExact(clientSock, (uint8_t*)tempAudioBuf, payloadLen)) break;
+              WebStreamManager::playAudioPcmChunk(tempAudioBuf, payloadLen / sizeof(int16_t));
+            } else {
+              drainExact(clientSock, payloadLen);
+            }
+          } else if (type == 2) {
+            // --- VIDEO JPEG PACKET ---
+            if (payloadLen > 0 && payloadLen <= MAX_FRAME_SLOT_SIZE) {
+              ensureVideoRingSlots();
+              uint8_t* destSlot = s_videoRing[s_videoHead].data;
+              if (destSlot && recvAllExact(clientSock, destSlot, payloadLen)) {
+                // Kiểm tra SOI JPEG (0xFF, 0xD8)
+                if (destSlot[0] == 0xFF && destSlot[1] == 0xD8) {
+                  taskENTER_CRITICAL(&s_videoRingMux);
+                  s_videoRing[s_videoHead].len = payloadLen;
+                  s_videoRing[s_videoHead].pts = pts;
+                  s_videoRing[s_videoHead].seq = seq;
+                  s_videoRing[s_videoHead].valid = true;
+
+                  size_t nextHead = (s_videoHead + 1) % VIDEO_RING_CAPACITY;
+                  if (s_videoRingCount >= VIDEO_RING_CAPACITY) {
+                    s_videoRing[s_videoTail].valid = false;
+                    s_videoTail = (s_videoTail + 1) % VIDEO_RING_CAPACITY;
+                    s_videoFramesDropped++;
+                  } else {
+                    s_videoRingCount++;
+                  }
+                  s_videoHead = nextHead;
+                  taskEXIT_CRITICAL(&s_videoRingMux);
+
+                  s_videoFrameCount++;
+                  s_lastVideoFrameMs = millis();
+                } else {
+                  s_videoFramesDropped++;
+                }
+              } else {
+                break;
+              }
+            } else {
+              drainExact(clientSock, payloadLen);
+            }
+          } else if (type == 3) {
+            // --- CLOCK SYNC / RESET ---
+            if (payloadLen > 0) drainExact(clientSock, payloadLen);
+            s_isPrebuffering = true;
+            s_firstPacketArrivalMs = millis();
+            s_videoFramesDropped = 0;
+
+            taskENTER_CRITICAL(&s_audioRingMux);
+            s_audioRingHead = 0;
+            s_audioRingTail = 0;
+            s_audioRingCount = 0;
+            taskEXIT_CRITICAL(&s_audioRingMux);
+
+            taskENTER_CRITICAL(&s_videoRingMux);
+            for (size_t i = 0; i < VIDEO_RING_CAPACITY; i++) {
+              s_videoRing[i].valid = false;
+              s_videoRing[i].len = 0;
+              s_videoRing[i].pts = 0;
+            }
+            s_videoHead = 0;
+            s_videoTail = 0;
+            s_videoRingCount = 0;
+            taskEXIT_CRITICAL(&s_videoRingMux);
+            Serial.println("🔄 [UNIFIED STREAM] Nhận lệnh CLOCK SYNC / RESET: Đã xóa sạch Ring Buffer!");
+          } else if (type == 4) {
+            // --- STREAM END ---
+            if (payloadLen > 0) drainExact(clientSock, payloadLen);
+            Serial.println("🛑 [UNIFIED STREAM] Nhận tín hiệu kết thúc luồng từ client.");
+            break;
+          } else {
+            if (payloadLen > 0) drainExact(clientSock, payloadLen);
+          }
+        }
+
+        close(clientSock);
+        s_streamSessionActive = false;
+        TestDisplay::stopStreamMode();
+        Serial.println("⚪ [UNIFIED STREAM] Transcoder PC đã ngắt kết nối.");
+      }
+
+      if (tempAudioBuf) free(tempAudioBuf);
+      close(serverSock);
+      s_unifiedServerSock = -1;
+      vTaskDelay(pdMS_TO_TICKS(500));
+    }
+
+    s_unifiedStreamTaskHandle = nullptr;
+    vTaskDelete(NULL);
+  }
 
   // Task xử lý luồng stream URL (Web Radio MP3 hoặc MJPEG Video) chạy nền trên Core 0
   static void urlStreamTask(void* param) {
@@ -48,7 +415,6 @@ namespace {
     bool isHttps = s_activeUrl.startsWith("https://");
 
     if (s_activeUrlType == "audio") {
-      // Dừng triệt để các nguồn phát âm thanh nền khác trước khi mở stream
       TestAudio::stopVoicePlaybackAsync();
       TestDisplay::controlMediaPlayer("stop");
       i2s_zero_dma_buffer((i2s_port_t)1);
@@ -97,7 +463,6 @@ namespace {
         return;
       }
 
-      // Cấp phát bộ nhớ giải mã MP3 ưu tiên trên PSRAM (8MB)
       mp3dec_t* mp3d = (mp3dec_t*)(psramFound() ? ps_malloc(sizeof(mp3dec_t)) : malloc(sizeof(mp3dec_t)));
       const int MP3_BUF_SIZE = 4096;
       uint8_t* mp3Buf = (uint8_t*)(psramFound() ? ps_malloc(MP3_BUF_SIZE) : malloc(MP3_BUF_SIZE));
@@ -130,7 +495,6 @@ namespace {
       Serial.println("🎧 [AUDIO STREAM] Bắt đầu giải mã & phát MP3 trực tuyến...");
 
       while (s_urlStreamRunning && http->connected()) {
-        // Nạp dữ liệu từ stream mạng vào buffer
         if (bufValid < (MP3_BUF_SIZE - 1500) && stream->available()) {
           size_t want = MP3_BUF_SIZE - bufValid;
           size_t nRead = stream->read(mp3Buf + bufValid, want);
@@ -161,7 +525,6 @@ namespace {
           s_lastAudioPcmMs = millis();
           s_audioChunkCount++;
 
-          // Cập nhật tần số lấy mẫu I2S1 nếu luồng đổi định dạng
           if (info.hz > 0 && (uint32_t)info.hz != currentSampleRate) {
             currentSampleRate = info.hz;
             i2s_set_sample_rates((i2s_port_t)1, currentSampleRate);
@@ -179,7 +542,7 @@ namespace {
               stereoPcm[i * 2]     = (int16_t)constrain(l, -31500, 31500);
               stereoPcm[i * 2 + 1] = (int16_t)constrain(r, -31500, 31500);
             } else {
-              int32_t m = (int32_t)(pcmOut[i] * volScale);
+              int32_t m = (int32_t)(pcmOut[i * 2] * volScale);
               int16_t s = (int16_t)constrain(m, -31500, 31500);
               stereoPcm[i * 2]     = s;
               stereoPcm[i * 2 + 1] = s;
@@ -189,7 +552,6 @@ namespace {
           size_t written = 0;
           i2s_write((i2s_port_t)1, stereoPcm, samplesPerChannel * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(100));
 
-          // Cập nhật phổ âm thanh ST7789
           uint8_t specBands[16] = {0};
           int maxLv = 0;
           for (int b = 0; b < 16; b++) {
@@ -202,7 +564,6 @@ namespace {
           TestAudio::setExternalAudioSpectrum(specBands, maxLv);
         }
 
-        // Nhường CPU cho Core 0 IDLE task (nuôi Watchdog)
         vTaskDelay(pdMS_TO_TICKS(1));
       }
 
@@ -261,7 +622,7 @@ namespace {
         return;
       }
 
-      uint8_t* rawJpgBuf = (uint8_t*)(psramFound() ? ps_malloc(MAX_STREAM_JPG_SIZE) : malloc(MAX_STREAM_JPG_SIZE));
+      uint8_t* rawJpgBuf = (uint8_t*)(psramFound() ? ps_malloc(MAX_FRAME_SLOT_SIZE) : malloc(MAX_FRAME_SLOT_SIZE));
       if (!rawJpgBuf) {
         Serial.println("❌ [VIDEO STREAM] Không đủ bộ nhớ cấp phát cho Frame JPEG!");
         http->end();
@@ -274,7 +635,6 @@ namespace {
         return;
       }
 
-      // Tự động chuyển màn hình sang chế độ Stream để hiển thị ngay luồng video
       TestDisplay::setScreenMode("stream");
 
       size_t jpgLen = 0;
@@ -301,13 +661,13 @@ namespace {
                 jpgLen = 2;
               }
             } else {
-              if (jpgLen < MAX_STREAM_JPG_SIZE) {
+              if (jpgLen < MAX_FRAME_SLOT_SIZE) {
                 rawJpgBuf[jpgLen++] = b;
               }
               if (lastByte == 0xFF && b == 0xD9) { // EOI
                 inFrame = false;
                 if (jpgLen > 100) {
-                  WebStreamManager::queueVideoFrame(rawJpgBuf, jpgLen);
+                  WebStreamManager::queueVideoFrame(rawJpgBuf, jpgLen, 0, 0);
                 }
                 jpgLen = 0;
               }
@@ -318,7 +678,6 @@ namespace {
           vTaskDelay(pdMS_TO_TICKS(5));
         }
 
-        // Nhường CPU cho Core 0 IDLE task (nuôi Watchdog)
         vTaskDelay(pdMS_TO_TICKS(1));
       }
 
@@ -334,7 +693,7 @@ namespace {
     s_urlStreamTaskHandle = nullptr;
     vTaskDelete(nullptr);
   }
-}
+} // namespace
 
 void WebStreamManager::init() {
   s_lastVideoFrameMs = 0;
@@ -346,46 +705,119 @@ void WebStreamManager::init() {
   s_fpsFrameCounter  = 0;
   s_urlStreamRunning = false;
   s_urlStreamTaskHandle = nullptr;
+  s_isPrebuffering   = true;
+  s_firstPacketArrivalMs = 0;
 
-  if (!s_asyncVideoBuf) {
-    if (psramFound()) {
-      s_asyncVideoBuf = (uint8_t*)ps_malloc(MAX_STREAM_JPG_SIZE);
-    }
-    if (!s_asyncVideoBuf) {
-      s_asyncVideoBuf = (uint8_t*)malloc(MAX_STREAM_JPG_SIZE);
-    }
-  }
-  s_asyncVideoLen = 0;
-  s_asyncVideoReady = false;
+  // Cấp phát linh hoạt (lazy allocation) khi luồng stream thực sự kết nối,
+  // tránh ngốn PSRAM khi trạm đang ở Màn hình chờ hoặc các chế độ khác.
 
-  Serial.println("📡 [STREAM] WebStreamManager đã khởi tạo thành công với PSRAM Double Buffer!");
+  Serial.println("📡 [STREAM] WebStreamManager đã khởi tạo thành công với SSUP Unified Ring Buffer!");
 }
 
 void WebStreamManager::loop() {
   unsigned long now = millis();
 
-  // 1. Kiểm tra nếu có Video Frame mới nhất, vẽ ra màn hình ST7789 trên Core 1
-  if (s_streamSessionActive && s_asyncVideoReady && s_asyncVideoBuf) {
-    taskENTER_CRITICAL(&s_streamMux);
-    size_t len = s_asyncVideoLen;
-    s_asyncVideoReady = false;
-    s_isDisplayRendering = true;
-    taskEXIT_CRITICAL(&s_streamMux);
+  // 1. Kiểm tra trạng thái Prebuffering
+  if (s_streamSessionActive && s_isPrebuffering) {
+    size_t vCount = 0;
+    taskENTER_CRITICAL(&s_videoRingMux);
+    vCount = s_videoRingCount;
+    taskEXIT_CRITICAL(&s_videoRingMux);
 
-    if (len > 0) {
-      TestDisplay::drawStreamJpegFrame(s_asyncVideoBuf, len);
-      s_fpsFrameCounter++;
+    size_t aCount = 0;
+    taskENTER_CRITICAL(&s_audioRingMux);
+    aCount = s_audioRingCount;
+    taskEXIT_CRITICAL(&s_audioRingMux);
+
+    bool ready = false;
+    // Ngưỡng 1: Đủ 8 frames video và 12,000 mẫu âm thanh (~0.75s)
+    if (vCount >= VIDEO_PREBUFFER_THRESHOLD && aCount >= 12000) {
+      ready = true;
+    }
+    // Ngưỡng 2: Luồng chỉ có video (không có audio) và tích lũy >= 10 frames
+    else if (vCount >= 10 && aCount == 0 && (s_firstPacketArrivalMs > 0) && (now - s_firstPacketArrivalMs > 800)) {
+      ready = true;
+    }
+    // Ngưỡng 3: Hết thời gian chờ 1200ms và có tối thiểu 4 frames hoặc 8000 mẫu âm thanh
+    else if ((s_firstPacketArrivalMs > 0) && (now - s_firstPacketArrivalMs >= 1200) && (vCount >= 4 || aCount >= 8000)) {
+      ready = true;
     }
 
-    s_isDisplayRendering = false;
-  } else if (!s_streamSessionActive && s_asyncVideoReady) {
-    taskENTER_CRITICAL(&s_streamMux);
-    s_asyncVideoReady = false;
-    s_asyncVideoLen = 0;
-    taskEXIT_CRITICAL(&s_streamMux);
+    if (ready) {
+      s_isPrebuffering = false;
+      s_playbackStartTimeMs = millis();
+      taskENTER_CRITICAL(&s_videoRingMux);
+      s_playbackStartPts = (s_videoRingCount > 0 && s_videoRing[s_videoTail].valid) ? s_videoRing[s_videoTail].pts : 0;
+      taskEXIT_CRITICAL(&s_videoRingMux);
+
+      Serial.printf("🎬 [STREAM SYNC] ✅ Prebuffering XONG! Video đệm: %u frames, Audio đệm: %u mẫu (~%.2fs) | Khởi động phát đồng bộ!\n",
+                    (unsigned)vCount, (unsigned)aCount, (float)aCount / 16000.0f);
+    }
   }
 
-  // 2. Tính FPS trung bình mỗi 1000ms
+  // 2. Trình phát Video Frame đồng bộ PTS trên Core 1
+  if (s_streamSessionActive && !s_isPrebuffering) {
+    size_t vCount = 0;
+    taskENTER_CRITICAL(&s_videoRingMux);
+    vCount = s_videoRingCount;
+    taskEXIT_CRITICAL(&s_videoRingMux);
+
+    size_t aCount = 0;
+    taskENTER_CRITICAL(&s_audioRingMux);
+    aCount = s_audioRingCount;
+    taskEXIT_CRITICAL(&s_audioRingMux);
+
+    if (vCount == 0 && aCount == 0 && s_lastVideoFrameMs > 0 && (now - s_lastVideoFrameMs > 800)) {
+      s_isPrebuffering = true;
+      s_firstPacketArrivalMs = now;
+      Serial.println("⏳ [STREAM SYNC] Bộ đệm cạn (Jitter Starvation)! Tạm dừng để Prebuffering lại...");
+    } else if (vCount > 0) {
+      uint32_t currentClockMs = now - s_playbackStartTimeMs;
+      uint32_t targetPts = s_playbackStartPts + currentClockMs;
+
+      taskENTER_CRITICAL(&s_videoRingMux);
+      QueuedVideoFrame* cur = &s_videoRing[s_videoTail];
+      uint32_t fPts = cur->pts;
+      size_t   fLen = cur->len;
+      uint8_t* fData = cur->data;
+      bool     fValid = cur->valid;
+      taskEXIT_CRITICAL(&s_videoRingMux);
+
+      if (fValid && fData && fLen > 0) {
+        if (fPts > targetPts + 10) {
+          // Khung hình ở tương lai: chưa đến thời điểm vẽ -> nhường nhịp cho các task khác
+        } else if (targetPts > fPts && (targetPts - fPts > 120)) {
+          // Khung hình bị trễ hơn 120ms: DROP ngay để đuổi kịp nhịp âm thanh
+          taskENTER_CRITICAL(&s_videoRingMux);
+          cur->valid = false;
+          s_videoTail = (s_videoTail + 1) % VIDEO_RING_CAPACITY;
+          s_videoRingCount--;
+          s_videoFramesDropped++;
+          taskEXIT_CRITICAL(&s_videoRingMux);
+        } else {
+          // Khung hình đúng nhịp! Tiến hành giải mã và vẽ lên màn hình ST7789
+          s_isDisplayRendering = true;
+          TestDisplay::drawStreamJpegFrame(fData, fLen);
+          s_isDisplayRendering = false;
+
+          taskENTER_CRITICAL(&s_videoRingMux);
+          cur->valid = false;
+          s_videoTail = (s_videoTail + 1) % VIDEO_RING_CAPACITY;
+          s_videoRingCount--;
+          s_videoFrameCount++;
+          s_fpsFrameCounter++;
+          taskEXIT_CRITICAL(&s_videoRingMux);
+        }
+      } else {
+        taskENTER_CRITICAL(&s_videoRingMux);
+        s_videoTail = (s_videoTail + 1) % VIDEO_RING_CAPACITY;
+        if (s_videoRingCount > 0) s_videoRingCount--;
+        taskEXIT_CRITICAL(&s_videoRingMux);
+      }
+    }
+  }
+
+  // 3. Tính FPS trung bình mỗi 1000ms
   if (now - s_fpsCalcStartMs >= 1000) {
     s_currentFps = (float)s_fpsFrameCounter * 1000.0f / (float)(now - s_fpsCalcStartMs);
     s_fpsFrameCounter = 0;
@@ -393,384 +825,50 @@ void WebStreamManager::loop() {
   }
 }
 
-bool WebStreamManager::queueVideoFrame(const uint8_t* jpegData, size_t len) {
-  if (!jpegData || len < 4 || len > MAX_STREAM_JPG_SIZE) return false;
+bool WebStreamManager::queueVideoFrame(const uint8_t* jpegData, size_t len, uint32_t pts, uint16_t seq) {
+  if (!jpegData || len < 4 || len > MAX_FRAME_SLOT_SIZE) return false;
 
-  // Kiểm tra header JPEG (SOI: 0xFF, 0xD8) để loại bỏ ngay frame rác / trống
   if (jpegData[0] != 0xFF || jpegData[1] != 0xD8) {
     s_videoFramesDropped++;
     return false;
   }
 
-  // Chặn frame video tàn dư trong vòng 1.2s sau khi người dùng bấm dừng stream
   if (millis() - s_lastStopMs < 1200) {
     s_videoFramesDropped++;
     return false;
   }
 
-  s_streamSessionActive = true;
-  s_lastVideoFrameMs = millis();
-  s_videoFrameCount++;
-
-  // Ưu tiên âm thanh - Cho phép Video Drop Frame:
-  // Nếu Core 1 đang giải mã/vẽ hoặc đã có 1 frame mới hơn chờ vẽ:
-  // Hủy (drop) khung hình này ngay lập tức! Chỉ vẽ khung hình mới nhất.
-  if (s_isDisplayRendering || s_asyncVideoReady) {
+  if (!ensureVideoRingSlots()) {
     s_videoFramesDropped++;
     return false;
   }
 
-  if (!s_asyncVideoBuf) {
-    if (psramFound()) {
-      s_asyncVideoBuf = (uint8_t*)ps_malloc(MAX_STREAM_JPG_SIZE);
-    }
-    if (!s_asyncVideoBuf) {
-      s_asyncVideoBuf = (uint8_t*)malloc(MAX_STREAM_JPG_SIZE);
-    }
+  if (s_firstPacketArrivalMs == 0) {
+    s_firstPacketArrivalMs = millis();
   }
-  if (!s_asyncVideoBuf) return false;
 
-  taskENTER_CRITICAL(&s_streamMux);
-  memcpy(s_asyncVideoBuf, jpegData, len);
-  s_asyncVideoLen = len;
-  s_asyncVideoReady = true;
-  taskEXIT_CRITICAL(&s_streamMux);
+  s_streamSessionActive = true;
+  s_lastVideoFrameMs = millis();
+
+  taskENTER_CRITICAL(&s_videoRingMux);
+  size_t slot = s_videoHead;
+  memcpy(s_videoRing[slot].data, jpegData, len);
+  s_videoRing[slot].len = len;
+  s_videoRing[slot].pts = pts;
+  s_videoRing[slot].seq = seq;
+  s_videoRing[slot].valid = true;
+
+  s_videoHead = (s_videoHead + 1) % VIDEO_RING_CAPACITY;
+  if (s_videoRingCount >= VIDEO_RING_CAPACITY) {
+    s_videoRing[s_videoTail].valid = false;
+    s_videoTail = (s_videoTail + 1) % VIDEO_RING_CAPACITY;
+    s_videoFramesDropped++;
+  } else {
+    s_videoRingCount++;
+  }
+  taskEXIT_CRITICAL(&s_videoRingMux);
 
   return true;
-}
-
-// ---------------- PSRAM AUDIO JITTER RING BUFFER (192,000 samples = 384 KB = 12.0s @ 16kHz) ----------------
-static const size_t AUDIO_RING_CAPACITY = 192000;      // 384 KB PSRAM (~12 giây âm thanh Mono 16kHz)
-static const size_t AUDIO_PREBUFFER_THRESHOLD = 8000;  // 0.50 giây âm thanh tải trước (Hấp thụ hoàn toàn Jitter Wi-Fi)
-static int16_t* s_audioRingBuf          = nullptr;
-static volatile size_t s_audioRingHead  = 0; // Vị trí đọc
-static volatile size_t s_audioRingTail  = 0; // Vị trí ghi
-static volatile size_t s_audioRingCount = 0;
-static volatile bool   s_isPrebuffering = true;
-static portMUX_TYPE s_audioRingMux      = portMUX_INITIALIZER_UNLOCKED;
-
-static TaskHandle_t s_audioPumpTaskHandle = nullptr;
-static volatile bool s_audioPumpRunning   = false;
-
-// ---------------- UDP AUDIO RECEIVER TASK (Core 0, Port 12345) ----------------
-static const uint16_t AUDIO_UDP_PORT      = 12345;
-static TaskHandle_t s_audioUdpTaskHandle  = nullptr;
-static volatile bool s_audioUdpRunning    = false;
-static int s_audioUdpSock                 = -1;
-static uint32_t s_udpPacketsReceived      = 0;
-
-static void audioPumpTask(void* param) {
-  Serial.println("🎧 [AUDIO PUMP TASK] Đã khởi chạy trên Core 0 (PSRAM 384KB Ring Buffer Jitter Absorber)!");
-  const size_t CHUNK = 256; // 16ms âm thanh ở 16kHz
-  int16_t localMono[CHUNK];
-
-  while (s_audioPumpRunning) {
-    size_t count = 0;
-    taskENTER_CRITICAL(&s_audioRingMux);
-    count = s_audioRingCount;
-    taskEXIT_CRITICAL(&s_audioRingMux);
-
-    // Pre-buffering: Khi mới bắt đầu hoặc sau khi cạn dữ liệu, nạp đầy 0.50s (~8,000 mẫu) mới kích hoạt loa
-    if (s_isPrebuffering) {
-      if (count >= AUDIO_PREBUFFER_THRESHOLD) {
-        s_isPrebuffering = false;
-        Serial.printf("🎧 [AUDIO PUMP] ✅ Pre-buffering hoàn tất (%u mẫu ~ %.2fs)! Kích hoạt phát loa I2S.\n",
-                      (unsigned)count, (float)count / 16000.0f);
-      } else {
-        vTaskDelay(pdMS_TO_TICKS(5));
-        continue;
-      }
-    }
-
-    if (count >= CHUNK) {
-      taskENTER_CRITICAL(&s_audioRingMux);
-      for (size_t i = 0; i < CHUNK; i++) {
-        localMono[i] = s_audioRingBuf[s_audioRingHead];
-        s_audioRingHead = (s_audioRingHead + 1) % AUDIO_RING_CAPACITY;
-      }
-      s_audioRingCount -= CHUNK;
-      taskEXIT_CRITICAL(&s_audioRingMux);
-
-      TestAudio::playStreamPcm(localMono, CHUNK);
-      taskYIELD();
-    } else if (count > 0) {
-      // Buffer sắp cạn: nếu sau 1500ms không có thêm gói mới từ mạng, phát nốt phần còn lại rồi vào chế độ pre-buffering
-      if (millis() - s_lastAudioPcmMs > 1500) {
-        size_t toPlay = count;
-        taskENTER_CRITICAL(&s_audioRingMux);
-        for (size_t i = 0; i < toPlay; i++) {
-          localMono[i] = s_audioRingBuf[s_audioRingHead];
-          s_audioRingHead = (s_audioRingHead + 1) % AUDIO_RING_CAPACITY;
-        }
-        s_audioRingCount -= toPlay;
-        taskEXIT_CRITICAL(&s_audioRingMux);
-
-        TestAudio::playStreamPcm(localMono, toPlay);
-        s_isPrebuffering = true;
-      } else {
-        vTaskDelay(pdMS_TO_TICKS(2));
-      }
-    } else {
-      // count == 0: Chờ nhẹ; chỉ bật lại cờ prebuffering nếu đã quá 1500ms không có dữ liệu mới
-      if (millis() - s_lastAudioPcmMs > 1500) {
-        s_isPrebuffering = true;
-      }
-      vTaskDelay(pdMS_TO_TICKS(5));
-    }
-  }
-
-  s_audioPumpTaskHandle = nullptr;
-  vTaskDelete(NULL);
-}
-
-static void audioUdpTask(void* param) {
-  Serial.println("🚀 [UDP AUDIO] Task lắng nghe UDP đã khởi tạo trên Core 0 (chờ mạng Wi-Fi)...");
-
-  while (s_audioUdpRunning) {
-    // 1. Chờ đến khi Wi-Fi có IP (STA kết nối hoặc SoftAP đã bật)
-    if (WiFi.status() != WL_CONNECTED && WiFi.softAPIP() == IPAddress(0, 0, 0, 0)) {
-      vTaskDelay(pdMS_TO_TICKS(500));
-      continue;
-    }
-
-    // Đệm thêm 200ms sau khi có IP để chắc chắn stack LWIP sẵn sàng 100%
-    vTaskDelay(pdMS_TO_TICKS(200));
-
-    Serial.printf("🚀 [UDP AUDIO] Đang mở socket UDP trên port %u (Core 0)...\n", AUDIO_UDP_PORT);
-
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) {
-      Serial.printf("❌ [UDP AUDIO] Không thể tạo socket UDP (errno %d)\n", errno);
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      continue;
-    }
-
-    // Tăng buffer nhận LWIP lên 32KB để hấp thụ jitter tối đa
-    int rcvbuf = 32768;
-    setsockopt(sock, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
-
-    // Timeout 1 giây để kiểm tra cờ s_audioUdpRunning
-    struct timeval tv;
-    tv.tv_sec = 1;
-    tv.tv_usec = 0;
-    setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-    struct sockaddr_in serv_addr;
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_addr.sin_port = htons(AUDIO_UDP_PORT);
-
-    if (bind(sock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-      Serial.printf("❌ [UDP AUDIO] Không thể bind UDP port %u (errno %d)\n", AUDIO_UDP_PORT, errno);
-      close(sock);
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      continue;
-    }
-
-    s_audioUdpSock = sock;
-    Serial.printf("✅ [UDP AUDIO] Đang lắng nghe UDP port %u trên Core 0! Sẵn sàng nhận PCM 16kHz.\n", AUDIO_UDP_PORT);
-
-    const size_t UDP_BUF_MAX = 2048;
-    int16_t* udpBuf = (int16_t*)(psramFound() ? ps_malloc(UDP_BUF_MAX) : malloc(UDP_BUF_MAX));
-    if (!udpBuf) {
-      Serial.println("❌ [UDP AUDIO] Không đủ bộ nhớ cấp phát cho buffer UDP!");
-      close(sock);
-      s_audioUdpSock = -1;
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      continue;
-    }
-
-    struct sockaddr_in client_addr;
-    socklen_t client_len = sizeof(client_addr);
-
-    while (s_audioUdpRunning && (WiFi.status() == WL_CONNECTED || WiFi.softAPIP() != IPAddress(0, 0, 0, 0))) {
-      int len = recvfrom(sock, (char*)udpBuf, UDP_BUF_MAX, 0, (struct sockaddr*)&client_addr, &client_len);
-      if (len <= 0) {
-        if (errno == EAGAIN || errno == EWOULDBLOCK) {
-          continue;
-        }
-        vTaskDelay(pdMS_TO_TICKS(10));
-        continue;
-      }
-
-      size_t samples = len / sizeof(int16_t);
-      if (samples > 0) {
-        s_udpPacketsReceived++;
-        WebStreamManager::playAudioPcmChunk(udpBuf, samples);
-      }
-    }
-
-    if (udpBuf) free(udpBuf);
-    close(sock);
-    s_audioUdpSock = -1;
-    vTaskDelay(pdMS_TO_TICKS(500));
-  }
-
-  s_audioUdpTaskHandle = nullptr;
-  Serial.println("🛑 [UDP AUDIO] Task UDP đã dừng.");
-  vTaskDelete(NULL);
-}
-
-void WebStreamManager::startAudioUdpListener() {
-  if (!s_audioUdpTaskHandle) {
-    s_audioUdpRunning = true;
-    xTaskCreatePinnedToCore(
-      audioUdpTask,
-      "audioUdpTask",
-      4096,
-      nullptr,
-      3,
-      &s_audioUdpTaskHandle,
-      0
-    );
-  }
-}
-
-// ---------------- TCP VIDEO STREAM RECEIVER TASK (Core 0, Port 12346) ----------------
-static const uint16_t VIDEO_TCP_PORT      = 12346;
-static TaskHandle_t s_videoTcpTaskHandle  = nullptr;
-static volatile bool s_videoTcpRunning    = false;
-static int s_videoTcpServerSock           = -1;
-
-static bool recvAllExact(int sock, uint8_t* dest, size_t targetLen) {
-  size_t got = 0;
-  while (got < targetLen && s_videoTcpRunning) {
-    int n = recv(sock, (char*)(dest + got), targetLen - got, 0);
-    if (n <= 0) {
-      if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-        vTaskDelay(pdMS_TO_TICKS(5));
-        continue;
-      }
-      return false;
-    }
-    got += n;
-  }
-  return (got == targetLen);
-}
-
-static void videoTcpTask(void* param) {
-  Serial.println("🎬 [TCP VIDEO] Task lắng nghe Video TCP đã khởi tạo trên Core 0...");
-
-  while (s_videoTcpRunning) {
-    if (WiFi.status() != WL_CONNECTED && WiFi.softAPIP() == IPAddress(0, 0, 0, 0)) {
-      vTaskDelay(pdMS_TO_TICKS(500));
-      continue;
-    }
-    vTaskDelay(pdMS_TO_TICKS(200));
-
-    int serverSock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (serverSock < 0) {
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      continue;
-    }
-
-    int enable = 1;
-    setsockopt(serverSock, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable));
-
-    struct sockaddr_in serv_addr;
-    memset(&serv_addr, 0, sizeof(serv_addr));
-    serv_addr.sin_family = AF_INET;
-    serv_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    serv_addr.sin_port = htons(VIDEO_TCP_PORT);
-
-    if (bind(serverSock, (struct sockaddr*)&serv_addr, sizeof(serv_addr)) < 0) {
-      close(serverSock);
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      continue;
-    }
-
-    if (listen(serverSock, 2) < 0) {
-      close(serverSock);
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      continue;
-    }
-
-    s_videoTcpServerSock = serverSock;
-    Serial.printf("🎬 [TCP VIDEO] Đang lắng nghe cổng Video TCP %u trên Core 0 (sẵn sàng nhận JPEG)...\n", VIDEO_TCP_PORT);
-
-    uint8_t* tcpFrameBuf = (uint8_t*)(psramFound() ? ps_malloc(MAX_STREAM_JPG_SIZE) : malloc(MAX_STREAM_JPG_SIZE));
-    if (!tcpFrameBuf) {
-      Serial.println("❌ [TCP VIDEO] Không đủ bộ nhớ cấp phát tcpFrameBuf!");
-      close(serverSock);
-      s_videoTcpServerSock = -1;
-      vTaskDelay(pdMS_TO_TICKS(2000));
-      continue;
-    }
-
-    while (s_videoTcpRunning && (WiFi.status() == WL_CONNECTED || WiFi.softAPIP() != IPAddress(0, 0, 0, 0))) {
-      struct sockaddr_in client_addr;
-      socklen_t client_len = sizeof(client_addr);
-      int clientSock = accept(serverSock, (struct sockaddr*)&client_addr, &client_len);
-      if (clientSock < 0) {
-        if (!s_videoTcpRunning) break;
-        vTaskDelay(pdMS_TO_TICKS(100));
-        continue;
-      }
-
-      int nodelay = 1;
-      setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
-      struct timeval tv;
-      tv.tv_sec = 10;
-      tv.tv_usec = 0;
-      setsockopt(clientSock, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-      int rcvbuf = 16384; // 16KB an toàn, không chiếm dụng cạn kiệt Internal SRAM Heap của ESP32
-      setsockopt(clientSock, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
-
-      int keepAlive = 1;
-      int keepIdle = 5;
-      int keepInterval = 2;
-      int keepCount = 3;
-      setsockopt(clientSock, SOL_SOCKET, SO_KEEPALIVE, &keepAlive, sizeof(keepAlive));
-      setsockopt(clientSock, IPPROTO_TCP, TCP_KEEPIDLE, &keepIdle, sizeof(keepIdle));
-      setsockopt(clientSock, IPPROTO_TCP, TCP_KEEPINTVL, &keepInterval, sizeof(keepInterval));
-      setsockopt(clientSock, IPPROTO_TCP, TCP_KEEPCNT, &keepCount, sizeof(keepCount));
-
-      Serial.println("⚡ [TCP VIDEO] Transcoder đã kết nối luồng Video trực tiếp tốc độ cao!");
-
-      while (s_videoTcpRunning) {
-        uint32_t netLen = 0;
-        if (!recvAllExact(clientSock, (uint8_t*)&netLen, 4)) break;
-
-        uint32_t frameLen = ntohl(netLen);
-        if (frameLen == 0 || frameLen > MAX_STREAM_JPG_SIZE) {
-          Serial.printf("⚠️ [TCP VIDEO] Kích thước frame không hợp lệ: %u bytes\n", (unsigned)frameLen);
-          break;
-        }
-
-        if (!recvAllExact(clientSock, tcpFrameBuf, frameLen)) break;
-
-        WebStreamManager::queueVideoFrame(tcpFrameBuf, frameLen);
-      }
-
-      close(clientSock);
-      Serial.println("⚪ [TCP VIDEO] Transcoder đã ngắt luồng Video.");
-    }
-
-    if (tcpFrameBuf) free(tcpFrameBuf);
-    close(serverSock);
-    s_videoTcpServerSock = -1;
-    vTaskDelay(pdMS_TO_TICKS(500));
-  }
-
-  s_videoTcpTaskHandle = nullptr;
-  Serial.println("🛑 [TCP VIDEO] Task Video TCP đã dừng.");
-  vTaskDelete(NULL);
-}
-
-void WebStreamManager::startVideoTcpListener() {
-  if (!s_videoTcpTaskHandle) {
-    s_videoTcpRunning = true;
-    xTaskCreatePinnedToCore(
-      videoTcpTask,
-      "videoTcpTask",
-      4096,
-      nullptr,
-      3,
-      &s_videoTcpTaskHandle,
-      0
-    );
-  }
 }
 
 void WebStreamManager::playAudioPcmChunk(const int16_t* pcmSamples, size_t sampleCount) {
@@ -778,7 +876,6 @@ void WebStreamManager::playAudioPcmChunk(const int16_t* pcmSamples, size_t sampl
   s_lastAudioPcmMs = millis();
   s_audioChunkCount++;
 
-  // Khởi tạo Ring Buffer 384KB trên PSRAM nếu chưa có
   if (!s_audioRingBuf) {
     if (psramFound()) {
       s_audioRingBuf = (int16_t*)ps_malloc(AUDIO_RING_CAPACITY * sizeof(int16_t));
@@ -789,12 +886,10 @@ void WebStreamManager::playAudioPcmChunk(const int16_t* pcmSamples, size_t sampl
     s_audioRingHead = 0;
     s_audioRingTail = 0;
     s_audioRingCount = 0;
-    s_isPrebuffering = true;
   }
 
   if (!s_audioRingBuf) return;
 
-  // Khởi động Task phát ngầm trên Core 0 với Priority 4 nếu chưa chạy
   if (!s_audioPumpTaskHandle) {
     s_audioPumpRunning = true;
     xTaskCreatePinnedToCore(
@@ -808,7 +903,6 @@ void WebStreamManager::playAudioPcmChunk(const int16_t* pcmSamples, size_t sampl
     );
   }
 
-  // Đẩy toàn bộ mẫu vào Ring Buffer (cực nhanh: ~0.02ms, không bao giờ drop, không block WebServer)
   taskENTER_CRITICAL(&s_audioRingMux);
   for (size_t i = 0; i < sampleCount; i++) {
     if (s_audioRingCount < AUDIO_RING_CAPACITY) {
@@ -816,20 +910,35 @@ void WebStreamManager::playAudioPcmChunk(const int16_t* pcmSamples, size_t sampl
       s_audioRingTail = (s_audioRingTail + 1) % AUDIO_RING_CAPACITY;
       s_audioRingCount++;
     } else {
-      // Bể chứa 384KB (~12 giây) nếu đầy tràn do client gửi quá nhanh: trượt mẫu cũ nhất
       s_audioRingHead = (s_audioRingHead + 1) % AUDIO_RING_CAPACITY;
       s_audioRingBuf[s_audioRingTail] = pcmSamples[i];
       s_audioRingTail = (s_audioRingTail + 1) % AUDIO_RING_CAPACITY;
     }
   }
   taskEXIT_CRITICAL(&s_audioRingMux);
+}
 
-  if (s_audioChunkCount == 1 || s_audioChunkCount % 50 == 0) {
-    Serial.printf("🔊 [STREAM AUDIO] Nhận %u mẫu PCM (chunk #%u | đệm: %u mẫu ~ %.2fs | drop video: %u)\n",
-                  (unsigned)sampleCount, (unsigned)s_audioChunkCount,
-                  (unsigned)s_audioRingCount, (float)s_audioRingCount / 16000.0f,
-                  (unsigned)s_videoFramesDropped);
+void WebStreamManager::startUnifiedStreamListener() {
+  if (!s_unifiedStreamTaskHandle) {
+    s_unifiedStreamRunning = true;
+    xTaskCreatePinnedToCore(
+      unifiedStreamTask,
+      "unifiedStreamTask",
+      8192,
+      nullptr,
+      3,
+      &s_unifiedStreamTaskHandle,
+      0
+    );
   }
+}
+
+void WebStreamManager::startAudioUdpListener() {
+  startUnifiedStreamListener();
+}
+
+void WebStreamManager::startVideoTcpListener() {
+  startUnifiedStreamListener();
 }
 
 bool WebStreamManager::startUrlStream(const String& type, const String& url) {
@@ -847,7 +956,6 @@ bool WebStreamManager::startUrlStream(const String& type, const String& url) {
   s_urlStreamRunning = true;
   s_streamSessionActive = true;
 
-  // Tạo Task trên Core 0 với Stack 12KB (an toàn cho minimp3 scratch và HTTP Client)
   BaseType_t res = xTaskCreatePinnedToCore(
     urlStreamTask,
     "urlStreamTask",
@@ -871,8 +979,6 @@ void WebStreamManager::stopUrlStream() {
   }
   s_activeUrl = "";
   s_activeUrlType = "";
-  s_asyncVideoReady = false;
-  s_asyncVideoLen = 0;
 }
 
 void WebStreamManager::stopAll() {
@@ -883,10 +989,9 @@ void WebStreamManager::stopAll() {
   s_lastVideoFrameMs = 0;
   s_lastAudioPcmMs = 0;
   s_currentFps = 0.0f;
-  s_asyncVideoReady = false;
-  s_asyncVideoLen = 0;
   s_videoFramesDropped = 0;
   s_isPrebuffering = true;
+  s_firstPacketArrivalMs = 0;
 
   // Xóa sạch Ring Buffer âm thanh
   taskENTER_CRITICAL(&s_audioRingMux);
@@ -894,6 +999,17 @@ void WebStreamManager::stopAll() {
   s_audioRingTail = 0;
   s_audioRingCount = 0;
   taskEXIT_CRITICAL(&s_audioRingMux);
+
+  // Xóa sạch Ring Buffer video
+  taskENTER_CRITICAL(&s_videoRingMux);
+  for (size_t i = 0; i < VIDEO_RING_CAPACITY; i++) {
+    s_videoRing[i].valid = false;
+    s_videoRing[i].len = 0;
+  }
+  s_videoHead = 0;
+  s_videoTail = 0;
+  s_videoRingCount = 0;
+  taskEXIT_CRITICAL(&s_videoRingMux);
 }
 
 bool WebStreamManager::isStreamSessionActive() {
@@ -924,14 +1040,18 @@ uint32_t WebStreamManager::getDroppedFrames() {
   return s_videoFramesDropped;
 }
 
+uint32_t WebStreamManager::getQueuedVideoFrames() {
+  return s_videoRingCount;
+}
+
 void WebStreamManager::getStatusJson(JsonDocument& doc) {
   doc["video_active"]   = isVideoStreaming();
   doc["audio_active"]   = isAudioStreaming();
   doc["fps"]            = serialized(String(getFps(), 1));
   doc["video_frames"]   = s_videoFrameCount;
   doc["video_dropped"]  = s_videoFramesDropped;
+  doc["video_queued"]   = s_videoRingCount;
   doc["audio_chunks"]   = s_audioChunkCount;
-  doc["audio_udp_pkts"] = s_udpPacketsReceived;
   doc["audio_buf_ms"]   = (uint32_t)((s_audioRingCount * 1000ULL) / 16000ULL);
   doc["prebuffering"]   = (bool)s_isPrebuffering;
   doc["url_running"]    = (bool)s_urlStreamRunning;
@@ -941,11 +1061,10 @@ void WebStreamManager::getStatusJson(JsonDocument& doc) {
 }
 
 bool WebStreamManager::hasAllocatedBuffers() {
-  return (s_asyncVideoBuf != nullptr || s_audioRingBuf != nullptr);
+  return (s_videoRing[0].data != nullptr || s_audioRingBuf != nullptr);
 }
 
 size_t WebStreamManager::trimMemory() {
-  // Không thu hồi nếu đang stream video hoặc audio
   if (isVideoStreaming() || isAudioStreaming() || s_urlStreamRunning) {
     return 0;
   }
@@ -970,7 +1089,6 @@ size_t WebStreamManager::trimMemory() {
     s_audioRingHead = 0;
     s_audioRingTail = 0;
     s_audioRingCount = 0;
-    s_isPrebuffering = true;
     totalFreed += AUDIO_RING_CAPACITY * sizeof(int16_t);
   }
   taskEXIT_CRITICAL(&s_audioRingMux);
@@ -979,24 +1097,35 @@ size_t WebStreamManager::trimMemory() {
     free(pAudio);
   }
 
-  // 3. Thu hồi s_asyncVideoBuf (64 KB)
-  uint8_t* pVideo = nullptr;
-  taskENTER_CRITICAL(&s_streamMux);
-  if (s_asyncVideoBuf != nullptr) {
-    pVideo = s_asyncVideoBuf;
-    s_asyncVideoBuf = nullptr;
-    s_asyncVideoLen = 0;
-    s_asyncVideoReady = false;
-    totalFreed += MAX_STREAM_JPG_SIZE;
-  }
-  taskEXIT_CRITICAL(&s_streamMux);
+  // 3. Thu hồi toàn bộ 20 slot Video Ring Buffer trong PSRAM (1.6 MB)
+  uint8_t* toFree[VIDEO_RING_CAPACITY] = {nullptr};
 
-  if (pVideo != nullptr) {
-    free(pVideo);
+  taskENTER_CRITICAL(&s_videoRingMux);
+  for (size_t i = 0; i < VIDEO_RING_CAPACITY; i++) {
+    if (s_videoRing[i].data != nullptr) {
+      toFree[i] = s_videoRing[i].data;
+      s_videoRing[i].data = nullptr;
+      totalFreed += MAX_FRAME_SLOT_SIZE;
+    }
+    s_videoRing[i].len = 0;
+    s_videoRing[i].pts = 0;
+    s_videoRing[i].seq = 0;
+    s_videoRing[i].valid = false;
+  }
+  s_videoHead = 0;
+  s_videoTail = 0;
+  s_videoRingCount = 0;
+  taskEXIT_CRITICAL(&s_videoRingMux);
+
+  // Giải phóng ngoài critical section để đảm bảo an toàn tuyệt đối cho heap mutex
+  for (size_t i = 0; i < VIDEO_RING_CAPACITY; i++) {
+    if (toFree[i] != nullptr) {
+      free(toFree[i]);
+    }
   }
 
   if (totalFreed > 0) {
-    Serial.printf("🧹 [TRIM STREAM] Đã giải phóng bộ đệm đa phương tiện (%u bytes / %u KB)\n",
+    Serial.printf("🧹 [TRIM STREAM] Đã giải phóng toàn bộ bộ đệm SSUP (%u bytes / %u KB)\n",
                   (unsigned int)totalFreed, (unsigned int)(totalFreed / 1024));
   }
   return totalFreed;

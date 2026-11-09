@@ -1,9 +1,9 @@
 {
-  "version": "v3.2.8",
+  "version": "v3.2.9",
   "name": "Space OS",
-  "build_date": "2026-10-24",
+  "build_date": "2026-11-09",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
-  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.2.8/firmware.bin",
-  "size": 2075504,
-  "changelog": "🚀 Space OS v3.2.8 - Web Authentication Security & Factory Reset (Default: Theme Mèo Gome Chibi):\n- Màn hình Đăng Nhập Web Cyberpunk & Xác Thực Người Dùng (WebAuth): Bảo vệ toàn bộ giao diện điều khiển trạm. Mặc định tài khoản ban đầu là admin / admin. Hỗ trợ ghi nhớ phiên đăng nhập (Token-based Session & Cookie), nút Đổi Mật Khẩu (Change Password Modal), và nút Đăng Xuất (Logout).\n- Bảo Vệ Toàn Diện REST APIs Điều Khiển: Toàn bộ API kiểm soát phần cứng (Motor cối xay gió, LED Edison/COB, bàn phím điều hướng, cài đặt màn hình, tải ảnh, cập nhật OTA, Web CLI Terminal) đều được khóa an toàn, yêu cầu xác thực 401 Unauthorized nếu chưa đăng nhập.\n- Chế độ Khôi Phục Cài Đặt Ban Đầu (Factory Reset) với Giao diện MÈO GOME CHIBI Mặc Định: Đặt lại toàn bộ tùy chỉnh người dùng, xóa bộ đệm cấu hình, đưa âm lượng về 70%, khôi phục tài khoản Web về admin/admin, và tự động chuyển giao diện màn hình trạm sang MÈO GOME CHIBI (Theme 5).\n- Mục Cài Đặt Thứ 15 Trên Màn Hình Trạm (Mode 6 - Cài Đặt Hệ Thống): Tích hợp tính năng '15. Khôi phục Cài đặt Gốc' ở cuối danh sách cài đặt với cơ chế điều hướng modulo động (S40_SETTINGS_COUNT = 15), khắc phục triệt để lỗi hiển thị lặp/trùng lặp nội dung của mục trước đó.\n- Tích hợp Khôi Phục Cài Đặt Ban Đầu trên Web UI & CLI: Thêm nút Khôi phục cài đặt gốc trong tab Hệ Thống và hỗ trợ lệnh CLI 'factory-reset'/'reset-defaults' trong Web Terminal."
+  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.2.9/firmware.bin",
+  "size": 2481904,
+  "changelog": "🚀 Space OS v3.2.9 - Cinema Mode Power Governor & Infinite Stream Stability:\n- Khắc phục triệt để lỗi Brownout (Sụt áp) & Ngoại lệ Crash khi hết video:\n  + Vô hiệu hóa ngắt nhạy của RTC Brownout Detector trước các xung cao tần.\n  + Kích hoạt Cinema Mode: Tự động hạ đèn Edison về 10% và tắt LED COB khi stream để dãn tải ~400mA.\n  + Triệt tiêu vòng lặp đệ quy khi thoát Stream Mode 17 và phân tách tác vụ đa nhân (Core Decoupling) an toàn.\n  + Tăng gấp đôi Stack cho tác vụ Unified Stream lên 8KB và hạ công suất phát Wi-Fi về 17dBm ổn định nguồn điện.\n- Mở rộng Trợ lý Không Gian XiaoZhi AI & MCP Tools:\n  + Thêm khẩu lệnh truy vấn thời gian thực: Báo cáo trạng thái tổng thể trạm, pin, Wi-Fi, thẻ nhớ SD, thời tiết phòng.\n  + Điều khiển đa phương tiện qua AI: Chuyển bài nhạc, mở ứng dụng game, đổi hình nền tự động.\n  + Tối ưu Jitter Buffer 240ms và Ping-Pong Frame Buffer trên PSRAM loại bỏ xé hình và nuốt âm."
 }

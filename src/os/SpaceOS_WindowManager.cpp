@@ -6,6 +6,7 @@
 #include "tests/TestSDCard.h"
 #include "tests/TestWindmill.h"
 #include "drivers/CobLedDriver.h"
+#include "drivers/MotorDriver.h"
 #include "Config.h"
 #include "WifiManager.h"
 #include "PcStatsManager.h"
@@ -81,6 +82,7 @@ namespace TestDisplay {
   // 11: App Symbian - Gọi Trợ Lý XiaoZhi AI (2/3 Biểu cảm + 1/3 Khung Hội thoại tròn dòng & tự cuộn)
   static uint8_t currentMode = 0;
   static uint8_t hudStyle = 1;
+  static void switchModeSafe(uint8_t targetMode);
 
   static int s40MenuCursor = 0;       // 0..11 trên lưới 4x3
   static int s40WallpaperCursor = 0;
@@ -536,10 +538,11 @@ namespace TestDisplay {
   void wakeUpScreenFromTask() {
     lastUserActivityMs = millis();
     isScreenSleeping = false;
-    currentMode = 0;
+    // Không ép currentMode = 0 để giữ nguyên màn hình chức năng người dùng đang sử dụng
     DisplayDriver::wakeUpScreenFromTask();
     setBacklightBrightness(screenBrightnessPct);
     PowerManagementService::notifyUserActivity();
+    // Không vẽ TFT trực tiếp từ context task của Core 0 để tránh xung đột bus SPI với Core 1
   }
 
   // Lấy thời gian hiện tại (từ NTP nếu đã đồng bộ, hoặc đếm từ mốc mặc định)
@@ -5508,13 +5511,29 @@ namespace TestDisplay {
     TestAudio::stopVoicePlaybackAsync();
   }
 
+  static bool s_waitForAiTtsToPlayMedia = false;
+  static unsigned long s_aiTtsFinishWaitStartMs = 0;
+
+  void setWaitForAiTtsToPlayMedia(bool wait) {
+    s_waitForAiTtsToPlayMedia = wait;
+    s_aiTtsFinishWaitStartMs = 0;
+    if (wait) {
+      Serial.println("⏳ [MEDIA] Kích hoạt cờ chờ Trợ lý AI dứt lời trước khi phát nhạc!");
+    }
+  }
+
+  bool isWaitingForAiTtsToPlayMedia() {
+    return s_waitForAiTtsToPlayMedia;
+  }
+
   // Bắt đầu / Dừng phát âm thanh thật ra Loa PWM GPIO 15 trong Trình Phát Nhạc
   static void startMediaAudioPlayback() {
     if (s40MediaTrackCount <= 0) return;
 
-    // Dừng ngay tác vụ phát cũ và nhường CPU 30ms để giải phóng SD Mutex
+    // Dừng ngay tác vụ phát cũ, xả sạch DMA stream XiaoZhi nếu có và nhường CPU để giải phóng Mutex
     stopMediaAudioPlayback();
-    vTaskDelay(pdMS_TO_TICKS(30));
+    TestAudio::resetStreamPcm();
+    vTaskDelay(pdMS_TO_TICKS(40));
 
     String fn = s40MediaTracks[s40MediaTrackIdx];
     Serial.printf("▶️ [MEDIA PLAYER] Bat dau phat: %s\n", fn.c_str());
@@ -6393,15 +6412,18 @@ namespace TestDisplay {
   static unsigned long lastStreamFrameMs = 0;
   static uint32_t s_streamFrameCount = 0;
 
-  // Double-Buffering trong PSRAM: Cấp phát toàn bộ Framebuffer 240x320 (153.6 KB)
-  // Giải mã toàn bộ khối MCU của JPEG vào RAM trước, sau đó bắn lên màn hình bằng 1 lệnh duy nhất.
+  // Double-Buffering Ping-Pong trong PSRAM: Cấp phát 2 bộ đệm Framebuffer 240x320 (153.6 KB x 2 = 307.2 KB)
+  // Luôn giải mã JPEG vào Back Buffer. Khi giải mã thành công (JDR_OK), bắn toàn bộ khối pixel qua SPI
+  // bằng fastBlockTransfer (32-bit registers, ~11ms) và tráo (flip) buffer.
   // Triệt tiêu 100% hiện tượng quét dòng (rolling scan) và rách hình (screen tearing).
-  static uint16_t* s_streamFrameBuffer = nullptr;
+  static uint16_t* s_streamFrameBuffer[2] = {nullptr, nullptr};
+  static uint8_t s_streamPingPongIdx = 0; // 0 hoặc 1: con trỏ trỏ tới Back Buffer
   static uint16_t s_streamDecodedW = 0;
   static uint16_t s_streamDecodedH = 0;
 
   static bool jpgStreamRenderCallback(int16_t x, int16_t y, uint16_t w, uint16_t h, uint16_t* bitmap) {
-    if (!s_streamFrameBuffer || !bitmap || w == 0 || h == 0) return false;
+    uint16_t* backBuf = s_streamFrameBuffer[s_streamPingPongIdx];
+    if (!backBuf || !bitmap || w == 0 || h == 0) return false;
     if (s_streamDecodedW == 0 || s_streamDecodedH == 0) return false;
 
     // Kích thước tối đa của toàn bộ Framebuffer
@@ -6433,7 +6455,7 @@ namespace TestDisplay {
       if (copyW > 0) {
         size_t pixelIndex = (size_t)targetY * stride + startX;
         if (pixelIndex + copyW <= maxPixels) {
-          uint16_t* dst = s_streamFrameBuffer + pixelIndex;
+          uint16_t* dst = backBuf + pixelIndex;
           const uint16_t* src = bitmap + srcOffset;
           memcpy(dst, src, copyW * sizeof(uint16_t));
         }
@@ -6485,6 +6507,39 @@ namespace TestDisplay {
     }
   }
 
+  static uint8_t s_streamSavedEdisonBrightness = 0;
+  static bool    s_streamSavedCobLedOn = false;
+  static bool    s_streamPowerPacingActive = false;
+
+  void applyStreamPowerGovernor(bool enable) {
+    if (enable) {
+      if (!s_streamPowerPacingActive) {
+        s_streamSavedEdisonBrightness = MotorDriver::getEdisonBrightness();
+        s_streamSavedCobLedOn = CobLeds::isOn();
+        s_streamPowerPacingActive = true;
+
+        // Giảm tải nguồn: Hạ Edison về mức dịu 10% và tắt COB LED (Cinema Mode)
+        // Tiết kiệm ngay ~350mA - 450mA trên đường nguồn 5V, triệt tiêu nguy cơ sụt áp Brownout
+        if (s_streamSavedEdisonBrightness > 15) {
+          MotorDriver::setEdisonBrightness(10);
+        }
+        if (s_streamSavedCobLedOn) {
+          CobLeds::turnOff();
+        }
+        Serial.println("⚡ [STREAM POWER GOVERNOR] Đã kích hoạt Cinema Mode: Giảm tải ~400mA chống sụt áp nguồn (Brownout)!");
+      }
+    } else {
+      if (s_streamPowerPacingActive) {
+        s_streamPowerPacingActive = false;
+        MotorDriver::setEdisonBrightness(s_streamSavedEdisonBrightness);
+        if (s_streamSavedCobLedOn) {
+          CobLeds::turnOn();
+        }
+        Serial.println("⚡ [STREAM POWER GOVERNOR] Đã khôi phục trạng thái đèn ban đầu sau khi kết thúc stream.");
+      }
+    }
+  }
+
   bool drawStreamJpegFrame(const uint8_t* buf, size_t len) {
     if (!tft || !buf || len < 4) return false;
     if (currentMode != 17 && !WebStreamManager::isStreamSessionActive()) {
@@ -6506,21 +6561,23 @@ namespace TestDisplay {
     if (currentMode != 17) {
       currentMode = 17;
       tft->fillScreen(C_BLACK);
+      applyStreamPowerGovernor(true);
     }
 
-    // Đảm bảo s_streamFrameBuffer được cấp phát an toàn trên PSRAM
-    if (!s_streamFrameBuffer) {
-      if (psramFound()) {
-        s_streamFrameBuffer = (uint16_t*)ps_malloc(240 * 320 * sizeof(uint16_t));
-      }
-      if (!s_streamFrameBuffer) {
-        s_streamFrameBuffer = (uint16_t*)malloc(240 * 320 * sizeof(uint16_t));
-      }
-      if (s_streamFrameBuffer) {
-        memset(s_streamFrameBuffer, 0, 240 * 320 * sizeof(uint16_t));
+    // Đảm bảo cả 2 buffer s_streamFrameBuffer[2] được cấp phát an toàn trên PSRAM
+    for (int i = 0; i < 2; i++) {
+      if (!s_streamFrameBuffer[i]) {
+        if (psramFound()) {
+          s_streamFrameBuffer[i] = (uint16_t*)ps_malloc(240 * 320 * sizeof(uint16_t));
+        }
+        if (!s_streamFrameBuffer[i]) {
+          Serial.println("❌ [STREAM] Thiếu PSRAM để cấp phát Frame Buffer 153.6KB!");
+          return false;
+        }
+        memset(s_streamFrameBuffer[i], 0, 240 * 320 * sizeof(uint16_t));
       }
     }
-    if (!s_streamFrameBuffer) return false;
+    if (!s_streamFrameBuffer[0] || !s_streamFrameBuffer[1]) return false;
 
     TJpgDec.setCallback(jpgStreamRenderCallback);
     TJpgDec.setSwapBytes(false);
@@ -6536,24 +6593,41 @@ namespace TestDisplay {
     s_streamDecodedW = jw;
     s_streamDecodedH = jh;
 
-    // Giải mã JPEG trực tiếp vào bộ đệm s_streamFrameBuffer trong PSRAM (không đẩy SPI rời rạc)
+    // Giải mã JPEG trực tiếp vào Back Buffer (s_streamFrameBuffer[s_streamPingPongIdx])
     bool ok = (TJpgDec.drawJpg(0, 0, buf, len) == JDR_OK);
 
-    // Bắn toàn bộ frame hoàn chỉnh qua bus SPI bằng DMA/Block Transfer đúng 1 lần (Lật trang tức thì)
-    if (ok && s_streamFrameBuffer && tft) {
-      tft->drawRGBBitmap(0, offsetY, s_streamFrameBuffer, jw, jh);
+    // Bắn toàn bộ frame hoàn chỉnh qua bus SPI bằng Fast Block Transfer (~11ms ở 80MHz)
+    if (ok && s_streamFrameBuffer[s_streamPingPongIdx] && tft) {
+      DisplayDriver::fastBlockTransfer(0, offsetY, s_streamFrameBuffer[s_streamPingPongIdx], jw, jh);
+      // Flip Ping-Pong: Hoán đổi buffer cho frame tiếp theo
+      s_streamPingPongIdx = 1 - s_streamPingPongIdx;
     }
 
     return ok;
   }
 
+  static volatile bool s_isStoppingStream = false;
+  static volatile bool s_streamStopRequested = false;
+
   void stopStreamMode() {
+    if (s_isStoppingStream) return;
+    s_isStoppingStream = true;
+
     lastStreamFrameMs = 0;
-    // Không free s_streamFrameBuffer ngay lập tức ở đây để tránh race condition khi frame đang decode
-    if (currentMode == 17) {
-      currentMode = 0;
-      refreshActiveScreen();
+    standbyCacheValid = false;
+    lastStandbyCacheSig = "";
+    applyStreamPowerGovernor(false);
+
+    // Nếu đang chạy trên Core 0 (từ task mạng FreeRTOS hoặc WebServer), ủy quyền chuyển mode an toàn cho Core 1 loop()
+    if (xPortGetCoreID() != 1) {
+      s_streamStopRequested = true;
+    } else {
+      if (currentMode == 17) {
+        switchModeSafe(0);
+      }
     }
+
+    s_isStoppingStream = false;
   }
 
   bool isStreamActive() {
@@ -6761,6 +6835,10 @@ namespace TestDisplay {
       }
       return;
     }
+    // Trước khi vẽ giao diện mới, xóa đen sạch sẽ 100% để loại bỏ pixel sót lại từ AI hoặc Stream
+    if (currentMode != 0 && currentMode != 17) {
+      tft->fillScreen(C_BLACK);
+    }
     if (currentMode == 0) drawStandbyScreenFull();
     else if (currentMode == 1 || currentMode == 11) drawXiaoZhiAssistantScreen(true);
     else if (currentMode == 2) drawPcHudScreen(true);
@@ -6803,13 +6881,18 @@ namespace TestDisplay {
       // Rời Trình phát nhạc: dừng phát âm thanh an toàn, giải phóng tệp MP3/WAV trên SD
       stopMediaAudioPlayback();
     } else if (oldMode == 17) {
-      // Rời Màn hình Stream: dừng luồng stream và đóng socket UDP
-      stopStreamMode();
+      // Rời Màn hình Stream: tắt Cinema Mode và dọn dẹp frame buffer
+      applyStreamPowerGovernor(false);
+      lastStreamFrameMs = 0;
+      standbyCacheValid = false;
+      lastStandbyCacheSig = "";
     } else if (oldMode == 11 || oldMode == 1) {
-      // Rời màn hình XiaoZhi: dừng thu âm nếu đang dở dang
+      // Rời màn hình XiaoZhi: dừng thu âm nếu đang dở dang và dập tắt máy trạng thái AI
       if (s40AiState == AI_STATE_LISTENING) {
-        s40AiState = AI_STATE_IDLE;
+        TestAudio::stopVoiceRecording();
       }
+      s40AiState = AI_STATE_IDLE;
+      eyeState = 0;
     } else if (oldMode == 15) {
       // Rời Trung tâm Trò chơi: reset trạng thái game loop
       s40GameActiveId = 0;
@@ -6841,8 +6924,12 @@ namespace TestDisplay {
   static void switchModeSafe(uint8_t targetMode) {
     if (targetMode == currentMode) return;
     uint8_t oldMode = currentMode;
+    currentMode = targetMode; // Cập nhật currentMode ngay lập tức để triệt tiêu mọi đệ quy!
     onExitMode(oldMode);
-    currentMode = targetMode;
+    if (tft && !isScreenSleeping) {
+      tft->fillScreen(C_BLACK);
+      commitFrame();
+    }
     onEnterMode(currentMode);
     LOG_I("UI", "Chuyen che do man hinh: %u -> %u (%s)", oldMode, targetMode, getScreenModeName().c_str());
     refreshActiveScreen();
@@ -7980,10 +8067,19 @@ namespace TestDisplay {
     } else if (currentMode == 12) {
       if (s40MediaSubState == 0) {
         if (keyIndex == 0) { // OK: Play / Pause
-          s40MediaPlaying = !s40MediaPlaying;
-          if (s40MediaPlaying) startMediaAudioPlayback();
-          else stopMediaAudioPlayback();
-          drawMediaPlayerAppScreen(false);
+          if (s_waitForAiTtsToPlayMedia) {
+            s_waitForAiTtsToPlayMedia = false;
+            s_aiTtsFinishWaitStartMs = 0;
+            TestAudio::resetStreamPcm();
+            s40MediaPlaying = true;
+            startMediaAudioPlayback();
+            drawMediaPlayerAppScreen(false);
+          } else {
+            s40MediaPlaying = !s40MediaPlaying;
+            if (s40MediaPlaying) startMediaAudioPlayback();
+            else stopMediaAudioPlayback();
+            drawMediaPlayerAppScreen(false);
+          }
         } else if (keyIndex == 1) { // UP: Tăng âm lượng phát nhạc
           TestAudio::setMusicVolumePct(TestAudio::getMusicVolumePct() + 5);
           drawMediaPlayerAppScreen(false);
@@ -8955,6 +9051,34 @@ namespace TestDisplay {
     setEmojiStyle((s_emojiStyle + dir + 4) % 4);
   }
 
+  void cycleStandbyWallpaper(int dir) {
+    String files[32];
+    size_t sizes[32];
+    int count = ImageManager::listAllImages(files, sizes, 32);
+    if (count <= 0) {
+      showSymbianToast("KHONG CO ANH NEN!");
+      return;
+    }
+    int cur = 0;
+    for (int i = 0; i < count; i++) {
+      if (stCfg.bgImage == files[i] || ("/" + stCfg.bgImage) == files[i]) {
+        cur = i;
+        break;
+      }
+    }
+    cur = (cur + dir + count) % count;
+    stCfg.bgImage = files[cur];
+    stCfg.bgMode = "image";
+    saveConfigToFile();
+    standbyCacheValid = false;
+    lastStandbyCacheSig = "";
+    if (currentMode == 0) {
+      refreshActiveScreen();
+    }
+    showSymbianToast("DA DOI ANH NEN!");
+    TestAudio::playOkChime();
+  }
+
   void setHudStyle(const String& style) {
     uint8_t newStyle = hudStyle;
     if (style == "bars") newStyle = 0;
@@ -9079,6 +9203,14 @@ namespace TestDisplay {
       setBacklightBrightness(screenBrightnessPct);
       PowerManagementService::notifyUserActivity();
       refreshActiveScreen();
+    }
+
+    // Nếu có yêu cầu dừng stream từ task mạng Core 0: Chuyển về màn hình chờ an toàn trên Core 1
+    if (s_streamStopRequested) {
+      s_streamStopRequested = false;
+      if (currentMode == 17) {
+        switchModeSafe(0);
+      }
     }
 
     TestSDCard::loop();
@@ -9209,6 +9341,26 @@ namespace TestDisplay {
       lastWifiState = wifiNow;
       lastKnownSsid = currentSsid;
       refreshActiveScreen();
+    }
+
+    // Kiểm tra cờ chờ Trợ lý AI dứt lời để tự động kích hoạt phát nhạc trên thẻ SD
+    if (s_waitForAiTtsToPlayMedia && currentMode == 12) {
+      bool aiDone = !TestAudio::isStreamPcmAsyncPlaying() && XiaoZhiClient::isTtsFinished();
+      if (aiDone) {
+        if (s_aiTtsFinishWaitStartMs == 0) {
+          s_aiTtsFinishWaitStartMs = now;
+        } else if (now - s_aiTtsFinishWaitStartMs >= 350) {
+          s_waitForAiTtsToPlayMedia = false;
+          s_aiTtsFinishWaitStartMs = 0;
+          if (s40MediaPlaying) {
+            Serial.println("🎵 [MEDIA] Trợ lý AI đã dứt lời hoàn toàn! Bắt đầu phát nhạc SD mượt mà...");
+            startMediaAudioPlayback();
+            drawMediaPlayerAppScreen(false);
+          }
+        }
+      } else {
+        s_aiTtsFinishWaitStartMs = 0;
+      }
     }
 
     if (now - lastSecondTick >= 1000) {
@@ -9583,16 +9735,25 @@ namespace TestDisplay {
       return;
     }
 
-    if (action == "open_on_esp") {
+    if (action == "open_on_esp" || action == "open") {
       s40MediaSubState = 0;
-      currentMode = 12;
-      refreshActiveScreen();
+      if (currentMode != 12) {
+        currentMode = 12;
+        refreshActiveScreen();
+      }
       return;
     }
 
+    bool aiSpeaking = TestAudio::isStreamPcmAsyncPlaying() || !XiaoZhiClient::isTtsFinished();
+
     if (action == "play") {
       s40MediaPlaying = true;
-      startMediaAudioPlayback();
+      if (aiSpeaking) {
+        setWaitForAiTtsToPlayMedia(true);
+      } else {
+        setWaitForAiTtsToPlayMedia(false);
+        startMediaAudioPlayback();
+      }
       if (currentMode != 12) {
         currentMode = 12;
         s40MediaSubState = 0;
@@ -9601,12 +9762,18 @@ namespace TestDisplay {
       }
     } else if (action == "pause") {
       s40MediaPlaying = false;
+      setWaitForAiTtsToPlayMedia(false);
       stopMediaAudioPlayback();
       if (currentMode == 12) drawMediaPlayerAppScreen(false);
     } else if (action == "toggle") {
       s40MediaPlaying = !s40MediaPlaying;
       if (s40MediaPlaying) {
-        startMediaAudioPlayback();
+        if (aiSpeaking) {
+          setWaitForAiTtsToPlayMedia(true);
+        } else {
+          setWaitForAiTtsToPlayMedia(false);
+          startMediaAudioPlayback();
+        }
         if (currentMode != 12) {
           currentMode = 12;
           s40MediaSubState = 0;
@@ -9614,6 +9781,7 @@ namespace TestDisplay {
           return;
         }
       } else {
+        setWaitForAiTtsToPlayMedia(false);
         stopMediaAudioPlayback();
         if (currentMode == 12) drawMediaPlayerAppScreen(false);
       }
@@ -9622,7 +9790,12 @@ namespace TestDisplay {
         s40MediaTrackIdx = (s40MediaTrackIdx + 1) % s40MediaTrackCount;
         s40MediaCurSec = 0;
         s40MediaPlaying = true;
-        startMediaAudioPlayback();
+        if (aiSpeaking) {
+          setWaitForAiTtsToPlayMedia(true);
+        } else {
+          setWaitForAiTtsToPlayMedia(false);
+          startMediaAudioPlayback();
+        }
         if (currentMode != 12) {
           currentMode = 12;
           s40MediaSubState = 0;
@@ -9635,7 +9808,12 @@ namespace TestDisplay {
         s40MediaTrackIdx = (s40MediaTrackIdx + s40MediaTrackCount - 1) % s40MediaTrackCount;
         s40MediaCurSec = 0;
         s40MediaPlaying = true;
-        startMediaAudioPlayback();
+        if (aiSpeaking) {
+          setWaitForAiTtsToPlayMedia(true);
+        } else {
+          setWaitForAiTtsToPlayMedia(false);
+          startMediaAudioPlayback();
+        }
         if (currentMode != 12) {
           currentMode = 12;
           s40MediaSubState = 0;
@@ -9658,7 +9836,12 @@ namespace TestDisplay {
       s40MediaCurSec = 0;
       s40MediaPlaying = true;
       s40MediaSubState = 0;
-      startMediaAudioPlayback();
+      if (aiSpeaking) {
+        setWaitForAiTtsToPlayMedia(true);
+      } else {
+        setWaitForAiTtsToPlayMedia(false);
+        startMediaAudioPlayback();
+      }
       if (currentMode != 12) {
         currentMode = 12;
         refreshActiveScreen();

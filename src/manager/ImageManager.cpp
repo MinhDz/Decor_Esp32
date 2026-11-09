@@ -115,6 +115,61 @@ void ImageManager::listImages(JsonDocument& doc) {
   doc["sd_total_mb"] = TestSDCard::getTotalMB();
 }
 
+int ImageManager::listAllImages(String* outFiles, size_t* outSizes, int maxFiles) {
+  if (!outFiles || maxFiles <= 0) return 0;
+  int count = 0;
+
+  // 1. Quét Micro SD /sd_images
+  if (TestSDCard::isMounted()) {
+    ensureSdFolders();
+    File sdDir = SD.open("/sd_images");
+    if (sdDir && sdDir.isDirectory()) {
+      File f = sdDir.openNextFile();
+      while (f && count < maxFiles) {
+        if (!f.isDirectory()) {
+          String fname = String(f.name());
+          int sl = fname.lastIndexOf('/');
+          if (sl >= 0) fname = fname.substring(sl + 1);
+          String low = fname;
+          low.toLowerCase();
+          if (low.endsWith(".png") || low.endsWith(".jpg") || low.endsWith(".jpeg") || low.endsWith(".bmp")) {
+            outFiles[count] = "/sd_images/" + fname;
+            if (outSizes) outSizes[count] = f.size();
+            count++;
+          }
+        }
+        f.close();
+        f = sdDir.openNextFile();
+      }
+      sdDir.close();
+    }
+  }
+
+  // 2. Quét LittleFS
+  File root = LittleFS.open("/");
+  if (root && root.isDirectory()) {
+    File file = root.openNextFile();
+    while (file && count < maxFiles) {
+      if (!file.isDirectory()) {
+        String fname = String(file.name());
+        String low = fname;
+        low.toLowerCase();
+        if (low.endsWith(".jpg") || low.endsWith(".jpeg") || low.endsWith(".png") || low.endsWith(".bmp")) {
+          String norm = fname.startsWith("/") ? fname : "/" + fname;
+          outFiles[count] = norm;
+          if (outSizes) outSizes[count] = file.size();
+          count++;
+        }
+      }
+      file.close();
+      file = root.openNextFile();
+    }
+    root.close();
+  }
+
+  return count;
+}
+
 void ImageManager::handleUpload(HTTPUpload& upload, bool& uploadAllowed, bool forceSdCard) {
   String origName = upload.filename;
   String lowName = origName;

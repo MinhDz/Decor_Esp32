@@ -6,6 +6,7 @@
 #include "drivers/CobLedDriver.h"
 #include "drivers/MotorDriver.h"
 #include "drivers/AudioDriver.h"
+#include "tests/TestDisplay.h"
 #include "WebStreamManager.h"
 #include "XiaoZhiClient.h"
 #include <WiFi.h>
@@ -268,11 +269,13 @@ namespace PowerManagementService {
 
     // =========================================================================
     // 3. TỰ ĐỘNG TẮT MÀN HÌNH KHI KHÔNG SỬ DỤNG (AUTO SCREEN SLEEP)
+    // Chỉ tự động tắt khi ở Màn hình chờ (Mode 0). Khi đang ở màn hình chức năng (XiaoZhi, Game, Stream,...) KHÔNG tự ý tắt.
     // =========================================================================
     if (s_screenSleepTimeoutMs > 0 && !DisplayDriver::isSleeping()) {
       if (now - s_lastUserActivityMs >= s_screenSleepTimeoutMs) {
-        // Kiểm tra xem trạm có đang bận các tác vụ truyền thông / media không
-        bool isBusy = WebStreamManager::isVideoStreaming() ||
+        bool isInApp = (TestDisplay::getCurrentMode() != 0);
+        bool isBusy = isInApp ||
+                      WebStreamManager::isVideoStreaming() ||
                       WebStreamManager::isAudioStreaming() ||
                       AudioDriver::isVoiceRecording() ||
                       AudioDriver::isMusicPlaying() ||

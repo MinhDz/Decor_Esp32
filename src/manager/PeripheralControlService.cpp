@@ -7,12 +7,15 @@
 #include "drivers/AudioDriver.h"
 #include "drivers/SensorDriver.h"
 #include "tests/TestDisplay.h"
+#include "tests/TestSDCard.h"
 #include "SystemLogger.h"
 
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <WiFiClientSecure.h>
 #include <ArduinoJson.h>
+#include <LittleFS.h>
+#include <SD.h>
 
 namespace PeripheralControlService {
 
@@ -70,24 +73,73 @@ PeripheralControlResult getTelemetry() {
   return {true, message};
 }
 
+static unsigned long s_lastAppOpenMs = 0;
+
 PeripheralControlResult switchScreen(const String& requestedMode) {
   String mode = requestedMode;
   mode.toLowerCase();
+
+  // Khóa bảo vệ màn hình: Nếu đang ở các app chức năng (Game, Media, Clock, Calendar...) và vừa mở trong vòng 25s,
+  // tuyệt đối không cho phép AI Cloud tự ý kéo màn hình về emoji/assistant!
+  uint8_t curMode = TestDisplay::getCurrentMode();
+  bool isAppActive = (curMode == 15 || curMode == 12 || curMode == 13 || curMode == 14 || curMode == 2 || curMode == 3);
+  if ((mode == "emoji" || mode == "ai" || mode == "xiaozhi" || mode == "assistant") && isAppActive) {
+    if (millis() - s_lastAppOpenMs < 25000) {
+      Serial.printf("🛡️ [SCREEN LOCK] Bỏ qua lệnh chuyển về %s từ Cloud: Đang giữ nguyên ứng dụng Mode %u cho thuyền trưởng!\n",
+                    mode.c_str(), curMode);
+      return {true, "Giữ nguyên màn hình ứng dụng hiện tại cho thuyền trưởng."};
+    }
+  }
+
   if (mode == "standby" || mode == "home" || mode == "cho") {
     TestDisplay::setScreenMode("standby");
     return {true, "Đã chuyển về màn hình chờ."};
   }
-  if (mode == "pc_status" || mode == "pc" || mode == "hud") {
+  if (mode == "pc_status" || mode == "pc" || mode == "hud" || mode == "pchud") {
+    s_lastAppOpenMs = millis();
     TestDisplay::setScreenMode("pchud");
     return {true, "Đã chuyển sang màn hình PC HUD."};
   }
-  if (mode == "emoji" || mode == "ai") {
+  if (mode == "emoji" || mode == "ai" || mode == "xiaozhi" || mode == "assistant") {
     TestDisplay::setScreenMode("emoji");
-    return {true, "Đã chuyển sang màn hình biểu cảm."};
+    return {true, "Đã chuyển sang màn hình biểu cảm trợ lý."};
   }
-  if (mode == "diag" || mode == "sensors" || mode == "song_am") {
+  if (mode == "diag" || mode == "sensors" || mode == "song_am" || mode == "chan_doan") {
+    s_lastAppOpenMs = millis();
     TestDisplay::setScreenMode("diag");
     return {true, "Đã chuyển sang màn hình chẩn đoán."};
+  }
+  if (mode == "games" || mode == "game" || mode == "tro_choi" || mode == "choi_game") {
+    s_lastAppOpenMs = millis();
+    TestDisplay::setScreenMode("games");
+    return {true, "Đã mở trung tâm trò chơi Game Center."};
+  }
+  if (mode == "media" || mode == "music" || mode == "nhac" || mode == "nghe_nhac") {
+    s_lastAppOpenMs = millis();
+    TestDisplay::setScreenMode("media");
+    return {true, "Đã mở trình phát nhạc Media Player."};
+  }
+  if (mode == "clock" || mode == "dong_ho" || mode == "alarm") {
+    s_lastAppOpenMs = millis();
+    TestDisplay::setScreenMode("clock");
+    return {true, "Đã mở đồng hồ đa năng."};
+  }
+  if (mode == "calendar" || mode == "lich" || mode == "lich_van_nien") {
+    s_lastAppOpenMs = millis();
+    TestDisplay::setScreenMode("calendar");
+    return {true, "Đã mở lịch vạn niên."};
+  }
+  if (mode == "menu" || mode == "symbian" || mode == "danh_ba") {
+    TestDisplay::setScreenMode("menu");
+    return {true, "Đã mở menu ứng dụng hệ thống."};
+  }
+  if (mode == "wifi_manager" || mode == "wifi" || mode == "quan_ly_wifi") {
+    TestDisplay::setScreenMode("wifi_manager");
+    return {true, "Đã mở trình quản lý kết nối Wi-Fi."};
+  }
+  if (mode == "about" || mode == "info" || mode == "thong_tin") {
+    TestDisplay::setScreenMode("about");
+    return {true, "Đã mở trang thông tin trạm vũ trụ."};
   }
   return {false, "Chế độ màn hình không được hỗ trợ: " + requestedMode};
 }
@@ -271,6 +323,101 @@ PeripheralControlResult getDailyNews(int limit) {
 
   SystemLogger::log(LOG_LVL_INFO, "NEWS", "Da lay thanh cong %d ban tin moi va cap nhat cache", count);
   return {true, result};
+}
+
+PeripheralControlResult getBatteryStatus() {
+  int bat = SensorDriver::getBatteryPercentage();
+  float vbat = SensorDriver::getBatteryVoltage();
+  bool chg = SensorDriver::isCharging();
+  bool full = PowerManagementService::isBatteryFullyCharged();
+  const char* prof = PowerManagementService::getProfileName();
+
+  String msg = "Báo cáo Thuyền trưởng: Dung lượng pin hiện tại đạt " + String(bat) + "% (điện áp " + String(vbat, 2) + "V). ";
+  if (chg) {
+    if (full) {
+      msg += "Nguồn điện ngoài đã sạc bão hòa 100%, trạm đang cấp nguồn trực tiếp an toàn. ";
+    } else {
+      msg += "Hệ thống đang được nạp điện từ nguồn sạc ngoài. ";
+    }
+  } else {
+    msg += "Trạm đang hoạt động bằng năng lượng pin dự phòng. ";
+  }
+  msg += "Cấu hình năng lượng hiện thời là " + String(prof) + " (" + String(getCpuFrequencyMhz()) + "MHz).";
+  return {true, msg};
+}
+
+PeripheralControlResult getWifiStatus() {
+  bool conn = (WiFi.status() == WL_CONNECTED);
+  if (!conn) {
+    return {true, "Báo cáo: Trạm chưa kết nối vào mạng Wi-Fi cục bộ. Điểm phát sóng cứu hộ SoftAP đang sẵn sàng tại địa chỉ 192.168.4.1."};
+  }
+  String ssid = WiFi.SSID();
+  int rssi = WiFi.RSSI();
+  String quality = (rssi >= -60) ? "rất mạnh" : ((rssi >= -75) ? "tốt" : "yếu");
+  String ip = WiFi.localIP().toString();
+
+  String msg = "Báo cáo Thuyền trưởng: Mạng Wi-Fi đang kết nối tới \"" + ssid + "\" với tín hiệu " + quality +
+               " (cường độ " + String(rssi) + " dBm). Địa chỉ IP nội bộ của trạm là " + ip + ". Đường truyền hoàn toàn ổn định.";
+  return {true, msg};
+}
+
+PeripheralControlResult getStorageStatus() {
+  String msg = "Báo cáo hệ thống lưu trữ: ";
+  if (TestSDCard::isMounted()) {
+    uint64_t totalMb = SD.totalBytes() / (1024 * 1024);
+    uint64_t usedMb = SD.usedBytes() / (1024 * 1024);
+    uint64_t freeMb = (totalMb > usedMb) ? (totalMb - usedMb) : 0;
+    msg += "Thẻ nhớ ngoài SD dung lượng " + String((uint32_t)totalMb) + " MB, đã sử dụng " +
+           String((uint32_t)usedMb) + " MB, còn trống " + String((uint32_t)freeMb) + " MB. ";
+  } else {
+    msg += "Thẻ nhớ SD hiện chưa gắn hoặc chưa mount. ";
+  }
+  size_t fsTotal = LittleFS.totalBytes() / 1024;
+  size_t fsUsed = LittleFS.usedBytes() / 1024;
+  msg += "Bộ nhớ Flash LittleFS dung lượng " + String(fsTotal) + " KB (còn trống " + String(fsTotal - fsUsed) + " KB). ";
+  msg += "Bộ nhớ đệm Octal PSRAM còn trống " + String(ESP.getFreePsram() / (1024 * 1024)) + " MB, Heap nội còn " + String(ESP.getFreeHeap() / 1024) + " KB.";
+  return {true, msg};
+}
+
+PeripheralControlResult getStationFullReport() {
+  float temp = SensorDriver::getTemperatureC();
+  float hum = SensorDriver::getHumidityPct();
+  int bat = SensorDriver::getBatteryPercentage();
+  float vbat = SensorDriver::getBatteryVoltage();
+  bool chg = SensorDriver::isCharging();
+  uint8_t fanSpd = MotorDriver::getMotorSpeed();
+  uint8_t edL = MotorDriver::getEdisonLeftBrightness();
+  uint8_t edR = MotorDriver::getEdisonRightBrightness();
+  bool cobOn = CobLeds::isOn();
+  bool wifiOk = (WiFi.status() == WL_CONNECTED);
+
+  String msg = "Báo cáo tổng hợp tình trạng Trạm Decor Vũ Trụ: ";
+  msg += "Môi trường khoang trạm có nhiệt độ " + String(temp, 1) + " độ C, độ ẩm " + String(hum, 0) + "%. ";
+  msg += "Năng lượng pin đạt " + String(bat) + "% (" + String(vbat, 2) + "V, " + (chg ? "đang cấp sạc" : "chạy pin") + "). ";
+  msg += "Hệ thống kết nối Wi-Fi " + String(wifiOk ? ("đang trực tuyến tại mạng " + WiFi.SSID()) : "chưa kết nối") + ". ";
+  msg += "Trạng thái ngoại vi: Đèn Edison (" + String(edL) + "% trái, " + String(edR) + "% phải), Đèn sao băng COB " +
+         String(cobOn ? "đang bật" : "đang tắt") + ", Cối xay gió " +
+         (fanSpd > 0 ? ("đang quay " + String(fanSpd) + "%") : "đang dừng") + ". ";
+  msg += "Màn hình ST7789 đang ở chế độ " + TestDisplay::getScreenModeName() + ". ";
+  msg += "Toàn bộ hệ thống lõi ESP32-S3 đang hoạt động danh nghĩa, sẵn sàng nhận lệnh tiếp theo từ Thuyền trưởng!";
+  return {true, msg};
+}
+
+PeripheralControlResult cycleWallpaper(int dir) {
+  TestDisplay::cycleStandbyWallpaper(dir);
+  return {true, "Đã chuyển sang hình nền tiếp theo trong bộ nhớ."};
+}
+
+PeripheralControlResult controlMedia(const String& action) {
+  String act = action;
+  act.toLowerCase();
+  s_lastAppOpenMs = millis();
+  if (act == "open" || act == "show" || act == "mo") {
+    TestDisplay::setScreenMode("media");
+    return {true, "Đã mở giao diện trình phát nhạc."};
+  }
+  TestDisplay::controlMediaPlayer(act, 0);
+  return {true, "Đã thực hiện thao tác âm nhạc: " + act};
 }
 
 } // namespace PeripheralControlService

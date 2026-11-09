@@ -18,4 +18,14 @@ namespace PeripheralControlService {
   PeripheralControlResult setPowerProfile(const String& profile, bool autoSwitch = false);
   PeripheralControlResult getPowerStatus();
   PeripheralControlResult getDailyNews(int limit = 5);
+
+  // Báo cáo chi tiết trạng thái hệ thống theo phong cách Chỉ huy Trạm Vũ Trụ
+  PeripheralControlResult getBatteryStatus();
+  PeripheralControlResult getWifiStatus();
+  PeripheralControlResult getStorageStatus();
+  PeripheralControlResult getStationFullReport();
+
+  // Điều khiển chức năng màn hình & giải trí đa phương tiện
+  PeripheralControlResult cycleWallpaper(int dir = 1);
+  PeripheralControlResult controlMedia(const String& action);
 }

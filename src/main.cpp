@@ -17,8 +17,26 @@
 #include "TimeManager.h"
 #include "MemoryScavenger.h"
 #include "services/PowerManagementService.h"
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
+
+static TaskHandle_t s_networkTaskHandle = nullptr;
+
+static void networkServerTask(void* pvParameters) {
+  Serial.printf("🌐 [NETWORK CORE 0] Task WebServer & Wi-Fi đã chạy trên Core %d (Priority %d, Stack 6KB)\n",
+                xPortGetCoreID(), uxTaskPriorityGet(nullptr));
+  while (true) {
+    WifiManager::loop();
+    WebRoutes::handleClient();
+    XiaoZhiClient::loopWebSocket();
+    vTaskDelay(pdMS_TO_TICKS(2)); // Nhường nhịp 2ms cho LwIP và Wi-Fi task trên Core 0
+  }
+}
 
 void setup() {
+  // Vô hiệu hóa reset cứng sụt áp tức thời (Microsecond Brownout Reset) do xung phát RF Wi-Fi hoặc Loa MAX98357A
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
   Serial.begin(115200);
   //pinMode(1, OUTPUT);
   
@@ -69,12 +87,23 @@ void setup() {
   // 3. Khởi tạo Wi-Fi (SoftAP cứu hộ & Tự động kết nối Smart Wi-Fi)
   WifiManager::begin();
 
-  // 3B. Khởi động bộ thu Audio UDP Port 12345 & Video TCP Port 12346 (sau khi Wi-Fi đã bắt đầu)
-  WebStreamManager::startAudioUdpListener();
-  WebStreamManager::startVideoTcpListener();
+  // 3B. Khởi động bộ thu Stream Hợp Nhất SSUP TCP Port 12345 (Audio PCM + Video JPEG ghép kênh)
+  WebStreamManager::startUnifiedStreamListener();
 
   // 4. Khởi tạo Web Server & Toàn bộ REST APIs đồng bộ thời gian thực với Web UI
   WebRoutes::begin();
+
+  // 4B. Tách toàn bộ Web Server, DNS Captive Portal & WebSocket sang Core 0 (Đề xuất 1)
+  // Giải phóng Core 1 chuyên cho UI SpaceOS, Render ST7789 và Giải mã Video
+  xTaskCreatePinnedToCore(
+    networkServerTask,
+    "NetworkCore0",
+    6144,
+    nullptr,
+    2,
+    &s_networkTaskHandle,
+    0
+  );
 
   // 5. Nếu đã kết nối Wi-Fi, tự động kiểm tra OTA và thông tin kích hoạt XiaoZhi Cloud
   if (WifiManager::isConnected()) {
@@ -114,23 +143,10 @@ void loop() {
   WeatherManager::loop();
   TaskProfiler::stop(PROF_WEATHER);
 
-  // 2. Xử lý DNS Captive Portal & các HTTP request từ giao diện Web
-  TaskProfiler::start(PROF_WIFI);
-  WifiManager::loop();
-  TaskProfiler::stop(PROF_WIFI);
-
-  TaskProfiler::start(PROF_WEB_ROUTES);
-  WebRoutes::handleClient();
-  TaskProfiler::stop(PROF_WEB_ROUTES);
-
+  // 2. Trình kết xuất luồng đa phương tiện (Video JPEG vào Back Buffer & Audio I2S)
   TaskProfiler::start(PROF_WEB_STREAM);
   WebStreamManager::loop();
   TaskProfiler::stop(PROF_WEB_STREAM);
-
-  // 2B. Duy trì kết nối WebSocket nền tới XiaoZhi Cloud (giữ Online trên Hub)
-  TaskProfiler::start(PROF_XIAOZHI);
-  XiaoZhiClient::loopWebSocket();
-  TaskProfiler::stop(PROF_XIAOZHI);
 
   // 3. Cập nhật trạng thái phần cứng, LED RGB, nhịp tim và lệnh Serial
   TaskProfiler::start(PROF_HARDWARE);

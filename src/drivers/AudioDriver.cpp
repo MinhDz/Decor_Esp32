@@ -1397,7 +1397,8 @@ namespace AudioDriver {
   static TaskHandle_t s_asyncStreamPumpHandle = nullptr;
   static volatile bool s_asyncStreamPumpRunning = false;
   static volatile bool s_asyncStreamPrebuffering = true;
-  static const size_t ASYNC_PREBUFFER_THRESHOLD = 1920; // 120ms @ 16kHz Mono (2 Opus frames) chống giật và vấp tiếng
+  static volatile uint32_t s_lastStreamArrivalMs = 0;
+  static const size_t ASYNC_PREBUFFER_THRESHOLD = 3840; // 240ms @ 16kHz Mono (4 khung Opus 60ms) triệt tiêu hoàn toàn giật / nuốt từ Wi-Fi
 
   static void asyncStreamPumpTask(void* param) {
     const size_t CHUNK = 256;
@@ -1416,9 +1417,9 @@ namespace AudioDriver {
         continue;
       }
 
-      // Cơ chế Jitter Pre-buffering: Tích lũy trước 120ms âm thanh để triệt tiêu vấp và nuốt từ do trễ gói Wi-Fi
+      // Cơ chế Jitter Pre-buffering: Tích lũy trước 240ms âm thanh (3840 mẫu) để triệt tiêu vấp và nuốt từ do trễ gói Wi-Fi
       if (s_asyncStreamPrebuffering) {
-        if (count < ASYNC_PREBUFFER_THRESHOLD && (millis() - s_lastStreamPcmMs < 200)) {
+        if (count < ASYNC_PREBUFFER_THRESHOLD && (millis() - s_lastStreamArrivalMs < 300)) {
           ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(20));
           continue;
         }
@@ -1463,8 +1464,19 @@ namespace AudioDriver {
         stereoChunk[j * 2 + 1] = (int16_t)s;
       }
 
-      size_t written = 0;
-      i2s_write(I2S_PORT_SPK, stereoChunk, toRead * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(50));
+      // Ghi toàn bộ dữ liệu ra I2S DMA, không bỏ rơi mẫu âm thanh nào
+      uint8_t* pWrite = (uint8_t*)stereoChunk;
+      size_t bytesLeft = toRead * 2 * sizeof(int16_t);
+      while (bytesLeft > 0 && s_asyncStreamPumpRunning) {
+        size_t written = 0;
+        esp_err_t err = i2s_write(I2S_PORT_SPK, pWrite, bytesLeft, &written, pdMS_TO_TICKS(100));
+        if (err == ESP_OK && written > 0) {
+          pWrite += written;
+          bytesLeft -= written;
+        } else {
+          break;
+        }
+      }
 
       if (toRead >= 16) {
         uint8_t specBands[16] = {0};
@@ -1528,6 +1540,8 @@ namespace AudioDriver {
     }
     taskEXIT_CRITICAL(&s_asyncStreamMux);
 
+    s_lastStreamArrivalMs = millis();
+
     if (s_asyncStreamPumpHandle) {
       xTaskNotifyGive(s_asyncStreamPumpHandle);
     }
@@ -1541,6 +1555,7 @@ namespace AudioDriver {
     taskEXIT_CRITICAL(&s_asyncStreamMux);
     s_asyncStreamPrebuffering = true;
     s_lastStreamPcmMs = 0;
+    s_lastStreamArrivalMs = 0;
     s_streamVoiceEnergy = 0;
     if (spkDriverInstalled) {
       i2s_zero_dma_buffer(I2S_PORT_SPK);
@@ -1559,6 +1574,7 @@ namespace AudioDriver {
   void resetStreamPcm() {
     stopStreamPcmAsync();
     s_lastStreamPcmMs = 0;
+    s_lastStreamArrivalMs = 0;
     s_streamVoiceEnergy = 0;
     if (spkDriverInstalled) {
       i2s_zero_dma_buffer(I2S_PORT_SPK);

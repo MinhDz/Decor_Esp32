@@ -207,5 +207,47 @@ namespace DisplayDriver {
     else if (s_tft9341) s_tft9341->invertDisplay(i);
   }
 
+  void fastBlockTransfer(int16_t x, int16_t y, const uint16_t* bitmap, int16_t w, int16_t h) {
+    if (!s_tft || !s_spiBus || !bitmap || w <= 0 || h <= 0) return;
+
+    int16_t dispW = s_tft->width();
+    int16_t dispH = s_tft->height();
+
+    // Hoàn toàn nằm ngoài vùng hiển thị
+    if (x >= dispW || y >= dispH || (x + w) <= 0 || (y + h) <= 0) return;
+
+    // Đường truyền tối ưu nhất: Khối hình nằm trọn vẹn trong màn hình (khối 1D liên tục)
+    if (x >= 0 && y >= 0 && (x + w) <= dispW && (y + h) <= dispH) {
+      s_tft->startWrite();
+      s_tft->setAddrWindow(x, y, w, h);
+      s_spiBus->writePixels((const void*)bitmap, (uint32_t)w * h * sizeof(uint16_t));
+      s_tft->endWrite();
+      return;
+    }
+
+    // Trường hợp bị cắt xén biên (Clipping an toàn):
+    int16_t bx1 = 0, by1 = 0;
+    int16_t origW = w;
+    int16_t clipW = w;
+    int16_t clipH = h;
+    int16_t clipX = x;
+    int16_t clipY = y;
+
+    if (clipX < 0) { clipW += clipX; bx1 = -clipX; clipX = 0; }
+    if (clipY < 0) { clipH += clipY; by1 = -clipY; clipY = 0; }
+    if (clipX + clipW > dispW) clipW = dispW - clipX;
+    if (clipY + clipH > dispH) clipH = dispH - clipY;
+    if (clipW <= 0 || clipH <= 0) return;
+
+    s_tft->startWrite();
+    s_tft->setAddrWindow(clipX, clipY, clipW, clipH);
+    const uint16_t* src = bitmap + (by1 * origW) + bx1;
+    for (int16_t row = 0; row < clipH; row++) {
+      s_spiBus->writePixels((const void*)src, (uint32_t)clipW * sizeof(uint16_t));
+      src += origW;
+    }
+    s_tft->endWrite();
+  }
+
 } // namespace DisplayDriver
 

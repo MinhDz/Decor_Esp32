@@ -8,6 +8,7 @@ public:
   static void ensureSdFolders();
   static int countStoredImages();
   static void listImages(JsonDocument& doc);
+  static int listAllImages(String* outFiles, size_t* outSizes, int maxFiles);
   static void handleUpload(HTTPUpload& upload, bool& uploadAllowed, bool forceSdCard = false);
   static bool deleteImage(const String& filename);
   static bool selectActiveImage(const String& filename);

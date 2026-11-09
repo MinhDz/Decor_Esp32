@@ -46,7 +46,7 @@ void appendDefinitions(JsonArray tools) {
 
   addTool(tools, "self.telemetry.get", "Đọc nhiệt độ, độ ẩm, pin, trạng thái sạc và tốc độ motor.");
 
-  addTool(tools, "self.screen.switch_mode", "Chuyển màn hình sang standby, pc_status, emoji hoặc diag.");
+  addTool(tools, "self.screen.switch_mode", "Chuyển màn hình sang standby, pc_status, emoji hoặc diag. TUYỆT ĐỐI KHÔNG tự ý chuyển sang emoji khi người dùng đang ở trò chơi hoặc ứng dụng khác.");
   tool = tools[tools.size() - 1].as<JsonObject>();
   addProperty(tool, "mode", "string", "Chế độ: standby, pc_status, emoji hoặc diag.");
 
@@ -54,9 +54,9 @@ void appendDefinitions(JsonArray tools) {
   tool = tools[tools.size() - 1].as<JsonObject>();
   addProperty(tool, "volume", "integer", "Âm lượng từ 0 đến 100 phần trăm.");
 
-  addTool(tools, "self.screen.set_emoji_style", "Đổi phong cách biểu cảm: neon, cute_girl, doi_mat hoặc gome.");
+  addTool(tools, "self.screen.set_emoji_style", "Chi goi khi nguoi dung yeu cau doi phong cach bieu cam khuon mat: neon, cute_girl, doi_mat hoac gome. Tuyet doi khong tu y goi khi dang doc tin tuc hoac tra loi binh thuong.");
   tool = tools[tools.size() - 1].as<JsonObject>();
-  addProperty(tool, "style", "string", "neon, cute_girl, doi_mat hoặc gome.");
+  addProperty(tool, "style", "string", "neon, cute_girl, doi_mat hoac gome.");
 
   addTool(tools, "self.power.set_profile", "Đặt cấu hình quản lý nguồn: performance (tối đa), balanced (cân bằng) hoặc saver (tiết kiệm pin).");
   tool = tools[tools.size() - 1].as<JsonObject>();
@@ -68,6 +68,21 @@ void appendDefinitions(JsonArray tools) {
   addTool(tools, "get_daily_news", "Lấy danh sách các bản tin tức mới nhất trong ngày từ báo điện tử để tóm tắt và đọc cho người dùng nghe (tin tức hôm nay, thời sự, điểm tin buổi sáng/tối, tin mới nhất).");
   tool = tools[tools.size() - 1].as<JsonObject>();
   addProperty(tool, "limit", "integer", "Số lượng tin tức muốn lấy (mặc định 5, từ 1 đến 5).");
+
+  // --- CÔNG CỤ QUẢN TRỊ TRẠM VŨ TRỤ CHO THUYỀN TRƯỞNG (SCI-FI AI COMMANDS) ---
+  addTool(tools, "self.battery.get", "Kiểm tra chi tiết dung lượng pin (phần trăm, điện áp vôn, trạng thái sạc nguồn ngoài hay pin dự phòng) để đọc cho người dùng.");
+  addTool(tools, "self.wifi.get", "Kiểm tra trạng thái mạng Wi-Fi (tên mạng SSID, cường độ sóng, IP, độ ổn định đường truyền) để đọc cho người dùng.");
+  addTool(tools, "self.storage.get", "Kiểm tra dung lượng thẻ nhớ ngoài SD, bộ nhớ Flash LittleFS và dung lượng RAM của trạm vũ trụ.");
+  addTool(tools, "self.station.get_report", "Lập báo cáo toàn diện tình trạng Trạm Vũ Trụ (nhiệt độ, độ ẩm, pin, wifi, thẻ nhớ, đèn, cối xay, CPU) theo phong cách AI Chỉ huy Trạm Vũ Trụ báo cáo cho Thuyền trưởng.");
+
+  addTool(tools, "self.screen.next_wallpaper", "Chuyển sang hình nền tiếp theo trong thẻ nhớ SD hoặc bộ nhớ trạm.");
+  addTool(tools, "self.screen.open_app", "Mở ứng dụng hoặc chức năng trên màn hình trạm: games (trò chơi), media (máy nghe nhạc), standby (màn hình chờ), pchud (thông số PC), diag (chẩn đoán cảm biến), clock (đồng hồ), calendar (lịch vạn niên). Giữ nguyên màn hình ứng dụng sau khi mở, tuyệt đối không tự ý chuyển về emoji.");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "app", "string", "Tên ứng dụng: games, media, standby, pchud, diag, clock hoặc calendar.");
+
+  addTool(tools, "self.media.control", "Điều khiển trình phát nhạc của trạm vũ trụ: play (phát), pause (tạm dừng), next (bài kế), prev (bài trước), open (mở màn hình nghe nhạc).");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "action", "string", "Thao tác: play, pause, next, prev hoặc open.");
 }
 
 PeripheralControlResult execute(const String& name, JsonObjectConst args) {
@@ -160,6 +175,23 @@ PeripheralControlResult execute(const String& name, JsonObjectConst args) {
     int limit = 5;
     if (args["limit"].is<int>()) limit = args["limit"].as<int>();
     return PeripheralControlService::getDailyNews(limit);
+  }
+
+  // Quản trị trạm vũ trụ theo lệnh Thuyền trưởng
+  if (name == "self.battery.get") return PeripheralControlService::getBatteryStatus();
+  if (name == "self.wifi.get") return PeripheralControlService::getWifiStatus();
+  if (name == "self.storage.get") return PeripheralControlService::getStorageStatus();
+  if (name == "self.station.get_report") return PeripheralControlService::getStationFullReport();
+
+  if (name == "self.screen.next_wallpaper") return PeripheralControlService::cycleWallpaper(1);
+  if (name == "self.screen.open_app") {
+    if (!args["app"].is<const char*>()) return invalidArguments("cần app dạng chuỗi.");
+    return PeripheralControlService::switchScreen(args["app"].as<String>());
+  }
+  if (name == "self.media.control") {
+    String action = "open";
+    if (args["action"].is<const char*>()) action = args["action"].as<String>();
+    return PeripheralControlService::controlMedia(action);
   }
 
   return {false, "Không tìm thấy công cụ MCP: " + name};

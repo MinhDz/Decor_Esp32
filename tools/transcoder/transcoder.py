@@ -105,23 +105,26 @@ def find_node():
         return sys_node
     return None
 
-def find_yt_dlp():
-    default_ytdlp = r"C:\Users\admin\AppData\Roaming\Python\Python314\Scripts\yt-dlp.exe"
-    if os.path.exists(default_ytdlp):
-        return default_ytdlp
+def find_yt_dlp_cmd():
     import shutil
     sys_ytdlp = shutil.which("yt-dlp")
     if sys_ytdlp:
-        return sys_ytdlp
-    return sys.executable + " -m yt_dlp"
+        return [sys_ytdlp]
+    default_ytdlp = r"C:\Users\admin\AppData\Roaming\Python\Python314\Scripts\yt-dlp.exe"
+    if os.path.exists(default_ytdlp):
+        return [default_ytdlp]
+    scripts_ytdlp = os.path.join(os.path.dirname(sys.executable), "Scripts", "yt-dlp.exe")
+    if os.path.exists(scripts_ytdlp):
+        return [scripts_ytdlp]
+    return [sys.executable, "-m", "yt_dlp"]
 
 FFMPEG_EXE = find_ffmpeg()
 NODE_EXE = find_node()
-YT_DLP_EXE = find_yt_dlp()
+YT_DLP_CMD = find_yt_dlp_cmd()
 
 logger.info(f"FFmpeg binary: {FFMPEG_EXE}")
 logger.info(f"Node.js binary: {NODE_EXE}")
-logger.info(f"yt-dlp binary: {YT_DLP_EXE}")
+logger.info(f"yt-dlp command: {' '.join(YT_DLP_CMD)}")
 
 # ============================================================================
 #               LỚP QUẢN LÝ TRANSCODER & STREAM ENGINE
@@ -147,12 +150,20 @@ class StreamSession:
         # Tiểu trình stream
         self.thread_video = None
         self.thread_audio = None
+        self.thread_sender = None
+        self.packet_queue = None
 
         # Thống kê
         self.video_frames_sent = 0
         self.audio_chunks_sent = 0
         self.audio_bytes_sent = 0
         self.audio_pts = 0.0
+        self.audio_read_pts = 0.0
+        self.video_read_pts = 0.0
+        self.first_audio_ready = False
+        self.first_video_ready = False
+        self.has_audio = False
+        self.has_video = False
         self.video_frames_decoded = 0
         self.video_frames_dropped = 0
         self.start_time = 0
@@ -182,8 +193,7 @@ class StreamSession:
         thumbnail = ""
         duration = 0
 
-        cmd_stream = [
-            YT_DLP_EXE,
+        cmd_stream = list(YT_DLP_CMD) + [
             "--no-playlist",
             "--no-check-certificates",
             "-f", "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
@@ -194,13 +204,13 @@ class StreamSession:
             url
         ]
         if NODE_EXE:
-            cmd_stream[1:1] = ["--js-runtimes", f"node:{NODE_EXE}"]
+            cmd_stream[len(YT_DLP_CMD):len(YT_DLP_CMD)] = ["--js-runtimes", f"node:{NODE_EXE}"]
 
         logger.info(f"Đang phân tích & trích xuất direct media stream qua yt-dlp: {url}")
         res_stream = subprocess.run(cmd_stream, capture_output=True, text=True, timeout=25)
         if res_stream.returncode != 0:
             # Fallback nếu video không có DASH phân tách
-            cmd_fallback = [YT_DLP_EXE, "--no-playlist", "-f", "best", "--print", "%(title)s", "-g", url]
+            cmd_fallback = list(YT_DLP_CMD) + ["--no-playlist", "-f", "best", "--print", "%(title)s", "-g", url]
             res_stream = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=20)
             if res_stream.returncode != 0:
                 raise RuntimeError(f"yt-dlp không thể trích xuất stream: {res_stream.stderr[:200]}")
@@ -274,25 +284,32 @@ class StreamSession:
             else: # Mặc định 240x240 chuẩn vuông
                 vf = "scale=240:240:force_original_aspect_ratio=decrease,pad=240:240:(ow-iw)/2:(oh-ih)/2:black,format=yuvj420p"
 
-            # 3. Khởi tạo tiến trình FFmpeg Video (MJPEG @ target FPS, kèm reconnect và User-Agent tránh bị YouTube ngắt)
+            # 3. Khởi tạo tiến trình FFmpeg Video (MJPEG @ target FPS, không dùng -re để cho phép burst prebuffer ban đầu)
+            def get_net_opts(u):
+                if u.startswith("http://") or u.startswith("https://"):
+                    return [
+                        "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
+                        "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+                        "-headers", "Sec-Fetch-Mode: navigate\r\n"
+                    ]
+                return []
+
             v_cmd = [
-                FFMPEG_EXE, "-hide_banner", "-loglevel", "warning",
-                "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
-                "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "-re", "-i", v_url,
+                FFMPEG_EXE, "-hide_banner", "-loglevel", "warning"
+            ] + get_net_opts(v_url) + [
+                "-i", v_url,
                 "-an",
                 "-vf", vf,
                 "-r", str(fps),
-                "-q:v", "5",
+                "-q:v", "7",
                 "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"
             ]
 
-            # 4. Khởi tạo tiến trình FFmpeg Audio (PCM 16-bit Mono 16000Hz)
+            # 4. Khởi tạo tiến trình FFmpeg Audio (PCM 16-bit Mono 16000Hz, không dùng -re)
             a_cmd = [
-                FFMPEG_EXE, "-hide_banner", "-loglevel", "warning",
-                "-reconnect", "1", "-reconnect_at_eof", "1", "-reconnect_streamed", "1", "-reconnect_delay_max", "5",
-                "-user_agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-                "-re", "-i", a_url,
+                FFMPEG_EXE, "-hide_banner", "-loglevel", "warning"
+            ] + get_net_opts(a_url) + [
+                "-i", a_url,
                 "-vn",
                 "-acodec", "pcm_s16le",
                 "-ar", "16000",
@@ -300,8 +317,8 @@ class StreamSession:
                 "-f", "s16le", "pipe:1"
             ]
 
-            self.proc_video = subprocess.Popen(v_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=65536)
-            self.proc_audio = subprocess.Popen(a_cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, bufsize=32768)
+            self.proc_video = subprocess.Popen(v_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=65536)
+            self.proc_audio = subprocess.Popen(a_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=32768)
 
             self.is_running = True
             self.is_paused = False
@@ -309,6 +326,12 @@ class StreamSession:
             self.audio_chunks_sent = 0
             self.audio_bytes_sent = 0
             self.audio_pts = 0.0
+            self.audio_read_pts = 0.0
+            self.video_read_pts = 0.0
+            self.first_audio_ready = False
+            self.first_video_ready = False
+            self.has_audio = (self.proc_audio is not None)
+            self.has_video = (self.proc_video is not None)
             self.video_frames_decoded = 0
             self.video_frames_dropped = 0
             self.start_time = time.time()
@@ -316,11 +339,15 @@ class StreamSession:
             # 5. Kích hoạt chế độ Stream trên ESP32
             self._notify_esp_stream_mode()
 
-            # 6. Khởi động 2 Worker Threads
+            # 6. Khởi động Hàng đợi Ghép kênh và 3 Worker Threads
+            import queue
+            self.packet_queue = queue.PriorityQueue(maxsize=120)
             self.thread_audio = threading.Thread(target=self._audio_worker, daemon=True)
             self.thread_video = threading.Thread(target=self._video_worker, daemon=True)
+            self.thread_sender = threading.Thread(target=self._sender_worker, daemon=True)
             self.thread_audio.start()
             self.thread_video.start()
+            self.thread_sender.start()
 
             return {
                 "status": "ok",
@@ -343,33 +370,36 @@ class StreamSession:
             pass
 
     def _audio_worker(self):
-        """Đọc raw PCM 16kHz từ FFmpeg và đẩy trực tiếp vào Ring Buffer PSRAM của ESP32 qua UDP Port 12345"""
-        import socket
-        
-        udp_port = 12345
-        udp_sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        try:
-            udp_sock.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 32768)
-        except Exception:
-            pass
+        """Đọc raw PCM 16kHz từ FFmpeg pipe, gán PTS và nạp vào PriorityQueue (Audio-Paced)"""
+        CHUNK_BYTES = 1024 # 512 mẫu 16-bit = 32ms @ 16kHz
+        audio_bytes = 0
+        seq = 0
 
-        # Kích thước chunk: 512 mẫu 16-bit = 1024 bytes (~32ms âm thanh @ 16kHz)
-        CHUNK_BYTES = 1024
-        start_time = self.start_time
-
-        logger.info(f"Khởi chạy luồng Audio Worker UDP (PCM 16kHz Mono -> {self.esp_ip}:{udp_port})...")
+        logger.info("Khởi chạy luồng Audio Reader...")
         while self.is_running:
-            if self.is_paused:
-                time.sleep(0.05)
-                continue
-
             try:
+                # Nếu video reader chưa sẵn sàng, audio chỉ nạp tối đa 1.0 giây
+                if self.has_video and not self.first_video_ready:
+                    if (audio_bytes / 32000.0) >= 1.0:
+                        time.sleep(0.015)
+                        continue
+
+                # Pacing: Không để audio đi trước video quá 600ms
+                if self.has_video and self.first_video_ready:
+                    current_audio_sec = audio_bytes / 32000.0
+                    if current_audio_sec > self.video_read_pts + 0.6:
+                        time.sleep(0.015)
+                        continue
+
                 raw_chunk = self.proc_audio.stdout.read(CHUNK_BYTES)
                 if not raw_chunk:
-                    logger.info("Luồng Audio hoàn tất (EOF)")
+                    err = self.proc_audio.stderr.read().decode('utf-8', errors='ignore') if (self.proc_audio and self.proc_audio.stderr) else ""
+                    if err.strip():
+                        logger.error(f"FFmpeg Audio lỗi: {err.strip()[:300]}")
+                    else:
+                        logger.info("Luồng Audio hoàn tất (EOF)")
                     break
 
-                # Áp dụng âm lượng phần mềm nếu != 100%
                 if self.volume != 100:
                     import array
                     samples = array.array('h', raw_chunk)
@@ -378,89 +408,58 @@ class StreamSession:
                         samples[i] = int(samples[i] * vol_scale)
                     raw_chunk = samples.tobytes()
 
-                # Bắn trực tiếp qua UDP Port 12345 (latency < 0.2ms)
-                udp_sock.sendto(raw_chunk, (self.esp_ip, udp_port))
-                self.audio_chunks_sent += 1
-                self.audio_bytes_sent += len(raw_chunk)
+                pts_ms = (audio_bytes / 32000.0) * 1000.0
+                audio_bytes += len(raw_chunk)
+                self.audio_read_pts = audio_bytes / 32000.0
+                self.first_audio_ready = True
+                seq = (seq + 1) & 0xFFFF
 
-                # Cập nhật Audio PTS (Master Clock - Thời điểm âm thanh thực tế phát trên loa)
-                self.audio_pts = self.audio_bytes_sent / 32000.0
-
-                # Giữ nhịp âm thanh khớp chuẩn xác thời gian thực (32ms/chunk)
-                now = time.time()
-                elapsed = now - start_time
-                if self.audio_pts > elapsed:
-                    time.sleep(self.audio_pts - elapsed)
+                # Đưa vào priority queue: (pts_ms, seq, type=1, payload)
+                while self.is_running:
+                    try:
+                        self.packet_queue.put((pts_ms, seq, 1, raw_chunk), timeout=0.1)
+                        break
+                    except Exception:
+                        continue
 
             except Exception as e:
-                logger.error(f"Lỗi trong Audio Worker UDP: {e}")
+                logger.error(f"Lỗi trong Audio Reader: {e}")
                 break
-
-        try:
-            udp_sock.close()
-        except Exception:
-            pass
-        logger.info("Kết thúc luồng Audio Worker UDP")
+        logger.info("Kết thúc luồng Audio Reader")
 
     def _video_worker(self):
-        """Bóc tách từng frame JPEG từ FFmpeg pipe và đẩy lên màn hình ST7789 của ESP32 với Audio Master-Clock Sync"""
-        import requests
-        import struct
-        import socket
-
-        session = requests.Session()
-        target_url = f"http://{self.esp_ip}/api/stream/video_frame"
-
-        # Thử mở kết nối TCP Video tốc độ cao tới ESP32 (Port 12346)
-        tcp_video_sock = None
-        last_tcp_attempt = 0
-
-        def get_tcp_sock():
-            nonlocal tcp_video_sock, last_tcp_attempt
-            if tcp_video_sock is not None:
-                return tcp_video_sock
-            now_t = time.time()
-            if now_t - last_tcp_attempt < 1.0:
-                return None
-            last_tcp_attempt = now_t
-            try:
-                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
-                s.settimeout(2.0)
-                s.connect((self.esp_ip, 12346))
-                tcp_video_sock = s
-                logger.info(f"⚡ [TCP VIDEO] Đã kết nối luồng Video TCP tốc độ cao (Port 12346): {self.esp_ip}")
-                return tcp_video_sock
-            except Exception as e:
-                tcp_video_sock = None
-                return None
-
-        # Thử kết nối lần đầu
-        get_tcp_sock()
-
+        """Bóc tách từng frame JPEG từ FFmpeg pipe, gán PTS và nạp vào PriorityQueue (Audio-Paced)"""
         raw_stream = bytearray()
         frame_idx = 0
         target_fps = float(self.fps)
-        start_time = self.start_time
-        fps_frame_count = 0
-        fps_timer = time.time()
-        consecutive_drops = 0
+        seq = 10000
 
-        logger.info(f"Khởi chạy luồng Video Worker (MJPEG {self.resolution} @ {self.fps} FPS, Master-Clock Synced)...")
-
+        logger.info(f"Khởi chạy luồng Video Reader (MJPEG @ {self.fps} FPS)...")
         while self.is_running:
-            if self.is_paused:
-                time.sleep(0.05)
-                continue
-
             try:
+                # Nếu audio reader chưa sẵn sàng, video chỉ nạp tối đa 15 frames (~1.0s)
+                if self.has_audio and not self.first_audio_ready:
+                    if frame_idx >= 15:
+                        time.sleep(0.015)
+                        continue
+
+                # Pacing: Không để video đi trước audio quá 400ms
+                if self.has_audio and self.first_audio_ready:
+                    current_video_sec = frame_idx / target_fps
+                    if current_video_sec > self.audio_read_pts + 0.4:
+                        time.sleep(0.015)
+                        continue
+
                 chunk = self.proc_video.stdout.read(8192)
                 if not chunk:
-                    logger.info("Luồng Video hoàn tất (EOF)")
+                    err = self.proc_video.stderr.read().decode('utf-8', errors='ignore') if (self.proc_video and self.proc_video.stderr) else ""
+                    if err.strip():
+                        logger.error(f"FFmpeg Video lỗi: {err.strip()[:300]}")
+                    else:
+                        logger.info("Luồng Video hoàn tất (EOF)")
                     break
                 raw_stream.extend(chunk)
 
-                # Bóc tách khung hình JPEG hoàn chỉnh (bắt đầu bằng \xff\xd8, kết thúc \xff\xd9)
                 while True:
                     soi = raw_stream.find(b'\xff\xd8')
                     if soi == -1:
@@ -474,84 +473,205 @@ class StreamSession:
                     frame_bytes = bytes(raw_stream[soi : eoi + 2])
                     del raw_stream[: eoi + 2]
 
-                    video_pts = frame_idx / target_fps
+                    pts_ms = (frame_idx / target_fps) * 1000.0
                     frame_idx += 1
+                    self.video_read_pts = frame_idx / target_fps
+                    self.first_video_ready = True
+                    seq = (seq + 1) & 0xFFFF
 
                     with self.frame_cond:
                         self.last_frame_jpeg = frame_bytes
                         self.frame_cond.notify_all()
 
-                    # ---------------- ACTIVE AUDIO-MASTER CLOCK SYNC ----------------
-                    now = time.time()
-                    master_clock = self.audio_pts if self.audio_pts > 0 else (now - start_time)
-                    drift = video_pts - master_clock
-
-                    # Nếu video bị trễ hơn 250ms (do lag mạng, TCP đứt hoặc buffering), lập tức resync để chống drop dây chuyền!
-                    if drift < -0.25:
-                        start_time = now - (frame_idx / target_fps)
-                        if self.audio_pts > 0:
-                            self.audio_pts = video_pts
-                        drift = 0
-                        consecutive_drops = 0
-
-                    # Trường hợp 1: Video bị trễ hơn âm thanh > 50ms (Frame cũ)
-                    if drift < -0.05:
-                        consecutive_drops += 1
-                        # Nếu drop liên tiếp quá 3 frame: ép gửi ngay frame này và resync
-                        if consecutive_drops > 3:
-                            consecutive_drops = 0
-                            start_time = now - (frame_idx / target_fps)
-                            if self.audio_pts > 0:
-                                self.audio_pts = video_pts
-                        else:
-                            self.video_frames_dropped += 1
-                            continue
-                    else:
-                        consecutive_drops = 0
-
-                    # Trường hợp 2: Video chạy nhanh hơn âm thanh > 20ms -> Chờ nhịp âm thanh
-                    if drift > 0.02:
-                        time.sleep(min(drift, 0.2))
-
-                    # Trường hợp 3: Khớp nhịp chuẩn -> Gửi frame xuống ESP32
-                    sent_ok = False
-                    sock = get_tcp_sock()
-                    if sock:
+                    while self.is_running:
                         try:
-                            payload = struct.pack("!I", len(frame_bytes)) + frame_bytes
-                            sock.sendall(payload)
-                            sent_ok = True
-                        except Exception as err:
-                            logger.warning(f"Lỗi socket TCP Video ({err}), đóng socket để tự động kết nối lại...")
-                            try:
-                                sock.close()
-                            except Exception:
-                                pass
-                            tcp_video_sock = None
-
-                    if not sent_ok:
-                        self.video_frames_dropped += 1
-                    else:
-                        self.video_frames_sent += 1
-                        fps_frame_count += 1
-
-                    # Tính toán FPS thực tế hiển thị
-                    if time.time() - fps_timer >= 1.0:
-                        self.current_live_fps = round(fps_frame_count / (time.time() - fps_timer), 1)
-                        fps_frame_count = 0
-                        fps_timer = time.time()
+                            self.packet_queue.put((pts_ms, seq, 2, frame_bytes), timeout=0.1)
+                            break
+                        except Exception:
+                            continue
 
             except Exception as e:
-                logger.error(f"Lỗi trong Video Worker: {e}")
+                logger.error(f"Lỗi trong Video Reader: {e}")
+                break
+        logger.info("Kết thúc luồng Video Reader")
+
+    def _sender_worker(self):
+        """Ghép kênh phát luồng SSUP qua 1 kết nối TCP duy nhất tới Port 12345 (Burst Prebuffer + Realtime Pacing)"""
+        import struct
+        import socket
+        import queue
+
+        tcp_sock = None
+        def connect_sock():
+            nonlocal tcp_sock
+            if tcp_sock is not None:
+                return tcp_sock
+            try:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 65536)
+                s.settimeout(5.0)
+                s.connect((self.esp_ip, 12345))
+                tcp_sock = s
+                logger.info(f"⚡ [SSUP UNIFIED] Đã kết nối TCP thành công tới ESP32 (Port 12345): {self.esp_ip}")
+                return tcp_sock
+            except Exception as e:
+                logger.warning(f"Chưa thể kết nối tới {self.esp_ip}:12345 ({e}), đang thử lại...")
+                tcp_sock = None
+                return None
+
+        for _ in range(15):
+            if not self.is_running:
+                return
+            if connect_sock():
+                break
+            time.sleep(0.3)
+
+        if not tcp_sock:
+            logger.error("❌ Không thể kết nối tới ESP32 sau 15 lần thử. Dừng stream.")
+            self.stop()
+            return
+
+        # ---------------- GIAI ĐOẠN 0: GỬI LỆNH SYNC/RESET VÀ CHỜ CẢ 2 LUỒNG SẴN SÀNG ----------------
+        try:
+            # Gửi gói Type 3 (SYNC RESET) để ESP32 xóa sạch hàng đợi cũ
+            sync_hdr = struct.pack("!4sBBHII", b"USP1", 3, 0, 0, 0, 0)
+            tcp_sock.sendall(sync_hdr)
+        except Exception as e:
+            logger.warning(f"Không thể gửi Sync packet: {e}")
+
+        # Chờ cả video và audio nạp frame đầu tiên vào queue (hoặc timeout 4s)
+        wait_start = time.time()
+        while self.is_running:
+            v_ok = (not self.has_video) or self.first_video_ready
+            a_ok = (not self.has_audio) or self.first_audio_ready
+            if v_ok and a_ok:
+                break
+            if time.time() - wait_start > 4.0:
+                break
+            time.sleep(0.02)
+
+        # ---------------- GIAI ĐOẠN 1: BURST PREBUFFERING ----------------
+        burst_frames = 0
+        burst_audio_bytes = 0
+        PREBUFFER_TARGET_PTS_MS = 1200.0 # Bơm trước 1.2s cả video và audio
+
+        logger.info(f"🚀 [SSUP] Bắt đầu xả Burst Prebuffer ({PREBUFFER_TARGET_PTS_MS}ms) để nạp đầy PSRAM...")
+        last_item_pts = 0.0
+        while self.is_running:
+            try:
+                item = self.packet_queue.get(timeout=0.3)
+            except queue.Empty:
+                if not (self.proc_video and self.proc_video.poll() is None):
+                    break
+                continue
+
+            pts_ms, seq, pkt_type, payload = item
+            last_item_pts = pts_ms
+            if pkt_type == 2:
+                burst_frames += 1
+            elif pkt_type == 1:
+                burst_audio_bytes += len(payload)
+                self.audio_pts = pts_ms / 1000.0
+
+            hdr = struct.pack("!4sBBHII", b"USP1", pkt_type, 0, seq & 0xFFFF, int(pts_ms) & 0xFFFFFFFF, len(payload))
+            try:
+                tcp_sock.sendall(hdr + payload)
+            except Exception as e:
+                logger.error(f"Lỗi gửi socket trong giai đoạn prebuffer: {e}")
+                tcp_sock = None
                 break
 
-        if tcp_video_sock:
+            if pkt_type == 2:
+                self.video_frames_sent += 1
+            elif pkt_type == 1:
+                self.audio_chunks_sent += 1
+                self.audio_bytes_sent += len(payload)
+
+            if pts_ms >= PREBUFFER_TARGET_PTS_MS:
+                break
+
+        logger.info(f"✅ [SSUP] Xong Burst Prebuffer! ({burst_frames} frames, {burst_audio_bytes} bytes). Bắt đầu Realtime Pacing!")
+
+        # ---------------- GIAI ĐOẠN 2: REALTIME PACING ----------------
+        start_wall_time = time.time()
+        start_pts_ms = last_item_pts
+        fps_frame_count = 0
+        fps_timer = time.time()
+
+        while self.is_running:
+            if self.is_paused:
+                time.sleep(0.05)
+                start_wall_time = time.time() - ((last_item_pts - start_pts_ms) / 1000.0)
+                continue
+
             try:
-                tcp_video_sock.close()
+                item = self.packet_queue.get(timeout=0.2)
+            except queue.Empty:
+                if (self.proc_video and self.proc_video.poll() is not None) and (self.proc_audio and self.proc_audio.poll() is not None):
+                    logger.info("Toàn bộ tiến trình FFmpeg đã hoàn tất và hàng đợi đã rỗng.")
+                    break
+                continue
+
+            pts_ms, seq, pkt_type, payload = item
+            last_item_pts = pts_ms
+
+            now = time.time()
+            elapsed_ms = (now - start_wall_time) * 1000.0
+            target_rel_pts = pts_ms - start_pts_ms
+
+            if target_rel_pts > elapsed_ms:
+                delay_sec = (target_rel_pts - elapsed_ms) / 1000.0
+                if delay_sec > 0.001:
+                    time.sleep(min(delay_sec, 0.05))
+
+            hdr = struct.pack("!4sBBHII", b"USP1", pkt_type, 0, seq & 0xFFFF, int(pts_ms) & 0xFFFFFFFF, len(payload))
+
+            sent = False
+            for retry in range(2):
+                if not tcp_sock:
+                    tcp_sock = connect_sock()
+                if tcp_sock:
+                    try:
+                        tcp_sock.sendall(hdr + payload)
+                        sent = True
+                        break
+                    except Exception as err:
+                        logger.warning(f"Lỗi gửi TCP SSUP ({err}), đóng socket để kết nối lại...")
+                        try:
+                            tcp_sock.close()
+                        except Exception:
+                            pass
+                        tcp_sock = None
+                        time.sleep(0.1)
+
+            if not sent:
+                if pkt_type == 2:
+                    self.video_frames_dropped += 1
+            else:
+                if pkt_type == 2:
+                    self.video_frames_sent += 1
+                    fps_frame_count += 1
+                elif pkt_type == 1:
+                    self.audio_chunks_sent += 1
+                    self.audio_bytes_sent += len(payload)
+                    self.audio_pts = pts_ms / 1000.0
+
+            if time.time() - fps_timer >= 1.0:
+                self.current_live_fps = round(fps_frame_count / (time.time() - fps_timer), 1)
+                fps_frame_count = 0
+                fps_timer = time.time()
+
+        if tcp_sock:
+            try:
+                end_hdr = struct.pack("!4sBBHII", b"USP1", 4, 0, 0, 0, 0)
+                tcp_sock.sendall(end_hdr)
+                time.sleep(0.1)
+                tcp_sock.close()
             except Exception:
                 pass
 
-        logger.info("Kết thúc luồng Video Worker")
+        logger.info("Kết thúc luồng Sender Worker SSUP")
         if self.is_running:
             self.stop()
 
@@ -584,6 +704,13 @@ class StreamSession:
             except Exception:
                 pass
             self.proc_audio = None
+
+        if self.packet_queue:
+            try:
+                while not self.packet_queue.empty():
+                    self.packet_queue.get_nowait()
+            except Exception:
+                pass
 
         # Chờ các worker kết thúc gửi gói mạng đang dở trước khi gửi tín hiệu STOP
         time.sleep(0.08)
@@ -783,7 +910,7 @@ HTML_DASHBOARD = """
             <div class="stat-val" id="stat-frames">0 frames</div>
           </div>
           <div class="stat-card">
-            <div class="stat-label">ÂM THANH PCM (UDP Port 12345)</div>
+            <div class="stat-label">LUỒNG HỢP NHẤT SSUP (TCP Port 12345)</div>
             <div class="stat-val" style="color: var(--primary)" id="stat-audio">0 KB</div>
           </div>
           <div class="stat-card">

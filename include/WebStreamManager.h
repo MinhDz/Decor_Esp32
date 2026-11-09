@@ -2,21 +2,35 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 
+#pragma pack(push, 1)
+struct StreamPacketHeader {
+  char     magic[4];   // "USP1"
+  uint8_t  type;       // 1 = AUDIO_PCM_16K, 2 = VIDEO_JPEG, 3 = CLOCK_SYNC, 4 = STREAM_END
+  uint8_t  flags;      // Bit 0: IsKeyFrame / ResetClock
+  uint16_t seq;        // Packet sequence number (0..65535, Big Endian)
+  uint32_t pts;        // Presentation TimeStamp in ms (Big Endian)
+  uint32_t payloadLen; // Payload size in bytes (Big Endian)
+};
+#pragma pack(pop)
+
 class WebStreamManager {
 public:
   static void init();
   static void loop();
 
-  // 1. Nhận & Xếp hàng Frame Video JPEG (Drop frame nếu Core 1 bận vẽ, chỉ vẽ frame mới nhất)
-  static bool queueVideoFrame(const uint8_t* jpegData, size_t len);
+  // Unified TCP Stream Listener (Port 12345)
+  static void startUnifiedStreamListener();
+  static void startAudioUdpListener();   // Giữ tương thích alias
+  static void startVideoTcpListener();   // Giữ tương thích alias
+
+  // 1. Nhận & Xếp hàng Frame Video JPEG vào Ring Buffer PSRAM
+  static bool queueVideoFrame(const uint8_t* jpegData, size_t len, uint32_t pts = 0, uint16_t seq = 0);
   static bool renderVideoFrame(const uint8_t* jpegData, size_t len) {
     return queueVideoFrame(jpegData, len);
   }
 
-  // 2. Nhận & Nạp Âm Thanh PCM 16-bit Mono (16,000 Hz) vào Ring Buffer PSRAM (Core 0 phát I2S - Không bao giờ drop)
+  // 2. Nhận & Nạp Âm Thanh PCM 16-bit Mono (16,000 Hz) vào Ring Buffer PSRAM (Core 0 phát I2S)
   static void playAudioPcmChunk(const int16_t* pcmSamples, size_t sampleCount);
-  static void startAudioUdpListener();
-  static void startVideoTcpListener();
 
   // 3. Khởi chạy / Dừng Stream từ URL Mạng Trực Tiếp (MP3 Web Radio hoặc MJPEG Camera)
   static bool startUrlStream(const String& type, const String& url);
@@ -32,6 +46,7 @@ public:
   static bool isAudioStreaming();
   static float getFps();
   static uint32_t getDroppedFrames();
+  static uint32_t getQueuedVideoFrames();
   static void getStatusJson(JsonDocument& doc);
 
   // 6. Thu hồi bộ nhớ an toàn (Memory Scavenger)

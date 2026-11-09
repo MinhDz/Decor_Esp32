@@ -44,7 +44,7 @@ void WifiManager::begin() {
 
   // Khởi chạy SoftAP: SSID, Mật khẩu, Channel 1, Không ẩn, Tối đa 4 kết nối
   WiFi.softAP(DEFAULT_AP_SSID, DEFAULT_AP_PASS, 1, 0, 4);
-  WiFi.setTxPower(WIFI_POWER_19_5dBm);
+  WiFi.setTxPower(WIFI_POWER_17dBm);
   s_apActive = true;
 
   // Khởi động DNS Captive Portal cho SoftAP (Trả về 192.168.4.1 cho mọi truy vấn tên miền)
@@ -249,6 +249,7 @@ bool WifiManager::smartConnect() {
     if (WiFi.status() == WL_CONNECTED) {
       WiFi.setSleep(false);
       esp_wifi_set_ps(WIFI_PS_NONE);
+      WiFi.setTxPower(WIFI_POWER_17dBm);
       Serial.printf("✅ [Smart-WiFi] Kết nối THÀNH CÔNG tới '%s'! IP: %s (Ping 1-4ms)\n", target.ssid.c_str(), WiFi.localIP().toString().c_str());
       LOG_I("WIFI", "Ket noi THÀNH CONG toi '%s'! IP: %s, RSSI: %d dBm",
             target.ssid.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI());
@@ -314,6 +315,7 @@ bool WifiManager::connectDirect(const String& ssid, const String& password, bool
   if (WiFi.status() == WL_CONNECTED) {
     WiFi.setSleep(false);
     esp_wifi_set_ps(WIFI_PS_NONE);
+    WiFi.setTxPower(WIFI_POWER_17dBm);
     HardwareManager::setLedColor(0, 255, 120); // Xanh lá
     lastWifiNotification = "Đã kết nối: " + ssid + " (" + WiFi.localIP().toString() + ")";
     Serial.printf("✅ Đã kết nối thành công tới %s! IP: %s (Ping 1-4ms)\n", ssid.c_str(), WiFi.localIP().toString().c_str());
