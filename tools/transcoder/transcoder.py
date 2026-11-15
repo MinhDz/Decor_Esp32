@@ -156,11 +156,17 @@ def parse_youtube_playlist(url, max_tracks=24):
     logger.info(f"Đang đọc danh sách bài hát YouTube Playlist qua yt-dlp: {url}")
     res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     if res.returncode != 0:
-        raise RuntimeError(f"Lỗi đọc playlist: {res.stderr[:200]}")
+        err = res.stderr or res.stdout or ""
+        if "The playlist does not exist" in err:
+            raise RuntimeError("Danh sách phát không tồn tại hoặc đang ở chế độ Riêng tư (Private). Vui lòng đổi sang Công khai (Public) hoặc Không công khai (Unlisted).")
+        raise RuntimeError(f"Lỗi đọc link YouTube: {err[:200]}")
 
     data = json.loads(res.stdout)
     playlist_title = data.get("title") or "YouTube Playlist"
-    entries = data.get("entries") or []
+    entries = data.get("entries")
+    if entries is None and data.get("id"):
+        entries = [data]
+    entries = entries or []
 
     tracks = []
     for idx, entry in enumerate(entries[:max_tracks]):
@@ -1659,7 +1665,7 @@ HTML_DASHBOARD = """
           const txt = await res.text();
           const box = document.getElementById('station-log-box');
           if (box) {
-            const lines = txt.split('\n');
+            const lines = txt.split(String.fromCharCode(10));
             let html = '';
             for (let l of lines) {
               if (!l) continue;
@@ -1734,6 +1740,10 @@ def api_options(dummy=""):
 def index():
     cfg = load_config()
     return render_template_string(HTML_DASHBOARD, cfg=cfg)
+
+@app.route("/favicon.ico")
+def favicon():
+    return Response("", status=204)
 
 @app.route("/api/status", methods=["GET"])
 def api_status():
