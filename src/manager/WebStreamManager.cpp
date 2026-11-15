@@ -320,12 +320,24 @@ namespace {
             // --- AUDIO PACKET ---
             if (payloadLen > 0 && payloadLen <= TEMP_AUDIO_MAX && tempAudioBuf) {
               if (!recvAllExact(clientSock, (uint8_t*)tempAudioBuf, payloadLen)) break;
-              WebStreamManager::playAudioPcmChunk(tempAudioBuf, payloadLen / sizeof(int16_t));
+              // CHỈ PHÁT AUDIO TỪ STREAM NẾU:
+              // 1. Đang ở Mode 17 (Stream Video/Audio)
+              // 2. Hoặc đang ở Mode 12 VÀ đang kích hoạt Online Playlist (isOnlinePlaylistActive() == true)
+              // NẾU người dùng đang ở Mode 12 nhưng phát nhạc từ Thẻ nhớ SD:
+              // TUYỆT ĐỐI BỎ QUA gói âm thanh này, không để âm thanh online đè lên nhạc thẻ SD!
+              uint8_t curM = TestDisplay::getCurrentMode();
+              if (curM == 17 || (curM == 12 && TestDisplay::isOnlinePlaylistActive())) {
+                WebStreamManager::playAudioPcmChunk(tempAudioBuf, payloadLen / sizeof(int16_t));
+              }
             } else {
               drainExact(clientSock, payloadLen);
             }
           } else if (type == 2) {
             // --- VIDEO JPEG PACKET ---
+            // Tự động kích hoạt Mode 17 nếu nhận được khung hình Video từ Transcoder PC
+            if (TestDisplay::getCurrentMode() != 17) {
+              TestDisplay::setScreenMode("stream");
+            }
             if (payloadLen > 0 && payloadLen <= MAX_FRAME_SLOT_SIZE) {
               ensureVideoRingSlots();
               uint8_t* destSlot = s_videoRing[s_videoHead].data;

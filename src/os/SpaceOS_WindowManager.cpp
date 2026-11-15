@@ -5606,18 +5606,24 @@ namespace TestDisplay {
       }
     }
 
-    // Nếu là file trên thẻ nhớ SD (trong /recording/ hoặc /Musics/ hoặc /)
+    // Nếu là file trên thẻ nhớ SD (trong /recording/ hoặc /Musics/ hoặc bất kỳ thư mục nào trên SD)
     if (TestSDCard::isMounted() && s40MediaFromSd[s40MediaTrackIdx]) {
       String path = "";
       if (StorageDriver::lock(pdMS_TO_TICKS(1500))) {
-        String p = "/recording/" + fn;
-        if (SD.exists(p)) path = p;
-        else {
-          p = "/Musics/" + fn;
+        // 1. Nếu tên tệp đã là đường dẫn tuyệt đối bắt đầu bằng '/'
+        if (fn.startsWith("/") && SD.exists(fn)) {
+          path = fn;
+        } else {
+          // 2. Tìm kiếm trong các thư mục âm nhạc thông dụng
+          String p = "/recording/" + fn;
           if (SD.exists(p)) path = p;
           else {
-            p = "/" + fn;
+            p = "/Musics/" + fn;
             if (SD.exists(p)) path = p;
+            else {
+              p = "/" + fn;
+              if (SD.exists(p)) path = p;
+            }
           }
         }
         if (path.length() > 0) {
@@ -5627,12 +5633,24 @@ namespace TestDisplay {
             path = "";
             showSymbianToast("TEP LOI 0KB: KHONG THE PHAT!");
           } else {
+            size_t actualSize = checkF.size();
             checkF.close();
+            s40MediaFileSizes[s40MediaTrackIdx] = actualSize;
+            // Ước tính thời lượng chuẩn xác cho bài hát
+            String low = path;
+            low.toLowerCase();
+            if (low.endsWith(".wav")) {
+              s40MediaDurations[s40MediaTrackIdx] = max((uint16_t)10, (uint16_t)(actualSize / 32000));
+            } else if (low.endsWith(".mp3")) {
+              s40MediaDurations[s40MediaTrackIdx] = max((uint16_t)10, (uint16_t)(actualSize / 16000));
+            }
           }
         }
         StorageDriver::unlock();
       }
       if (path.length() > 0) {
+        s40MediaPlaying = true;
+        s40MediaCurSec = 0;
         TestAudio::playSdFileAsync(path, PIN_I2S_SPK_DIN);
         return;
       } else {
@@ -6054,6 +6072,8 @@ namespace TestDisplay {
         tft->setTextSize(1);
         tft->setTextColor(isCursor ? C_YELLOW : (isPlayingThis ? C_NEON_GREEN : C_WHITE), isCursor ? 0x1949 : C_CARD_BG);
         String name = s40MediaTracks[idx];
+        int slashIdx = name.lastIndexOf('/');
+        if (slashIdx >= 0) name = name.substring(slashIdx + 1);
         if (vnStrLen(name) > 26) name = vnSubstr(name, 0, 26);
         tft->setCursor(16, ry + 8);
         tft->printf("%s%02d. %s", isPlayingThis ? "> " : "  ", idx + 1, name.c_str());
@@ -6197,6 +6217,8 @@ namespace TestDisplay {
     tft->drawRoundRect(8, 113, W - 16, 54, 6, C_CARD_BORDER);
 
     String title = (s40MediaTrackCount > 0) ? s40MediaTracks[s40MediaTrackIdx] : "Chưa có bài hát";
+    int titleSlash = title.lastIndexOf('/');
+    if (titleSlash >= 0) title = title.substring(titleSlash + 1);
     if (vnStrLen(title) > 33) title = vnSubstr(title, 0, 33);
 
     tft->setTextSize(1);
@@ -7688,15 +7710,15 @@ namespace TestDisplay {
               String low = selPath;
               low.toLowerCase();
               if (low.endsWith(".mp3") || low.endsWith(".wav") || low.endsWith(".flac") || low.endsWith(".ogg")) {
-                // Tệp âm thanh: Bấm OK phát ngay trên Trình phát nhạc
-                if (s40MediaIsOnline || WebStreamManager::isAudioStreaming()) {
-                  WebStreamManager::stopAll();
-                  stopMediaAudioPlayback();
-                  TestAudio::resetStreamPcm();
-                  s40MediaIsOnline = false;
-                  s40MediaPlaylistTitle = "";
-                  MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
-                }
+                // Tệp âm thanh: Dừng dứt điểm tác vụ cũ, xả sạch DMA/I2S và nhường nhịp đóng file SD
+                WebStreamManager::stopAll();
+                stopMediaAudioPlayback();
+                TestAudio::resetStreamPcm();
+                s40MediaIsOnline = false;
+                s40MediaPlaylistTitle = "";
+                vTaskDelay(pdMS_TO_TICKS(50));
+                MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
+
                 refreshMediaPlaylist();
                 String cleanAudio = selPath.startsWith("[FS]") ? selPath.substring(4) : selPath;
                 String songBase = cleanAudio;
@@ -7712,15 +7734,16 @@ namespace TestDisplay {
                 }
                 if (foundIdx >= 0) {
                   s40MediaTrackIdx = foundIdx;
+                  s40MediaTracks[foundIdx] = cleanAudio;
                 } else if (s40MediaTrackCount < 24) {
-                  s40MediaTracks[s40MediaTrackCount] = songBase;
+                  s40MediaTracks[s40MediaTrackCount] = cleanAudio;
                   s40MediaFileSizes[s40MediaTrackCount] = (sizes[idx] > 0) ? sizes[idx] : 2048000;
                   s40MediaDurations[s40MediaTrackCount] = (s40MediaFileSizes[s40MediaTrackCount] > 16000) ? (s40MediaFileSizes[s40MediaTrackCount] / 16000) : 180;
                   s40MediaFromSd[s40MediaTrackCount] = !selPath.startsWith("[FS]");
                   s40MediaTrackIdx = s40MediaTrackCount;
                   s40MediaTrackCount++;
                 } else {
-                  s40MediaTracks[0] = songBase;
+                  s40MediaTracks[0] = cleanAudio;
                   s40MediaTrackIdx = 0;
                 }
                 s40MediaCurSec = 0;
@@ -7767,14 +7790,13 @@ namespace TestDisplay {
               // Bấm OK từ Preview ảnh -> Mở Xem Toàn Màn Hình Tràn Viền 240x320!
               s40MemSubState = 5;
             } else if (low.endsWith(".mp3") || low.endsWith(".wav") || low.endsWith(".flac") || low.endsWith(".ogg")) {
-              if (s40MediaIsOnline || WebStreamManager::isAudioStreaming()) {
-                WebStreamManager::stopAll();
-                stopMediaAudioPlayback();
-                TestAudio::resetStreamPcm();
-                s40MediaIsOnline = false;
-                s40MediaPlaylistTitle = "";
-                MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
-              }
+              WebStreamManager::stopAll();
+              stopMediaAudioPlayback();
+              TestAudio::resetStreamPcm();
+              s40MediaIsOnline = false;
+              s40MediaPlaylistTitle = "";
+              vTaskDelay(pdMS_TO_TICKS(50));
+              MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
               refreshMediaPlaylist();
               String cleanAudio = selPath.startsWith("[FS]") ? selPath.substring(4) : selPath;
               String songBase = cleanAudio;
@@ -7790,8 +7812,9 @@ namespace TestDisplay {
               }
               if (foundIdx >= 0) {
                 s40MediaTrackIdx = foundIdx;
+                s40MediaTracks[foundIdx] = cleanAudio;
               } else if (s40MediaTrackCount < 24) {
-                s40MediaTracks[s40MediaTrackCount] = songBase;
+                s40MediaTracks[s40MediaTrackCount] = cleanAudio;
                 s40MediaFileSizes[s40MediaTrackCount] = (sizes[idx] > 0) ? sizes[idx] : 2048000;
                 s40MediaDurations[s40MediaTrackCount] = (s40MediaFileSizes[s40MediaTrackCount] > 16000) ? (s40MediaFileSizes[s40MediaTrackCount] / 16000) : 180;
                 s40MediaFromSd[s40MediaTrackCount] = !selPath.startsWith("[FS]");
@@ -7857,14 +7880,13 @@ namespace TestDisplay {
             } else if (isAudio) {
               if (s40MemPopupCursor == 0) {
                 // Phát bài hát ngay
-                if (s40MediaIsOnline || WebStreamManager::isAudioStreaming()) {
-                  WebStreamManager::stopAll();
-                  stopMediaAudioPlayback();
-                  TestAudio::resetStreamPcm();
-                  s40MediaIsOnline = false;
-                  s40MediaPlaylistTitle = "";
-                  MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
-                }
+                WebStreamManager::stopAll();
+                stopMediaAudioPlayback();
+                TestAudio::resetStreamPcm();
+                s40MediaIsOnline = false;
+                s40MediaPlaylistTitle = "";
+                vTaskDelay(pdMS_TO_TICKS(50));
+                MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
                 refreshMediaPlaylist();
                 String cleanAudio = selPath.startsWith("[FS]") ? selPath.substring(4) : selPath;
                 String songBase = cleanAudio;
@@ -7880,8 +7902,9 @@ namespace TestDisplay {
                 }
                 if (foundIdx >= 0) {
                   s40MediaTrackIdx = foundIdx;
+                  s40MediaTracks[foundIdx] = cleanAudio;
                 } else if (s40MediaTrackCount < 24) {
-                  s40MediaTracks[s40MediaTrackCount] = songBase;
+                  s40MediaTracks[s40MediaTrackCount] = cleanAudio;
                   s40MediaFileSizes[s40MediaTrackCount] = (sizes[idx] > 0) ? sizes[idx] : 2048000;
                   s40MediaDurations[s40MediaTrackCount] = (s40MediaFileSizes[s40MediaTrackCount] > 16000) ? (s40MediaFileSizes[s40MediaTrackCount] / 16000) : 180;
                   s40MediaFromSd[s40MediaTrackCount] = !selPath.startsWith("[FS]");
@@ -7985,8 +8008,9 @@ namespace TestDisplay {
               }
               if (foundIdx >= 0) {
                 s40MediaTrackIdx = foundIdx;
+                s40MediaTracks[foundIdx] = cleanAudio;
               } else if (s40MediaTrackCount < 24) {
-                s40MediaTracks[s40MediaTrackCount] = songBase;
+                s40MediaTracks[s40MediaTrackCount] = cleanAudio;
                 s40MediaFileSizes[s40MediaTrackCount] = (sizes[idx] > 0) ? sizes[idx] : 2048000;
                 s40MediaDurations[s40MediaTrackCount] = (s40MediaFileSizes[s40MediaTrackCount] > 16000) ? (s40MediaFileSizes[s40MediaTrackCount] / 16000) : 180;
                 s40MediaFromSd[s40MediaTrackCount] = !selPath.startsWith("[FS]");

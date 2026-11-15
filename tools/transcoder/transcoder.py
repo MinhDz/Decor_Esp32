@@ -252,12 +252,26 @@ class StreamSession:
                 "duration": 0
             }
 
+        # 1B. Nếu là đường link trực tiếp tới tệp video/âm thanh trên mạng (MP4, M3U8, MKV, MP3, WAV, v.v...)
+        clean_url = url.split("?")[0].lower()
+        if any(clean_url.endswith(ext) for ext in [".mp4", ".m3u8", ".mkv", ".webm", ".avi", ".mov", ".flv", ".ts", ".mp3", ".wav"]):
+            title = url.split("?")[0].split("/")[-1] or ("Audio Stream" if audio_only else "Video Stream")
+            logger.info(f"Phát hiện URL luồng tệp trực tiếp: {url}")
+            return {
+                "title": title,
+                "is_local": False,
+                "video_url": url if not audio_only else "",
+                "audio_url": url,
+                "thumbnail": "",
+                "duration": 0
+            }
+
         # 2. Sử dụng yt-dlp để trích xuất đồng thời Metadata và Direct Stream URLs trong 1 lượt gọi
         title = "Audio Stream" if audio_only else "Video Stream"
         thumbnail = ""
         duration = 0
 
-        fmt = "ba/b" if audio_only else "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
+        fmt = "ba/b" if audio_only else "bv*[height<=480]+ba/b[height<=480]/b"
         cmd_stream = list(YT_DLP_CMD) + [
             "--no-playlist",
             "--no-check-certificates",
@@ -274,11 +288,12 @@ class StreamSession:
         logger.info(f"Đang phân tích & trích xuất direct media stream qua yt-dlp (audio_only={audio_only}): {url}")
         res_stream = subprocess.run(cmd_stream, capture_output=True, text=True, timeout=25)
         if res_stream.returncode != 0:
-            # Fallback nếu video không có DASH phân tách
-            cmd_fallback = list(YT_DLP_CMD) + ["--no-playlist", "-f", "best", "--print", "%(title)s", "-g", url]
+            # Fallback an toàn (tránh cờ -f best gây cảnh báo/lỗi trên một số phiên bản yt-dlp)
+            cmd_fallback = list(YT_DLP_CMD) + ["--no-playlist", "-f", "b/bv*+ba", "--print", "%(title)s", "-g", url]
             res_stream = subprocess.run(cmd_fallback, capture_output=True, text=True, timeout=20)
             if res_stream.returncode != 0:
-                raise RuntimeError(f"yt-dlp không thể trích xuất stream: {res_stream.stderr[:200]}")
+                err_msg = res_stream.stderr or res_stream.stdout or "Không rõ lỗi"
+                raise RuntimeError(f"yt-dlp không thể trích xuất stream: {err_msg[:200]}")
 
         lines = [l.strip() for l in res_stream.stdout.splitlines() if l.strip()]
         http_urls = [l for l in lines if l.startswith("http")]
@@ -1031,6 +1046,11 @@ class PlaylistManager:
             time.sleep(0.5)
             if not self.tracks or not self.esp_ip:
                 continue
+
+            # Nếu phiên Video Stream (Mode 17) đang chạy, không cho PlaylistManager can thiệp
+            if self.session.is_running and not self.session.audio_only:
+                continue
+
             try:
                 # 1. Phát hiện bài đã phát xong (chỉ khi đang ở trạng thái playing và đã gửi audio)
                 if getattr(self, "state", "") == "playing" and not self.session.is_running and self.session.audio_bytes_sent > 32000:
@@ -1051,6 +1071,14 @@ class PlaylistManager:
                     if esp_mode != 12:
                         if self.session.is_running or getattr(self, "state", "") == "playing":
                             logger.info(f"⏹️ Người dùng đã thoát Trình phát nhạc trên trạm (Chuyển sang Mode {esp_mode}). PC dừng stream và giải phóng toàn bộ tài nguyên!")
+                            self.stop()
+                        continue
+
+                    # Nếu ESP32 đã chuyển sang Thẻ nhớ SD (Offline / is_online == False)
+                    # PC BẮT BUỘC DỪNG NGAY STREAM ONLINE ĐỂ KHÔNG BƠM ÂM THANH XUỐNG ESP32 NỮA!
+                    if not is_online:
+                        if self.session.is_running or getattr(self, "state", "") == "playing":
+                            logger.info("⏹️ ESP32 đã chuyển sang phát nhạc Thẻ nhớ SD (Offline). PC Transcoder dừng stream ngay lập tức!")
                             self.stop()
                         continue
 
@@ -1851,6 +1879,9 @@ def api_start():
     cfg["last_url"] = url
     cfg["volume"] = volume
     save_config(cfg)
+
+    # 1. Dừng Playlist Manager ngay lập tức để không xung đột đồng bộ với Video Stream
+    playlist_mgr.stop()
 
     try:
         res = session.start(url, esp_ip, fps, resolution, volume)
