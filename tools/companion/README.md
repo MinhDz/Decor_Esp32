@@ -1,7 +1,7 @@
 # 🛰️ Decor Space Station Companion (Trạm Decor Vũ Trụ)
 
 Ứng dụng đồng hành máy tính (PC Companion App) chạy ngầm dưới **Khay hệ thống Windows (System Tray)**, hợp nhất toàn bộ tính năng hỗ trợ PC cho Trạm Decor ESP32:
-1. **Trạm Chuyển Mã Video (Web Transcoder Engine)**: Nhận link YouTube/Video web, chuyển mã thời gian thực bằng FFmpeg MJPEG + PCM và đẩy xuống ESP32 màn hình tròn/vuông. Cung cấp Web Dashboard tại `http://localhost:5050`.
+1. **Trạm Chuyển Mã Âm Nhạc & Stream (Web Transcoder Engine)**: Nhận link YouTube Playlist / Video web, chuyển mã thời gian thực bằng FFmpeg MJPEG + PCM 16kHz và đẩy xuống ESP32 màn hình tròn/vuông. Hỗ trợ chế độ **Audio-Only Mode 12 (Nokia S40)** phát nhạc YouTube mượt mà, hiển thị tên bài tiếng Việt, phổ âm thanh FFT VU và tự động ngắt stream khi người dùng bấm EXIT trên trạm để tối ưu tài nguyên. Cung cấp Web Dashboard tại `http://localhost:5050`.
 2. **Giám Sát Phần Cứng PC (PC Hardware Telemetry - PC HUD Mode)**: Thu thập xung nhịp CPU, nhiệt độ, phần trăm RAM, dung lượng ổ đĩa, tốc độ mạng Download/Upload, thông số GPU (NVIDIA NVML / Windows PDH) và đẩy định kỳ lên API `/api/pc/metrics` của ESP32.
 3. **Cơ Chế Cài Đặt Khởi Động Cùng Windows**: Cho phép bật/tắt tùy chọn tự khởi động cùng máy tính Windows thông qua Registry `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`. Người dùng không cần tìm file `.bat` để khởi động thủ công mỗi khi mở máy.
 

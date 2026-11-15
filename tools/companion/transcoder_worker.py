@@ -33,7 +33,7 @@ try:
     import transcoder
     HAS_TRANSCODER = True
 except Exception as e:
-    logger.error(f"Không thể import module transcoder: {e}")
+    logger.exception(f"Không thể import module transcoder: {e}")
     HAS_TRANSCODER = False
 
 class TranscoderWorker:
@@ -49,8 +49,11 @@ class TranscoderWorker:
     def set_esp_ip(self, ip):
         with self._lock:
             self.esp_ip = str(ip).strip()
-            if HAS_TRANSCODER and hasattr(transcoder, 'session'):
-                transcoder.session.esp_ip = self.esp_ip
+            if HAS_TRANSCODER:
+                if hasattr(transcoder, 'session'):
+                    transcoder.session.esp_ip = self.esp_ip
+                if hasattr(transcoder, 'playlist_mgr'):
+                    transcoder.playlist_mgr.esp_ip = self.esp_ip
                 logger.info(f"Đã cập nhật IP ESP32 trong Transcoder: {self.esp_ip}")
 
     def is_running(self):
@@ -65,9 +68,11 @@ class TranscoderWorker:
                 return True
 
             try:
-                # Cập nhật cấu hình ban đầu cho transcoder session
+                # Cập nhật cấu hình ban đầu cho transcoder session & playlist manager
                 if hasattr(transcoder, 'session'):
                     transcoder.session.esp_ip = self.esp_ip
+                if hasattr(transcoder, 'playlist_mgr'):
+                    transcoder.playlist_mgr.esp_ip = self.esp_ip
 
                 # Khởi tạo werkzeug make_server (hỗ trợ graceful shutdown)
                 self.server = make_server("0.0.0.0", self.port, transcoder.app, threaded=True)
@@ -97,8 +102,11 @@ class TranscoderWorker:
                 return
             logger.info("Đang dừng máy chủ Transcoder...")
             try:
-                if HAS_TRANSCODER and hasattr(transcoder, 'session'):
-                    transcoder.session.stop()
+                if HAS_TRANSCODER:
+                    if hasattr(transcoder, 'session'):
+                        transcoder.session.stop()
+                    if hasattr(transcoder, 'playlist_mgr'):
+                        transcoder.playlist_mgr.stop()
             except Exception:
                 pass
 

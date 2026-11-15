@@ -5258,6 +5258,7 @@ namespace TestDisplay {
   static uint8_t s40MediaRepeatMode = 0; // 0 = Lặp tất cả, 1 = Lặp 1 bài, 2 = Ngẫu nhiên
   static uint8_t s40MediaSubState = 0;   // 0 = Trình phát chính, 1 = Popup Menu, 2 = Danh sách bài hát SD
   static int s40MediaPopupCursor = 0;
+  static int s40MediaListCursor = 0;     // Con trỏ riêng duyệt danh sách bài hát (không làm đổi bài đang phát)
   static int s40MediaTrackIdx = 0;
   static int s40MediaTrackCount = 0;
   static String s40MediaTracks[24];
@@ -5267,6 +5268,20 @@ namespace TestDisplay {
   static bool s40MediaIsOnline = false;
   static String s40MediaPlaylistTitle = "";
   static String s40MediaTrackIds[24];
+
+  // Bộ đệm lưu trữ dự phòng cho Playlist Online (để khi chuyển qua lại giữa SD và Online không bị mất)
+  static int    s40OnlineSavedTrackCount = 0;
+  static String s40OnlineSavedTracks[24];
+  static uint16_t s40OnlineSavedDurations[24];
+  static String s40OnlineSavedIds[24];
+  static String s40OnlineSavedPlaylistName = "";
+
+  // Bộ đệm lưu trữ dự phòng cho Thẻ SD
+  static int    s40SdSavedTrackCount = 0;
+  static String s40SdSavedTracks[24];
+  static uint16_t s40SdSavedDurations[24];
+  static size_t s40SdSavedFileSizes[24];
+  static bool   s40SdSavedFromSd[24];
   static unsigned long s40OnlineTrackStartMs = 0;
   static bool s40OnlineHasReceivedAudio = false;
   static uint16_t s40MediaCurSec = 0;
@@ -5406,6 +5421,14 @@ namespace TestDisplay {
       s40MediaTrackCount++;
     }
     if (s40MediaTrackIdx >= s40MediaTrackCount) s40MediaTrackIdx = 0;
+    // Lưu vào bộ đệm thẻ SD để chuyển đổi tức thời giữa Online và SD
+    s40SdSavedTrackCount = s40MediaTrackCount;
+    for (int i = 0; i < s40MediaTrackCount; i++) {
+      s40SdSavedTracks[i] = s40MediaTracks[i];
+      s40SdSavedDurations[i] = s40MediaDurations[i];
+      s40SdSavedFileSizes[i] = s40MediaFileSizes[i];
+      s40SdSavedFromSd[i] = s40MediaFromSd[i];
+    }
   }
 
   static bool deleteSelectedMediaTrack() {
@@ -5517,10 +5540,10 @@ namespace TestDisplay {
   }
 
   static void stopMediaAudioPlayback() {
+    s40MediaPlaying = false;
     TestAudio::stopVoicePlaybackAsync();
-    if (s40MediaIsOnline) {
-      WebStreamManager::stopAll();
-    }
+    TestAudio::resetStreamPcm();
+    WebStreamManager::stopAll();
     s40OnlineTrackStartMs = 0;
     s40OnlineHasReceivedAudio = false;
   }
@@ -5990,24 +6013,24 @@ namespace TestDisplay {
       tft->drawRoundRect(12, 38, W - 24, 236, 8, C_YELLOW);
       tft->setTextSize(1);
       tft->setTextColor(C_YELLOW, 0x0862);
-      tft->setCursor(22, 48);
+      tft->setCursor(20, 48);
       tft->print("TÙY CHỌN TRÌNH PHÁT NHẠC:");
 
       const char* visNames[3] = { "Đĩa quay Vinyl", "Sóng Hình Sin", "Cột sóng VU Meter" };
-      const char* repNames[3] = { "Lặp tất cả", "Lặp 1 bài", "Phát ngẫu nhiên" };
-      String opts[4] = {
-        "1. Danh sách bài hát (" + String(s40MediaTrackCount) + " bài)",
-        "2. Hiệu ứng: " + String(visNames[s40MediaVisMode % 3]),
-        "3. Chế độ: " + String(repNames[s40MediaRepeatMode % 3]),
-        "4. Thoát về Menu Chính"
+      String opts[5] = {
+        "1. Danh sách bài (" + String(s40MediaTrackCount) + (s40MediaIsOnline ? " bài Online)" : " bài SD)"),
+        "2. Tải nhạc Thẻ nhớ SD",
+        "3. Sử dụng Playlist Online",
+        "4. Hiệu ứng: " + String(visNames[s40MediaVisMode % 3]),
+        "5. Thoát về Menu Chính"
       };
-      for (int i = 0; i < 4; i++) {
-        int ry = 72 + i * 44;
+      for (int i = 0; i < 5; i++) {
+        int ry = 66 + i * 40;
         bool sel = (i == s40MediaPopupCursor);
-        tft->fillRoundRect(20, ry, W - 40, 36, 6, sel ? 0x218A : 0x0841);
-        tft->drawRoundRect(20, ry, W - 40, 36, 6, sel ? C_NEON_CYAN : 0x2124);
+        tft->fillRoundRect(18, ry, W - 36, 34, 6, sel ? 0x218A : 0x0841);
+        tft->drawRoundRect(18, ry, W - 36, 34, 6, sel ? C_NEON_CYAN : 0x2124);
         tft->setTextColor(sel ? C_YELLOW : C_WHITE, sel ? 0x218A : 0x0841);
-        tft->setCursor(28, ry + 14);
+        tft->setCursor(24, ry + 12);
         tft->print(opts[i]);
       }
       drawSymbianSoftkeys("[OK:Chọn]", "Lên/Xuống", "[EXIT:Đóng]");
@@ -6020,22 +6043,23 @@ namespace TestDisplay {
       String listHdr = s40MediaIsOnline ? ("PLAYLIST: " + (s40MediaPlaylistTitle.length() > 0 ? s40MediaPlaylistTitle : "YOUTUBE")) : "DANH SÁCH BÀI HÁT (SD)";
       if (vnStrLen(listHdr) > 24) listHdr = vnSubstr(listHdr, 0, 24);
       drawSymbianChrome(listHdr.c_str(), "[MENU:TùyChọn]", "[OK:Phát]", "[EXIT:QuayLại]");
-      int startIdx = max(0, min(s40MediaTrackIdx - 2, max(0, s40MediaTrackCount - 6)));
+      int startIdx = max(0, min(s40MediaListCursor - 2, max(0, s40MediaTrackCount - 6)));
       for (int row = 0; row < 6 && (startIdx + row) < s40MediaTrackCount; row++) {
         int idx = startIdx + row;
-        bool sel = (idx == s40MediaTrackIdx);
+        bool isCursor = (idx == s40MediaListCursor);
+        bool isPlayingThis = (idx == s40MediaTrackIdx && s40MediaPlaying);
         int ry = 32 + row * 41;
-        tft->fillRoundRect(8, ry, W - 16, 37, 5, sel ? 0x1949 : C_CARD_BG);
-        tft->drawRoundRect(8, ry, W - 16, 37, 5, sel ? C_NEON_CYAN : C_CARD_BORDER);
+        tft->fillRoundRect(8, ry, W - 16, 37, 5, isCursor ? 0x1949 : C_CARD_BG);
+        tft->drawRoundRect(8, ry, W - 16, 37, 5, isCursor ? C_NEON_CYAN : (isPlayingThis ? C_NEON_GREEN : C_CARD_BORDER));
         tft->setTextSize(1);
-        tft->setTextColor(sel ? C_YELLOW : C_WHITE, sel ? 0x1949 : C_CARD_BG);
+        tft->setTextColor(isCursor ? C_YELLOW : (isPlayingThis ? C_NEON_GREEN : C_WHITE), isCursor ? 0x1949 : C_CARD_BG);
         String name = s40MediaTracks[idx];
-        if (vnStrLen(name) > 28) name = vnSubstr(name, 0, 28);
+        if (vnStrLen(name) > 26) name = vnSubstr(name, 0, 26);
         tft->setCursor(16, ry + 8);
-        tft->printf("%02d. %s", idx + 1, name.c_str());
+        tft->printf("%s%02d. %s", isPlayingThis ? "> " : "  ", idx + 1, name.c_str());
 
         uint16_t subCol = s40MediaIsOnline ? C_NEON_AMBER : (s40MediaFromSd[idx] ? C_NEON_GREEN : C_NEON_PINK);
-        tft->setTextColor(subCol, sel ? 0x1949 : C_CARD_BG);
+        tft->setTextColor(subCol, isCursor ? 0x1949 : C_CARD_BG);
         tft->setCursor(16, ry + 22);
         if (s40MediaIsOnline) {
           tft->printf("[YOUTUBE ONLINE]   %02u:%02u", s40MediaDurations[idx] / 60, s40MediaDurations[idx] % 60);
@@ -7665,6 +7689,14 @@ namespace TestDisplay {
               low.toLowerCase();
               if (low.endsWith(".mp3") || low.endsWith(".wav") || low.endsWith(".flac") || low.endsWith(".ogg")) {
                 // Tệp âm thanh: Bấm OK phát ngay trên Trình phát nhạc
+                if (s40MediaIsOnline || WebStreamManager::isAudioStreaming()) {
+                  WebStreamManager::stopAll();
+                  stopMediaAudioPlayback();
+                  TestAudio::resetStreamPcm();
+                  s40MediaIsOnline = false;
+                  s40MediaPlaylistTitle = "";
+                  MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
+                }
                 refreshMediaPlaylist();
                 String cleanAudio = selPath.startsWith("[FS]") ? selPath.substring(4) : selPath;
                 String songBase = cleanAudio;
@@ -7735,6 +7767,14 @@ namespace TestDisplay {
               // Bấm OK từ Preview ảnh -> Mở Xem Toàn Màn Hình Tràn Viền 240x320!
               s40MemSubState = 5;
             } else if (low.endsWith(".mp3") || low.endsWith(".wav") || low.endsWith(".flac") || low.endsWith(".ogg")) {
+              if (s40MediaIsOnline || WebStreamManager::isAudioStreaming()) {
+                WebStreamManager::stopAll();
+                stopMediaAudioPlayback();
+                TestAudio::resetStreamPcm();
+                s40MediaIsOnline = false;
+                s40MediaPlaylistTitle = "";
+                MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
+              }
               refreshMediaPlaylist();
               String cleanAudio = selPath.startsWith("[FS]") ? selPath.substring(4) : selPath;
               String songBase = cleanAudio;
@@ -7817,6 +7857,14 @@ namespace TestDisplay {
             } else if (isAudio) {
               if (s40MemPopupCursor == 0) {
                 // Phát bài hát ngay
+                if (s40MediaIsOnline || WebStreamManager::isAudioStreaming()) {
+                  WebStreamManager::stopAll();
+                  stopMediaAudioPlayback();
+                  TestAudio::resetStreamPcm();
+                  s40MediaIsOnline = false;
+                  s40MediaPlaylistTitle = "";
+                  MemoryScavenger::scavenge(true, "FILE_MGR_PLAY_SD");
+                }
                 refreshMediaPlaylist();
                 String cleanAudio = selPath.startsWith("[FS]") ? selPath.substring(4) : selPath;
                 String songBase = cleanAudio;
@@ -8137,55 +8185,100 @@ namespace TestDisplay {
             drawMediaPlayerAppScreen(false);
           }
         } else if (keyIndex == 6) { // EXIT: Quay lại Menu 4x3
+          s40MediaPlaying = false;
           stopMediaAudioPlayback();
           currentMode = 4;
           refreshActiveScreen();
         }
       } else if (s40MediaSubState == 1) {
-        if (keyIndex == 1) {
-          s40MediaPopupCursor = (s40MediaPopupCursor + 3) % 4;
+        if (keyIndex == 1) { // UP: Lên
+          s40MediaPopupCursor = (s40MediaPopupCursor + 4) % 5;
           drawMediaPlayerAppScreen(false);
-        } else if (keyIndex == 2) {
-          s40MediaPopupCursor = (s40MediaPopupCursor + 1) % 4;
+        } else if (keyIndex == 2) { // DOWN: Xuống
+          s40MediaPopupCursor = (s40MediaPopupCursor + 1) % 5;
           drawMediaPlayerAppScreen(false);
         } else if (keyIndex == 0 || keyIndex == 3 || keyIndex == 4) {
           if (s40MediaPopupCursor == 0) {
-            refreshMediaPlaylist();
+            // 1. Xem danh sách bài hát hiện tại (khởi tạo con trỏ cuộn tại bài đang phát)
+            s40MediaListCursor = constrain(s40MediaTrackIdx, 0, max(0, s40MediaTrackCount - 1));
             s40MediaSubState = 2;
             drawMediaPlayerAppScreen(true);
           } else if (s40MediaPopupCursor == 1) {
+            // 2. Tải nhạc từ Thẻ nhớ SD (Dừng online nếu có, quét SD và chuyển nguồn sang SD)
+            if (s40MediaIsOnline) {
+              stopMediaAudioPlayback();
+              WebStreamManager::stopAll();
+              TestAudio::resetStreamPcm();
+              s40MediaIsOnline = false;
+              s40MediaPlaylistTitle = "";
+              MemoryScavenger::scavenge(true, "LOAD_SD_MUSIC");
+            }
+            refreshMediaPlaylist();
+            s40MediaListCursor = 0;
+            s40MediaSubState = 2;
+            showSymbianToast("ĐÃ TẢI NHẠC TỪ THẺ SD");
+            drawMediaPlayerAppScreen(true);
+          } else if (s40MediaPopupCursor == 2) {
+            // 3. Sử dụng Playlist Online (Nếu rỗng thông báo mở Transcoder PC)
+            if (s40OnlineSavedTrackCount == 0 && (!s40MediaIsOnline || s40MediaTrackCount == 0)) {
+              showSymbianToast("PLAYLIST RỖNG! MỞ TRANSCODER PC ĐỂ NẠP");
+              drawMediaPlayerAppScreen(false);
+            } else {
+              if (!s40MediaIsOnline) {
+                stopMediaAudioPlayback();
+                TestAudio::resetStreamPcm();
+                s40MediaIsOnline = true;
+                s40MediaTrackCount = s40OnlineSavedTrackCount;
+                s40MediaPlaylistTitle = s40OnlineSavedPlaylistName;
+                for (int i = 0; i < s40OnlineSavedTrackCount; i++) {
+                  s40MediaTracks[i] = s40OnlineSavedTracks[i];
+                  s40MediaDurations[i] = s40OnlineSavedDurations[i];
+                  s40MediaTrackIds[i] = s40OnlineSavedIds[i];
+                  s40MediaFromSd[i] = false;
+                }
+                s40MediaTrackIdx = 0;
+                s40MediaCurSec = 0;
+              }
+              s40MediaListCursor = s40MediaTrackIdx;
+              s40MediaSubState = 2;
+              showSymbianToast("CHUYỂN SANG PLAYLIST ONLINE");
+              drawMediaPlayerAppScreen(true);
+            }
+          } else if (s40MediaPopupCursor == 3) {
+            // 4. Đổi chế độ hiển thị sóng âm (Nhạc vẫn tiếp tục chạy mượt mà!)
             s40MediaVisMode = (s40MediaVisMode + 1) % 3;
             drawMediaPlayerAppScreen(false);
-          } else if (s40MediaPopupCursor == 2) {
-            s40MediaRepeatMode = (s40MediaRepeatMode + 1) % 3;
-            drawMediaPlayerAppScreen(false);
-          } else if (s40MediaPopupCursor == 3) {
+          } else if (s40MediaPopupCursor == 4) {
+            // 5. Thoát về Menu Chính
             s40MediaSubState = 0;
+            s40MediaPlaying = false;
+            stopMediaAudioPlayback();
             currentMode = 4;
             refreshActiveScreen();
           }
-        } else if (keyIndex == 6) {
+        } else if (keyIndex == 6) { // EXIT: Đóng popup về màn hình chính (Nhạc tiếp tục chạy nền)
           s40MediaSubState = 0;
           drawMediaPlayerAppScreen(true);
         }
       } else if (s40MediaSubState == 2) {
-        if (keyIndex == 1 || keyIndex == 3) {
+        if (keyIndex == 1 || keyIndex == 3) { // UP / LEFT: Cuộn danh sách lên (Không làm ngắt bài đang phát!)
           if (s40MediaTrackCount > 0) {
-            s40MediaTrackIdx = (s40MediaTrackIdx + s40MediaTrackCount - 1) % s40MediaTrackCount;
+            s40MediaListCursor = (s40MediaListCursor + s40MediaTrackCount - 1) % s40MediaTrackCount;
             drawMediaPlayerAppScreen(false);
           }
-        } else if (keyIndex == 2 || keyIndex == 4) {
+        } else if (keyIndex == 2 || keyIndex == 4) { // DOWN / RIGHT: Cuộn danh sách xuống
           if (s40MediaTrackCount > 0) {
-            s40MediaTrackIdx = (s40MediaTrackIdx + 1) % s40MediaTrackCount;
+            s40MediaListCursor = (s40MediaListCursor + 1) % s40MediaTrackCount;
             drawMediaPlayerAppScreen(false);
           }
-        } else if (keyIndex == 0) {
+        } else if (keyIndex == 0) { // OK: Phát bài đã chọn!
+          s40MediaTrackIdx = s40MediaListCursor;
           s40MediaCurSec = 0;
           s40MediaPlaying = true;
           s40MediaSubState = 0;
           startMediaAudioPlayback();
           drawMediaPlayerAppScreen(true);
-        } else if (keyIndex == 6) {
+        } else if (keyIndex == 6) { // EXIT: Quay lại phát chính (Nhạc tiếp tục chạy nền)
           s40MediaSubState = 0;
           drawMediaPlayerAppScreen(true);
         }
@@ -9413,7 +9506,7 @@ namespace TestDisplay {
         drawSdCardTestScreen(false);
       } else if (currentMode == 13 && s40ClockTab == 2 && s40TimerRunning) {
         drawClockSuiteAppScreen(false);
-      } else if (currentMode == 12 && s40MediaSubState == 0 && s40MediaPlaying) {
+      } else if (currentMode == 12 && s40MediaPlaying) {
         uint16_t tot = (s40MediaTrackCount > 0) ? s40MediaDurations[s40MediaTrackIdx] : 200;
 
         // BẮT NGOẠI LỆ MẤT MẠNG KHI PHÁT YOUTUBE ONLINE:
@@ -9433,8 +9526,8 @@ namespace TestDisplay {
             netLost = true;
             errorMsg = "MAT WI-FI! DUNG PHAT";
           } else if (s40OnlineHasReceivedAudio) {
-            // Đang phát bình thường nhưng sau 6 giây không có audio mới
-            if (millis() - WebStreamManager::getLastAudioPcmMs() > 6000) {
+            // Đang phát bình thường nhưng sau 8 giây không có audio mới (chỉ kiểm tra sau khi bài hát đã chạy > 8s)
+            if ((millis() - s40OnlineTrackStartMs > 8000) && (millis() - WebStreamManager::getLastAudioPcmMs() > 8000)) {
               netLost = true;
               errorMsg = "TIMEOUT MANG // DUNG PHAT";
             }
@@ -9490,9 +9583,9 @@ namespace TestDisplay {
             s40MediaPlaying = false;
             stopMediaAudioPlayback();
           }
-          drawMediaPlayerAppScreen(false);
+          if (s40MediaSubState == 0) drawMediaPlayerAppScreen(false);
         } else {
-          drawMediaProgressAndTimeOnly();
+          if (s40MediaSubState == 0) drawMediaProgressAndTimeOnly();
         }
       }
     }
@@ -9833,7 +9926,7 @@ namespace TestDisplay {
       return;
     }
 
-    bool aiSpeaking = TestAudio::isStreamPcmAsyncPlaying() || (XiaoZhiClient::isConversationActive() && !XiaoZhiClient::isTtsFinished());
+    bool aiSpeaking = XiaoZhiClient::isConversationActive() && !XiaoZhiClient::isTtsFinished();
 
     if (action == "play") {
       s40MediaPlaying = true;
@@ -10313,6 +10406,9 @@ namespace TestDisplay {
   // HỖ TRỢ PLAYLIST NHẠC TRỰC TUYẾN (YOUTUBE ONLINE PLAYLIST TRÊN MODE 12)
   // ============================================================================
   void setOnlinePlaylist(const String titles[], const uint16_t durations[], const String ids[], int count, const String& playlistName) {
+    stopMediaAudioPlayback();
+    WebStreamManager::stopAll();
+    TestAudio::resetStreamPcm();
     invalidateCoverArtCache();
     s40MediaIsOnline = true;
     s40MediaPlaylistTitle = playlistName;
@@ -10320,6 +10416,8 @@ namespace TestDisplay {
     s40MediaTrackIdx = 0;
     s40MediaCurSec = 0;
     s40MediaPlaying = false;
+    s40OnlineTrackStartMs = 0;
+    s40OnlineHasReceivedAudio = false;
     SystemLogger::log(LOG_LVL_INFO, "MEDIA", "Đã nạp Playlist Online mới: '%s' (%d bài hát)", playlistName.c_str(), s40MediaTrackCount);
 
     for (int i = 0; i < s40MediaTrackCount; i++) {
@@ -10329,6 +10427,15 @@ namespace TestDisplay {
       s40MediaFileSizes[i] = 0;
       if (ids) s40MediaTrackIds[i] = ids[i];
       else s40MediaTrackIds[i] = "";
+    }
+
+    // Lưu vào bộ đệm Playlist Online dự phòng
+    s40OnlineSavedTrackCount = s40MediaTrackCount;
+    s40OnlineSavedPlaylistName = playlistName;
+    for (int i = 0; i < s40MediaTrackCount; i++) {
+      s40OnlineSavedTracks[i] = s40MediaTracks[i];
+      s40OnlineSavedDurations[i] = s40MediaDurations[i];
+      s40OnlineSavedIds[i] = s40MediaTrackIds[i];
     }
 
     if (currentMode != 12) {
@@ -10347,8 +10454,15 @@ namespace TestDisplay {
 
   void clearOnlinePlaylist() {
     SystemLogger::log(LOG_LVL_INFO, "MEDIA", "Đã xóa Playlist Online, hoàn nguyên về Thẻ SD");
+    stopMediaAudioPlayback();
+    WebStreamManager::stopAll();
+    TestAudio::resetStreamPcm();
     s40MediaIsOnline = false;
     s40MediaPlaylistTitle = "";
+    s40OnlineSavedTrackCount = 0;
+    s40OnlineSavedPlaylistName = "";
+    s40OnlineTrackStartMs = 0;
+    s40OnlineHasReceivedAudio = false;
     for (int i = 0; i < 24; i++) {
       s40MediaTrackIds[i] = "";
     }

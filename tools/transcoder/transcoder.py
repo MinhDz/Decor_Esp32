@@ -43,7 +43,7 @@ logging.basicConfig(
 logger = logging.getLogger("Transcoder")
 
 # Đường dẫn thư mục và cấu hình
-SCRIPT_DIR = Path(__file__).resolve().parent
+SCRIPT_DIR = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else Path(__file__).resolve().parent
 CONFIG_FILE = SCRIPT_DIR / "transcoder_config.json"
 
 def load_config():
@@ -719,6 +719,10 @@ class StreamSession:
                     except Exception as err:
                         logger.warning(f"Lỗi gửi TCP SSUP ({err}), đóng socket để kết nối lại...")
                         try:
+                            tcp_sock.shutdown(socket.SHUT_RDWR)
+                        except Exception:
+                            pass
+                        try:
                             tcp_sock.close()
                         except Exception:
                             pass
@@ -851,8 +855,13 @@ class PlaylistManager:
         self.esp_ip = "192.168.1.233"
         self.sync_thread = None
         self.sync_running = False
-        self.cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "playlist_cache.json")
+        app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+        self.cache_file = os.path.join(app_dir, "playlist_cache.json")
         self._load_cached_playlist()
+        if not self.sync_running:
+            self.sync_running = True
+            self.sync_thread = threading.Thread(target=self._sync_worker, daemon=True)
+            self.sync_thread.start()
 
     def _load_cached_playlist(self):
         try:
@@ -887,10 +896,19 @@ class PlaylistManager:
         with self.lock:
             self.stop()
             self.esp_ip = esp_ip
+
+            # Dừng dứt điểm stream cũ và xóa sạch playlist cũ trên ESP32 trước khi nạp mới
+            try:
+                import requests
+                requests.post(f"http://{self.esp_ip}/api/stream/stop", timeout=1.0)
+                requests.post(f"http://{self.esp_ip}/api/media/playlist/clear", timeout=1.5)
+            except Exception:
+                pass
+
             p_data = parse_youtube_playlist(url, max_tracks=24)
             self.playlist_name = p_data["playlist_name"]
             self.tracks = p_data["tracks"]
-            self.current_index = 0 if len(self.tracks) > 0 else -1
+            self.current_index = -1  # Đặt -1 để bất kỳ bài nào được chọn (kể cả bài #0) đều kích hoạt phát mới
 
             self._save_cached_playlist()
 
@@ -934,10 +952,31 @@ class PlaylistManager:
 
             logger.info(f"🎵 Bắt đầu nạp & phát bài online #{index+1}/{len(self.tracks)}: \"{track['title']}\" ({track['url']})")
 
-            # Báo ESP32 chọn bài này trên giao diện S40
+            # Đảm bảo ESP32 đã có danh sách Online Playlist này (nếu vừa reboot hoặc mất trạng thái online)
             try:
                 import requests
-                requests.post(f"http://{self.esp_ip}/api/media/control", json={"action": "select", "index": index, "value": index}, timeout=1.5)
+                st_res = requests.get(f"http://{self.esp_ip}/api/media/status", timeout=1.0)
+                if st_res.status_code == 200:
+                    st_json = st_res.json()
+                    if not st_json.get("is_online", False):
+                        logger.info("📡 ESP32 chưa có Online Playlist (vừa khởi động lại), tự động đồng bộ danh sách bài hát...")
+                        payload = {
+                            "playlist_name": self.playlist_name,
+                            "tracks": [
+                                {"title": t["title"], "duration": t["duration"], "id": t["id"]}
+                                for t in self.tracks
+                            ]
+                        }
+                        requests.post(f"http://{self.esp_ip}/api/media/playlist/set", json=payload, timeout=3.0)
+                        requests.post(f"http://{self.esp_ip}/api/screen/state", json={"mode": "music"}, timeout=1.0)
+            except Exception as e:
+                logger.warning(f"Không thể kiểm tra/đồng bộ playlist tới ESP32: {e}")
+
+            # Báo ESP32 chọn bài này trên giao diện S40 và bật phát
+            try:
+                import requests
+                requests.post(f"http://{self.esp_ip}/api/media/control", json={"action": "select", "index": index, "value": index}, timeout=2.0)
+                requests.post(f"http://{self.esp_ip}/api/media/control", json={"action": "play"}, timeout=1.5)
             except Exception:
                 pass
 
@@ -1005,6 +1044,15 @@ class PlaylistManager:
                     is_online = st.get("is_online", False)
                     is_esp_playing = st.get("playing", False)
                     esp_idx = st.get("track_idx", -1)
+                    esp_mode = st.get("current_mode", 12)
+
+                    # Nếu người dùng đã bấm EXIT trên trạm để thoát Trình phát nhạc (Mode 12)
+                    # Lập tức ngắt luồng stream và đóng socket trên PC để giải phóng CPU, RAM, băng thông
+                    if esp_mode != 12:
+                        if self.session.is_running or getattr(self, "state", "") == "playing":
+                            logger.info(f"⏹️ Người dùng đã thoát Trình phát nhạc trên trạm (Chuyển sang Mode {esp_mode}). PC dừng stream và giải phóng toàn bộ tài nguyên!")
+                            self.stop()
+                        continue
 
                     if is_online:
                         if is_esp_playing:
@@ -1018,9 +1066,14 @@ class PlaylistManager:
                                 self.play_track(esp_idx)
                         else:
                             # Nếu ESP32 bấm Pause/Stop mà PC đang phát
+                            # CHỈ ngắt nếu bài hát đã phát ổn định ít nhất 6 giây và đã gửi > 64KB audio
+                            # để tránh race condition trong lúc bài hát đang khởi động
                             if self.session.is_running and getattr(self, "state", "") == "playing":
-                                logger.info("⏸️ ESP32 đã tạm dừng phát nhạc. PC dừng stream...")
-                                self.stop()
+                                stream_uptime = time.time() - getattr(self.session, "start_time", 0)
+                                bytes_sent = getattr(self.session, "audio_bytes_sent", 0)
+                                if stream_uptime > 6.0 and bytes_sent > 64000:
+                                    logger.info("⏸️ ESP32 đã tạm dừng phát nhạc (bấm Pause/Stop trên trạm). PC dừng stream...")
+                                    self.stop()
             except Exception:
                 pass
 

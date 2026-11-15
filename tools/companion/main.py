@@ -22,20 +22,25 @@ if sys.platform == "win32":
     except Exception:
         pass
 
-# Thiết lập Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s [%(name)s/%(levelname)s] %(message)s',
-    datefmt='%H:%M:%S'
-)
-logger = logging.getLogger("MainCompanion")
-
 # Thêm thư mục hiện tại vào sys.path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPT_DIR not in sys.path:
     sys.path.insert(0, SCRIPT_DIR)
 
 import config as cfg_mgr
+
+# Thiết lập Logging đồng thời ra File và Console
+LOG_FILE = os.path.join(cfg_mgr.get_base_dir(), "companion.log")
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s [%(name)s/%(levelname)s] %(message)s',
+    datefmt='%H:%M:%S',
+    handlers=[
+        logging.FileHandler(LOG_FILE, encoding='utf-8', mode='a'),
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger("MainCompanion")
 from telemetry_worker import TelemetryWorker
 from transcoder_worker import TranscoderWorker
 from settings_dialog import SettingsDialog

@@ -115,7 +115,7 @@ class SystemTrayApp:
         return Menu(
             item(status_text, self._on_open_settings),
             Menu.SEPARATOR,
-            item("🌐 Mở Bảng Điều Khiển Video (Port 5050)", self._on_open_transcoder),
+            item("🎵 Bảng Điều Khiển Âm Nhạc & Stream (Port 5050)", self._on_open_transcoder),
             item("🖥️ Mở Trang Web Trạm ESP32", self._on_open_esp_web),
             Menu.SEPARATOR,
             item(

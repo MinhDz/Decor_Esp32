@@ -165,6 +165,7 @@ namespace {
   static TaskHandle_t s_unifiedStreamTaskHandle = nullptr;
   static volatile bool s_unifiedStreamRunning = false;
   static int s_unifiedServerSock = -1;
+  static volatile int s_unifiedClientSock = -1;
 
   static bool recvAllExact(int sock, uint8_t* dest, size_t targetLen) {
     size_t got = 0;
@@ -246,6 +247,8 @@ namespace {
           vTaskDelay(pdMS_TO_TICKS(100));
           continue;
         }
+
+        s_unifiedClientSock = clientSock;
 
         int nodelay = 1;
         setsockopt(clientSock, IPPROTO_TCP, TCP_NODELAY, &nodelay, sizeof(nodelay));
@@ -391,6 +394,7 @@ namespace {
           }
         }
 
+        s_unifiedClientSock = -1;
         close(clientSock);
         s_streamSessionActive = false;
         TestDisplay::stopStreamMode();
@@ -985,6 +989,15 @@ void WebStreamManager::stopAll() {
   s_streamSessionActive = false;
   s_lastStopMs = millis();
   stopUrlStream();
+
+  // Đóng dứt điểm socket client kết nối port 12345 để giải phóng kết nối ngay lập tức
+  if (s_unifiedClientSock >= 0) {
+    int s = s_unifiedClientSock;
+    s_unifiedClientSock = -1;
+    shutdown(s, SHUT_RDWR);
+    close(s);
+  }
+
   TestDisplay::stopStreamMode();
   s_lastVideoFrameMs = 0;
   s_lastAudioPcmMs = 0;

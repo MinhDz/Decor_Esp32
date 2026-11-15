@@ -244,6 +244,7 @@ namespace ApiMedia {
     doc["sd_mounted"]  = TestSDCard::isMounted();
     doc["mic_level"]   = TestAudio::getLastMicLevelPct();
     doc["ui_theme"]    = TestDisplay::getUiThemeIdx();
+    doc["current_mode"] = TestDisplay::getCurrentMode();
 
     JsonArray specArr = doc["spectrum"].to<JsonArray>();
     const uint8_t* spec16 = TestAudio::getMicSpectrum16();

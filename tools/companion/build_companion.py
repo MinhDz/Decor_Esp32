@@ -31,9 +31,11 @@ def build_exe():
         "--clean",              # Dọn dẹp cache build cũ
         f"--distpath={DIST_DIR}",
         f"--workpath={BUILD_DIR}",
+        f"--paths={TRANSCODER_DIR}",
         # Nhúng thư mục transcoder để phục vụ Dashboard & Streaming
         f"--add-data={TRANSCODER_DIR};transcoder",
         # Các hidden imports cần thiết
+        "--hidden-import=transcoder",
         "--hidden-import=pystray",
         "--hidden-import=pystray._win32",
         "--hidden-import=PIL",
