@@ -27,7 +27,7 @@ Hệ thống được điều khiển bởi vi điều khiển hiệu năng cao 
 
 ### 2. 🖥️ Màn Hình Màu IPS 2.4" & Sẵn Sàng Cho Màn Hình Cảm Ứng
 - **Màn hình ST7789 2.4 inch (240x320 IPS)**: Bus SPI phần cứng tốc độ cao (40MHz – 80MHz) hiển thị giao diện trạm không gian, đồng hồ, thông tin thời tiết, phổ âm thanh sống động.
-- **Sẵn sàng Nâng cấp Màn hình 2.4" Cảm ứng**: Đã cấu hình và dự phòng chân **`GPIO 47`** làm chân ngắt chạm cảm ứng (`PIN_TOUCH_SCREEN_INT / IRQ / CS`), hỗ trợ cả màn hình cảm ứng I2C (CST816S, FT6236) và SPI (XPT2046).
+- **Sẵn sàng Nâng cấp Màn hình 2.4" Cảm ứng**: Đã cấu hình chân I/O tự do **`GPIO 45`** làm chân ngắt chạm cảm ứng (`PIN_TOUCH_SCREEN_INT / IRQ / CS`), hỗ trợ cả màn hình cảm ứng I2C (CST816S, FT6236) và SPI (XPT2046) mà không ảnh hưởng đến cụm đèn LED Edison trên GPIO 47.
 
 ### 3. 🌪️ Cối Xay Gió Cyberpunk & Đèn Trang Trí Không Gian
 - **Cối xay gió N20**: Động cơ giảm tốc N20 và vòng LED cánh cối xay đấu song song qua mạch cầu H L298N Mini / MX1508, điều khiển băm xung PWM mềm mượt trên **`GPIO 1`**.
@@ -81,8 +81,9 @@ Chi tiết đầy đủ về sơ đồ mạch và kinh nghiệm thi công xem t�
 | **GPIO 40**| **Thẻ Micro SD MOSI**   | SPI Data Out thẻ nhớ SD |
 | **GPIO 41**| **Thẻ Micro SD MISO**   | SPI Data In thẻ nhớ SD (Dùng chung cho Touch SPI nếu nâng cấp) |
 | **GPIO 42**| **Thẻ Micro SD SCK**    | SPI Clock thẻ nhớ SD |
+| **GPIO 45**| **Chân Cảm Ứng Màn Hình 2.4" / Dự Phòng** | **Chân ngắt IRQ/INT hoặc CS cho màn hình 2.4" cảm ứng** (Chân I/O tự do) |
 | **GPIO 46**| **Trạng Thái Sạc Vin**  | Đọc mức High/Low trạng thái cắm sạc pin từ bo MH-CD42 (Input-Only) |
-| **GPIO 47**| **Nâng Cấp Cảm Ứng 2.4" / LED Edison Trái** | **Chân ngắt IRQ/INT hoặc CS cho màn hình 2.4" cảm ứng** / Cặp LED Edison Trái |
+| **GPIO 47**| **LED Edison Sườn Trái**| Cực (+) cặp LED Edison sườn trái qua trở $47\,\Omega$ (PWM CH4, 11 hiệu ứng) |
 | **GPIO 48**| **RGB WS2812 Onboard**  | Đèn LED RGB đa sắc tích hợp trên kit ESP32-S3 |
 
 > [!WARNING]
@@ -96,13 +97,13 @@ Chi tiết đầy đủ về sơ đồ mạch và kinh nghiệm thi công xem t�
 1. **Màn hình Cảm Ứng Chuẩn I2C (CST816S / FT6236 / FT5436)**:
    - `SDA` $\to$ **GPIO 8** (nối chung bus I2C với SHT31).
    - `SCL` $\to$ **GPIO 9** (nối chung bus I2C với SHT31).
-   - `INT / IRQ` $\to$ **GPIO 47** (`PIN_TOUCH_SCREEN_INT` trong [Config.h](file:///c:/Users/admin/Documents/GitHub/Decor_Esp32/include/Config.h)).
+   - `INT / IRQ` $\to$ **GPIO 45** (`PIN_TOUCH_SCREEN_INT` trong [Config.h](file:///c:/Users/admin/Documents/GitHub/Decor_Esp32/include/Config.h)).
    - `RST` $\to$ **GPIO 10** (chung LCD RST) hoặc cấp 3.3V.
 2. **Màn hình Cảm Ứng Chuẩn SPI (XPT2046)**:
    - `T_CLK` $\to$ **GPIO 12** (chung SPI SCK).
    - `T_DIN` $\to$ **GPIO 11** (chung SPI MOSI).
    - `T_DO` $\to$ **GPIO 41** (chung SPI MISO của thẻ nhớ SD).
-   - `T_CS` hoặc `T_IRQ` $\to$ **GPIO 47** (`PIN_TOUCH_SCREEN_CS` / `PIN_TOUCH_SCREEN_IRQ`).
+   - `T_CS` hoặc `T_IRQ` $\to$ **GPIO 45** (`PIN_TOUCH_SCREEN_CS` / `PIN_TOUCH_SCREEN_IRQ`).
 
 ---
 

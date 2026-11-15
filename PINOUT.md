@@ -77,9 +77,9 @@ Sơ đồ nhìn từ mặt trước khi cổng USB hướng lên trên:
 | 10 | GPIO 38 | **38** | **LED Nước Chảy Trái (L)** | **Cực (+) Thanh LED sao băng bên TRÁI mặt lưng (qua trở $22\,\Omega$)** |
 | 11-13 | GPIO 35-37 | - | *BỎ TRỐNG* | **CẤM DÙNG** (Nội bộ Octal PSRAM / SPI Flash) |
 | 14 | GPIO 0 | 0 | Boot Pin | Để hở / Nút BOOT |
-| 15 | GPIO 45 | 45 | Dự phòng | Chân I/O tự do |
+| 15 | GPIO 45 | **45** | **Chân Cảm Ứng Màn Hình 2.4" / Dự Phòng I/O** | Chân ngắt INT/IRQ hoặc CS nâng cấp màn hình cảm ứng 2.4" (Chân I/O tự do hoàn toàn) |
 | 16 | GPIO 48 | **48** | **RGB WS2812 Onboard** | Đèn LED đa sắc RGB tích hợp sẵn trên mạch |
-| 17 | GPIO 47 | **47** | **Cặp LED Ống Edison Trái / Chân Cảm Ứng Màn Hình 2.4"** | Chân ngắt INT/IRQ hoặc CS nâng cấp màn hình cảm ứng 2.4" / Cực (+) Cặp LED Edison sườn TRÁI qua trở $47\,\Omega$ (PWM CH4, 11 hiệu ứng) |
+| 17 | GPIO 47 | **47** | **Cặp LED Ống Edison Trái (L)** | Cực (+) Cặp LED Edison sườn TRÁI qua trở $47\,\Omega$ (PWM CH4, 11 hiệu ứng) |
 | 18 | GPIO 21 | **21** | **Cặp LED Ống Edison Phải (R)** | Cực (+) Cặp LED Edison sườn PHẢI qua trở $47\,\Omega$ (PWM CH5, 11 hiệu ứng) |
 | 19 | NC / GND | - | Mass chung | - |
 | 20 | GND | - | Mass chung | Nối sườn trạm kiềng đồng |
@@ -143,18 +143,18 @@ Việc tách riêng biệt cụm chân I2S cho Loa và Mic giúp ESP32-S3 chạy
 ---
 
 ### E. Cấu hình Nâng Cấp Màn Hình 2.4" Cảm Ứng (Touch Screen Upgrade)
-Khi nâng cấp từ màn hình ST7789 thường sang **màn hình 2.4" có lớp cảm ứng (Capacitive / Resistive Touch Screen)**, chân **`GPIO 47`** được chỉ định làm chân tín hiệu cảm ứng:
+Khi nâng cấp từ màn hình ST7789 thường sang **màn hình 2.4" có lớp cảm ứng (Capacitive / Resistive Touch Screen)**, chân **`GPIO 45`** (Header J3 chân 15 - Chân I/O tự do hoàn toàn) được chỉ định làm chân tín hiệu cảm ứng:
 - **Chuẩn cảm ứng I2C (ví dụ chip CST816S, FT6236, FT5436)**:
   - `SDA`: Nối chung vào Bus I2C phần cứng trên **`GPIO 8`** (đã có pull-up cùng SHT31).
   - `SCL`: Nối chung vào Bus I2C phần cứng trên **`GPIO 9`**.
-  - `INT / IRQ`: Nối vào **`GPIO 47`** (tín hiệu ngắt khi phát hiện chạm hoặc vuốt cử chỉ).
+  - `INT / IRQ`: Nối vào **`GPIO 45`** (tín hiệu ngắt khi phát hiện chạm hoặc vuốt cử chỉ).
   - `RST`: Nối chung chân Reset LCD **`GPIO 10`** hoặc treo lên 3.3V.
 - **Chuẩn cảm ứng SPI (ví dụ chip XPT2046)**:
   - `T_CLK`: Dùng chung SPI Clock **`GPIO 12`**.
   - `T_DIN` (MOSI): Dùng chung SPI MOSI **`GPIO 11`**.
   - `T_DO` (MISO): Dùng chung chân SPI MISO thẻ nhớ **`GPIO 41`**.
-  - `T_CS` / `T_IRQ`: Nối vào **`GPIO 47`** (tín hiệu Chip Select hoặc ngắt chạm).
-- *Phương án tương thích phần cứng*: Khi gán GPIO 47 cho cảm ứng màn hình, LED Edison sườn trái có thể đấu song song với sườn phải trên `GPIO 21`, hoặc sử dụng chân tự do `GPIO 45`.
+  - `T_CS` / `T_IRQ`: Nối vào **`GPIO 45`** (tín hiệu Chip Select hoặc ngắt chạm).
+- *Ưu điểm layout*: Sử dụng chân tự do **`GPIO 45`** giúp bảo toàn nguyên vẹn chân **`GPIO 47`** cho **Cặp LED Ống Edison Trái** và **`GPIO 21`** cho **Cặp LED Edison Phải**, không gây bất kỳ xung đột nào với các hiệu ứng ánh sáng của trạm.
 
 ---
 
@@ -172,7 +172,7 @@ flowchart TD
             TFT_CS["GPIO 14 (CS)"]
             TFT_RST["GPIO 10 (RST)"]
             TFT_BL["GPIO 7 (PWM Backlight)"]
-            TFT_TOUCH["GPIO 47 (Touch INT / IRQ / CS)"]
+            TFT_TOUCH["GPIO 45 (Touch INT / IRQ / CS)"]
         end
 
         subgraph SPI_SD["Thẻ Nhớ Micro SD (Shield Mặt Sau)"]
