@@ -1031,6 +1031,10 @@ bool WebStreamManager::isAudioStreaming() {
   return (s_lastAudioPcmMs > 0 && millis() - s_lastAudioPcmMs < 3000) || (s_urlStreamRunning && s_activeUrlType == "audio");
 }
 
+uint32_t WebStreamManager::getLastAudioPcmMs() {
+  return s_lastAudioPcmMs;
+}
+
 float WebStreamManager::getFps() {
   if (millis() - s_lastVideoFrameMs > 3000) return 0.0f;
   return s_currentFps;

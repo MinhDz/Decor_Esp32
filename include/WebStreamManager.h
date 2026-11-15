@@ -44,6 +44,7 @@ public:
   static void setStreamSessionActive(bool active);
   static bool isVideoStreaming();
   static bool isAudioStreaming();
+  static uint32_t getLastAudioPcmMs();
   static float getFps();
   static uint32_t getDroppedFrames();
   static uint32_t getQueuedVideoFrames();

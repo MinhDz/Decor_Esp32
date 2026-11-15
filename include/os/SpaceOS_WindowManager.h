@@ -83,6 +83,13 @@ namespace TestDisplay {
   int  getUiThemeIdx();
   void setUiThemeIdx(int idx);
 
+  // --- HỖ TRỢ PLAYLIST NHẠC TRỰC TUYẾN (YOUTUBE / ONLINE PLAYLIST TRÊN MODE 12) ---
+  void setOnlinePlaylist(const String titles[], const uint16_t durations[], const String ids[], int count, const String& playlistName);
+  bool isOnlinePlaylistActive();
+  void clearOnlinePlaylist();
+  String getOnlinePlaylistName();
+  String getOnlineTrackId(int idx);
+
   // --- ĐỒNG BỘ & ĐIỀU KHIỂN TRỢ LÝ XIAOZHI AI (MODE 11 <-> WEB UI) ---
   void getXiaoZhiChatState(String& stateStr, String& userText, String& aiReply, String& emotion,
                            uint8_t& eyeState, int& volumePct, int& micLevelPct, uint32_t& turnId);

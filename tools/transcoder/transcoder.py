@@ -137,6 +137,52 @@ logger.info(f"FFmpeg binary: {FFMPEG_EXE}")
 logger.info(f"Node.js binary: {NODE_EXE}")
 logger.info(f"yt-dlp command: {' '.join(YT_DLP_CMD)}")
 
+def parse_youtube_playlist(url, max_tracks=24):
+    """Trích xuất danh sách bài hát trong YouTube Playlist (dạng flat, không tải stream ngay)"""
+    url = url.strip()
+    if not url:
+        raise ValueError("URL playlist rỗng")
+
+    cmd = list(YT_DLP_CMD) + [
+        "--flat-playlist",
+        "-J",
+        "--no-check-certificates",
+        "--playlist-end", str(max_tracks),
+        url
+    ]
+    if NODE_EXE:
+        cmd[len(YT_DLP_CMD):len(YT_DLP_CMD)] = ["--js-runtimes", f"node:{NODE_EXE}"]
+
+    logger.info(f"Đang đọc danh sách bài hát YouTube Playlist qua yt-dlp: {url}")
+    res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    if res.returncode != 0:
+        raise RuntimeError(f"Lỗi đọc playlist: {res.stderr[:200]}")
+
+    data = json.loads(res.stdout)
+    playlist_title = data.get("title") or "YouTube Playlist"
+    entries = data.get("entries") or []
+
+    tracks = []
+    for idx, entry in enumerate(entries[:max_tracks]):
+        vid_id = entry.get("id") or ""
+        v_title = entry.get("title") or f"Bài hát {idx + 1}"
+        v_duration = int(entry.get("duration") or 180)
+        v_url = entry.get("url") or f"https://www.youtube.com/watch?v={vid_id}"
+        if not v_url.startswith("http"):
+            v_url = f"https://www.youtube.com/watch?v={v_url}"
+        tracks.append({
+            "id": vid_id,
+            "title": v_title,
+            "duration": v_duration,
+            "url": v_url
+        })
+
+    logger.info(f"Đã trích xuất thành công {len(tracks)} bài hát từ Playlist '{playlist_title}'")
+    return {
+        "playlist_name": playlist_title,
+        "tracks": tracks
+    }
+
 # ============================================================================
 #               LỚP QUẢN LÝ TRANSCODER & STREAM ENGINE
 # ============================================================================
@@ -145,6 +191,7 @@ class StreamSession:
         self.lock = threading.RLock()
         self.is_running = False
         self.is_paused = False
+        self.audio_only = False
         self.current_url = ""
         self.video_title = ""
         self.thumbnail_url = ""
@@ -182,7 +229,7 @@ class StreamSession:
         self.current_live_fps = 0.0
         self.frame_cond = threading.Condition()
 
-    def parse_media_url(self, url):
+    def parse_media_url(self, url, audio_only=False):
         """Phân tích link YouTube hoặc web link để lấy stream direct URLs"""
         url = url.strip()
         if not url:
@@ -193,21 +240,22 @@ class StreamSession:
             return {
                 "title": os.path.basename(url),
                 "is_local": True,
-                "video_url": url,
+                "video_url": url if not audio_only else "",
                 "audio_url": url,
                 "thumbnail": "",
                 "duration": 0
             }
 
         # 2. Sử dụng yt-dlp để trích xuất đồng thời Metadata và Direct Stream URLs trong 1 lượt gọi
-        title = "Video Stream"
+        title = "Audio Stream" if audio_only else "Video Stream"
         thumbnail = ""
         duration = 0
 
+        fmt = "ba/b" if audio_only else "bestvideo[height<=480]+bestaudio/best[height<=480]/best"
         cmd_stream = list(YT_DLP_CMD) + [
             "--no-playlist",
             "--no-check-certificates",
-            "-f", "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
+            "-f", fmt,
             "--print", "%(title)s",
             "--print", "%(thumbnail)s",
             "--print", "%(duration)s",
@@ -217,7 +265,7 @@ class StreamSession:
         if NODE_EXE:
             cmd_stream[len(YT_DLP_CMD):len(YT_DLP_CMD)] = ["--js-runtimes", f"node:{NODE_EXE}"]
 
-        logger.info(f"Đang phân tích & trích xuất direct media stream qua yt-dlp: {url}")
+        logger.info(f"Đang phân tích & trích xuất direct media stream qua yt-dlp (audio_only={audio_only}): {url}")
         res_stream = subprocess.run(cmd_stream, capture_output=True, text=True, timeout=25)
         if res_stream.returncode != 0:
             # Fallback nếu video không có DASH phân tách
@@ -245,7 +293,10 @@ class StreamSession:
         if not media_urls:
             media_urls = http_urls
 
-        if len(media_urls) >= 2:
+        if audio_only:
+            v_url = ""
+            a_url = media_urls[-1] if media_urls else ""
+        elif len(media_urls) >= 2:
             v_url = media_urls[0]
             a_url = media_urls[1]
         elif len(media_urls) >= 1:
@@ -254,7 +305,7 @@ class StreamSession:
         else:
             raise RuntimeError("yt-dlp không tìm thấy direct media stream nào")
 
-        logger.info(f"Đã trích xuất thành công: Video URL ({len(v_url)} ký tự), Audio URL ({len(a_url)} ký tự)")
+        logger.info(f"Đã trích xuất thành công: Audio URL ({len(a_url)} ký tự), Video URL ({len(v_url)} ký tự)")
         return {
             "title": title,
             "is_local": False,
@@ -264,7 +315,7 @@ class StreamSession:
             "duration": duration
         }
 
-    def start(self, url, esp_ip, fps=15, resolution="240x240", volume=100):
+    def start(self, url, esp_ip, fps=15, resolution="240x240", volume=100, audio_only=False):
         with self.lock:
             self.stop_locked()
 
@@ -273,9 +324,10 @@ class StreamSession:
             self.resolution = resolution
             self.volume = max(0, min(100, volume))
             self.current_url = url
+            self.audio_only = audio_only
 
             # 1. Phân tích link
-            media_info = self.parse_media_url(url)
+            media_info = self.parse_media_url(url, audio_only=audio_only)
             self.video_title = media_info["title"]
             self.thumbnail_url = media_info["thumbnail"]
             self.duration = media_info["duration"]
@@ -283,19 +335,8 @@ class StreamSession:
             v_url = media_info["video_url"]
             a_url = media_info["audio_url"]
 
-            logger.info(f"Bắt đầu Transcode & Stream: \"{self.video_title}\" xuống ESP32 ({self.esp_ip})")
+            logger.info(f"Bắt đầu Transcode & Stream (Audio-only={audio_only}): \"{self.video_title}\" xuống ESP32 ({self.esp_ip})")
 
-            # 2. Xây dựng Video Filter cho FFmpeg
-            if resolution == "240x320":
-                # Scale vừa chiều ngang 240, chiều dọc tối đa 320, lót đen phần thừa
-                vf = "scale=240:320:force_original_aspect_ratio=decrease,pad=240:320:(ow-iw)/2:(oh-ih)/2:black,format=yuvj420p"
-            elif resolution == "crop240":
-                # Crop tràn khung 240x240
-                vf = "scale=240:240:force_original_aspect_ratio=increase,crop=240:240,format=yuvj420p"
-            else: # Mặc định 240x240 chuẩn vuông
-                vf = "scale=240:240:force_original_aspect_ratio=decrease,pad=240:240:(ow-iw)/2:(oh-ih)/2:black,format=yuvj420p"
-
-            # 3. Khởi tạo tiến trình FFmpeg Video (MJPEG @ target FPS, không dùng -re để cho phép burst prebuffer ban đầu)
             def get_net_opts(u):
                 if u.startswith("http://") or u.startswith("https://"):
                     return [
@@ -305,16 +346,30 @@ class StreamSession:
                     ]
                 return []
 
-            v_cmd = [
-                FFMPEG_EXE, "-hide_banner", "-loglevel", "warning"
-            ] + get_net_opts(v_url) + [
-                "-i", v_url,
-                "-an",
-                "-vf", vf,
-                "-r", str(fps),
-                "-q:v", "7",
-                "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"
-            ]
+            if not audio_only:
+                # 2. Xây dựng Video Filter cho FFmpeg
+                if resolution == "240x320":
+                    vf = "scale=240:320:force_original_aspect_ratio=decrease,pad=240:320:(ow-iw)/2:(oh-ih)/2:black,format=yuvj420p"
+                elif resolution == "crop240":
+                    vf = "scale=240:240:force_original_aspect_ratio=increase,crop=240:240,format=yuvj420p"
+                else:
+                    vf = "scale=240:240:force_original_aspect_ratio=decrease,pad=240:240:(ow-iw)/2:(oh-ih)/2:black,format=yuvj420p"
+
+                v_cmd = [
+                    FFMPEG_EXE, "-hide_banner", "-loglevel", "warning"
+                ] + get_net_opts(v_url) + [
+                    "-i", v_url,
+                    "-an",
+                    "-vf", vf,
+                    "-r", str(fps),
+                    "-q:v", "7",
+                    "-f", "image2pipe", "-vcodec", "mjpeg", "pipe:1"
+                ]
+                self.proc_video = subprocess.Popen(v_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=65536)
+                self.has_video = True
+            else:
+                self.proc_video = None
+                self.has_video = False
 
             # 4. Khởi tạo tiến trình FFmpeg Audio (PCM 16-bit Mono 16000Hz, không dùng -re)
             a_cmd = [
@@ -328,8 +383,8 @@ class StreamSession:
                 "-f", "s16le", "pipe:1"
             ]
 
-            self.proc_video = subprocess.Popen(v_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=65536)
             self.proc_audio = subprocess.Popen(a_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, bufsize=32768)
+            self.has_audio = (self.proc_audio is not None)
 
             self.is_running = True
             self.is_paused = False
@@ -341,30 +396,34 @@ class StreamSession:
             self.video_read_pts = 0.0
             self.first_audio_ready = False
             self.first_video_ready = False
-            self.has_audio = (self.proc_audio is not None)
-            self.has_video = (self.proc_video is not None)
             self.video_frames_decoded = 0
             self.video_frames_dropped = 0
             self.start_time = time.time()
 
-            # 5. Kích hoạt chế độ Stream trên ESP32
-            self._notify_esp_stream_mode()
+            # 5. Kích hoạt chế độ Stream trên ESP32 CHỈ KHI CÓ VIDEO (Mode 17)
+            # Khi audio_only (YouTube Music Mode 12), KHÔNG chuyển sang Mode 17 để giữ nguyên giao diện Nokia S40!
+            if not audio_only:
+                self._notify_esp_stream_mode()
 
-            # 6. Khởi động Hàng đợi Ghép kênh và 3 Worker Threads
+            # 6. Khởi động Hàng đợi Ghép kênh và Worker Threads
             import queue
             self.packet_queue = queue.PriorityQueue(maxsize=120)
             self.thread_audio = threading.Thread(target=self._audio_worker, daemon=True)
-            self.thread_video = threading.Thread(target=self._video_worker, daemon=True)
-            self.thread_sender = threading.Thread(target=self._sender_worker, daemon=True)
             self.thread_audio.start()
-            self.thread_video.start()
+
+            if not audio_only:
+                self.thread_video = threading.Thread(target=self._video_worker, daemon=True)
+                self.thread_video.start()
+
+            self.thread_sender = threading.Thread(target=self._sender_worker, daemon=True)
             self.thread_sender.start()
 
             return {
                 "status": "ok",
                 "title": self.video_title,
-                "fps": self.fps,
-                "resolution": self.resolution,
+                "fps": self.fps if not audio_only else 0,
+                "resolution": self.resolution if not audio_only else "audio-only",
+                "audio_only": audio_only,
                 "esp_ip": self.esp_ip
             }
 
@@ -573,7 +632,9 @@ class StreamSession:
             try:
                 item = self.packet_queue.get(timeout=0.3)
             except queue.Empty:
-                if not (self.proc_video and self.proc_video.poll() is None):
+                video_alive = (self.proc_video is not None and self.proc_video.poll() is None)
+                audio_alive = (self.proc_audio is not None and self.proc_audio.poll() is None)
+                if not (video_alive or audio_alive):
                     break
                 continue
 
@@ -619,7 +680,9 @@ class StreamSession:
             try:
                 item = self.packet_queue.get(timeout=0.2)
             except queue.Empty:
-                if (self.proc_video and self.proc_video.poll() is not None) and (self.proc_audio and self.proc_audio.poll() is not None):
+                video_done = (self.proc_video is None) or (self.proc_video.poll() is not None)
+                audio_done = (self.proc_audio is None) or (self.proc_audio.poll() is not None)
+                if video_done and audio_done:
                     logger.info("Toàn bộ tiến trình FFmpeg đã hoàn tất và hàng đợi đã rỗng.")
                     break
                 continue
@@ -747,6 +810,7 @@ class StreamSession:
         return {
             "running": self.is_running,
             "paused": self.is_paused,
+            "audio_only": getattr(self, "audio_only", False),
             "title": self.video_title,
             "url": self.current_url,
             "esp_ip": self.esp_ip,
@@ -765,6 +829,146 @@ class StreamSession:
 
 # Khởi tạo phiên làm việc duy nhất
 session = StreamSession()
+
+# ============================================================================
+#               LỚP QUẢN LÝ YOUTUBE PLAYLIST & MODE 12 AUDIO-ONLY
+# ============================================================================
+class PlaylistManager:
+    def __init__(self, stream_session):
+        self.session = stream_session
+        self.lock = threading.RLock()
+        self.playlist_name = ""
+        self.tracks = []
+        self.current_index = -1
+        self.is_playing = False
+        self.esp_ip = "192.168.1.233"
+        self.sync_thread = None
+        self.sync_running = False
+
+    def load_playlist(self, url, esp_ip):
+        with self.lock:
+            self.stop()
+            self.esp_ip = esp_ip
+            p_data = parse_youtube_playlist(url, max_tracks=24)
+            self.playlist_name = p_data["playlist_name"]
+            self.tracks = p_data["tracks"]
+            self.current_index = 0 if len(self.tracks) > 0 else -1
+
+            # Đẩy danh sách bài hát sang ESP32
+            try:
+                import requests
+                payload = {
+                    "playlist_name": self.playlist_name,
+                    "tracks": [
+                        {"title": t["title"], "duration": t["duration"], "id": t["id"]}
+                        for t in self.tracks
+                    ]
+                }
+                requests.post(f"http://{self.esp_ip}/api/media/playlist/set", json=payload, timeout=4.0)
+                # Đảm bảo chuyển màn hình trạm sang Mode 12 (Trình phát nhạc Nokia S40)
+                requests.post(f"http://{self.esp_ip}/api/screen/state", json={"mode": "music"}, timeout=1.5)
+            except Exception as e:
+                logger.warning(f"Không thể gửi playlist tới ESP32 ({self.esp_ip}): {e}")
+
+            if not self.sync_running:
+                self.sync_running = True
+                self.sync_thread = threading.Thread(target=self._sync_worker, daemon=True)
+                self.sync_thread.start()
+
+            return {
+                "status": "ok",
+                "playlist_name": self.playlist_name,
+                "count": len(self.tracks),
+                "tracks": self.tracks
+            }
+
+    def play_track(self, index):
+        with self.lock:
+            if not self.tracks or index < 0 or index >= len(self.tracks):
+                return {"status": "error", "error": "Chỉ số bài hát không hợp lệ"}
+
+            self.current_index = index
+            track = self.tracks[index]
+            self.is_playing = True
+
+            logger.info(f"🎵 Phát bài online #{index+1}/{len(self.tracks)}: \"{track['title']}\" ({track['url']})")
+
+            # Báo ESP32 chọn bài này trên giao diện S40
+            try:
+                import requests
+                requests.post(f"http://{self.esp_ip}/api/media/control", json={"action": "select", "index": index}, timeout=1.5)
+            except Exception:
+                pass
+
+            cfg = load_config()
+            # Bắt đầu stream Audio-Only (không truyền video, không chuyển Mode 17)
+            self.session.start(
+                url=track["url"],
+                esp_ip=self.esp_ip,
+                fps=15,
+                resolution="240x240",
+                volume=cfg.get("volume", 100),
+                audio_only=True
+            )
+
+            return {
+                "status": "ok",
+                "index": index,
+                "track": track
+            }
+
+    def next_track(self):
+        with self.lock:
+            if not self.tracks:
+                return {"status": "error", "error": "Chưa nạp playlist"}
+            next_idx = (self.current_index + 1) % len(self.tracks)
+            return self.play_track(next_idx)
+
+    def prev_track(self):
+        with self.lock:
+            if not self.tracks:
+                return {"status": "error", "error": "Chưa nạp playlist"}
+            prev_idx = (self.current_index - 1 + len(self.tracks)) % len(self.tracks)
+            return self.play_track(prev_idx)
+
+    def stop(self):
+        with self.lock:
+            self.is_playing = False
+            self.session.stop()
+            try:
+                import requests
+                requests.post(f"http://{self.esp_ip}/api/media/control", json={"action": "stop"}, timeout=1.0)
+            except Exception:
+                pass
+            return {"status": "ok", "stopped": True}
+
+    def _sync_worker(self):
+        """Đồng bộ 2 chiều giữa ESP32 (Mode 12) và PC Transcoder"""
+        import requests
+        while self.sync_running:
+            time.sleep(1.0)
+            if not self.tracks or not self.esp_ip:
+                continue
+            try:
+                res = requests.get(f"http://{self.esp_ip}/api/media/status", timeout=1.5)
+                if res.status_code == 200:
+                    st = res.json()
+                    # 1. Phát hiện bài đã phát xong (session dừng nhưng playlist đang active)
+                    if self.is_playing and not self.session.is_running:
+                        logger.info("🎵 Bài hát online hiện tại đã kết thúc. Tự động chuyển bài tiếp theo...")
+                        self.next_track()
+                        continue
+
+                    # 2. Phát hiện người dùng bấm nút NEXT / PREV / SELECT trên trạm ESP32
+                    esp_idx = st.get("track_idx", -1)
+                    if esp_idx >= 0 and esp_idx < len(self.tracks) and esp_idx != self.current_index:
+                        if self.is_playing:
+                            logger.info(f"🔄 ESP32 chuyển sang bài #{esp_idx+1}. PC bắt đầu stream bài mới...")
+                            self.play_track(esp_idx)
+            except Exception:
+                pass
+
+playlist_mgr = PlaylistManager(session)
 
 # ============================================================================
 #                      GIAO DIỆN WEB CONTROL DASHBOARD
@@ -891,6 +1095,47 @@ HTML_DASHBOARD = """
           <button class="btn btn-danger" onclick="stopBrowserTabShare()">
             ⏹ DỪNG CHIA SẺ TAB
           </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Thẻ Phát Nhạc YouTube Online (Mode 12 Audio-Only) -->
+    <div class="card" style="border: 1px solid rgba(245, 158, 11, 0.35);">
+      <div class="card-title" style="color: var(--amber);">
+        🎵 Phát Nhạc YouTube Online (Giao Diện Trình Phát Nhạc Nokia Mode 12)
+      </div>
+      <p style="font-size: 0.78rem; color: var(--subtext); margin-bottom: 12px; line-height: 1.4;">
+        Nhập link YouTube Playlist hoặc Album. PC Transcoder sẽ trích xuất trực tiếp luồng Audio PCM 16kHz đẩy xuống ESP32. 
+        Màn hình trạm sẽ hiển thị <strong>Trình phát nhạc Symbian S40 (Đĩa than Vinyl, Sóng âm FFT VU, Tiến trình mm:ss)</strong> mà không chuyển sang chế độ Stream Video!
+      </p>
+      <div class="form-group">
+        <label>Đường link YouTube Playlist / Video Mix:</label>
+        <div style="display:flex; gap:8px;">
+          <input type="text" id="playlist_url" placeholder="https://www.youtube.com/playlist?list=... hoặc link video đơn">
+          <button class="btn btn-warning" style="white-space:nowrap;" onclick="loadPlaylist()">📥 Nạp Playlist Vào Trạm</button>
+        </div>
+        <div class="quick-chips">
+          <span class="chip" onclick="setPlaylistUrl('https://www.youtube.com/playlist?list=PL4fGSIFgk533K29Wwt9o-j6f0b4oHwT7V')">🎶 Chill Lofi Beats (Sample Playlist)</span>
+          <span class="chip" onclick="setPlaylistUrl('https://www.youtube.com/playlist?list=PLOzDu-MXXL3gvdq1tZ2F18y0_m59C7G7p')">☕ Acoustic Coffee Morning</span>
+        </div>
+      </div>
+
+      <!-- Khối điều khiển Playlist -->
+      <div id="playlist-box" style="display:none; margin-top: 14px; background: #0b1120; border-radius: 8px; padding: 12px; border: 1px solid var(--card-border);">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+          <div style="font-weight:600; font-size:0.9rem; color:var(--amber);" id="pl-title">YouTube Playlist</div>
+          <div style="font-size:0.75rem; color:var(--subtext);" id="pl-count">0 bài hát</div>
+        </div>
+        
+        <div class="row" style="margin-bottom: 12px;">
+          <button class="btn btn-outline" onclick="prevTrack()">⏮ Bài Trước</button>
+          <button class="btn btn-warning" style="flex:1;" onclick="togglePlayTrack()">▶ / ⏸ Phát / Dừng</button>
+          <button class="btn btn-outline" onclick="nextTrack()">⏭ Bài Sau</button>
+          <button class="btn btn-danger" onclick="stopPlaylist()">⏹ Dừng Playlist</button>
+        </div>
+
+        <div id="track-list" style="max-height: 220px; overflow-y: auto; border: 1px solid #1e293b; border-radius: 6px;">
+          <!-- Các bài hát được nạp động -->
         </div>
       </div>
     </div>
@@ -1189,6 +1434,140 @@ HTML_DASHBOARD = """
       dotText.innerText = 'IDLE';
       dotText.style.color = '#64748b';
     }
+
+    // ==========================================
+    // CÁC HÀM ĐIỀU KHIỂN YOUTUBE ONLINE PLAYLIST
+    // ==========================================
+    function setPlaylistUrl(u) {
+      document.getElementById('playlist_url').value = u;
+    }
+
+    async function loadPlaylist() {
+      const url = document.getElementById('playlist_url').value.trim();
+      const esp_ip = document.getElementById('esp_ip').value.trim() || '192.168.1.233';
+      if (!url) return alert("Vui lòng nhập link YouTube Playlist!");
+
+      const btn = event.target;
+      const oldTxt = btn.innerText;
+      btn.innerText = "⏳ Đang tải...";
+      btn.disabled = true;
+
+      try {
+        const res = await fetch('/api/playlist/load', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ url, esp_ip })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          renderPlaylistUI(data);
+          alert(`Đã nạp ${data.count} bài hát vào Trạm! Bấm nút Play trên từng bài hoặc trên trạm để bắt đầu.`);
+        } else {
+          alert("Lỗi tải playlist: " + (data.error || "Không rõ"));
+        }
+      } catch (err) {
+        alert("Lỗi kết nối tới Transcoder: " + err);
+      } finally {
+        btn.innerText = oldTxt;
+        btn.disabled = false;
+      }
+    }
+
+    function renderPlaylistUI(pl) {
+      const box = document.getElementById('playlist-box');
+      box.style.display = 'block';
+      document.getElementById('pl-title').innerText = pl.playlist_name || 'YouTube Playlist';
+      document.getElementById('pl-count').innerText = (pl.tracks ? pl.tracks.length : 0) + ' bài hát';
+
+      const listDiv = document.getElementById('track-list');
+      listDiv.innerHTML = '';
+      (pl.tracks || []).forEach((t, idx) => {
+        const row = document.createElement('div');
+        row.id = 'track-row-' + idx;
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.alignItems = 'center';
+        row.style.padding = '8px 12px';
+        row.style.borderBottom = '1px solid #1e293b';
+        row.style.cursor = 'pointer';
+        row.style.fontSize = '0.82rem';
+        row.onmouseover = () => { row.style.background = 'rgba(245,158,11,0.1)'; };
+        row.onmouseout = () => { 
+          if (row.dataset.active !== 'true') row.style.background = 'transparent'; 
+        };
+        row.onclick = () => { playTrackIndex(idx); };
+
+        const mins = Math.floor(t.duration / 60);
+        const secs = t.duration % 60;
+        const durStr = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+
+        row.innerHTML = `
+          <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;">
+            <span style="color:var(--amber); font-weight:600;">#${idx+1}</span>
+            <span style="color:#fff;" title="${t.title}">${t.title}</span>
+          </div>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="color:var(--subtext); font-size:0.75rem;">${durStr}</span>
+            <button class="btn btn-warning" style="padding:4px 8px; font-size:0.7rem;" onclick="event.stopPropagation(); playTrackIndex(${idx})">▶</button>
+          </div>
+        `;
+        listDiv.appendChild(row);
+      });
+    }
+
+    async function playTrackIndex(idx) {
+      try {
+        const res = await fetch('/api/playlist/play', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ index: idx })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          highlightActiveTrack(idx);
+        } else {
+          alert("Lỗi phát bài: " + (data.error || ""));
+        }
+      } catch (err) {
+        alert("Lỗi: " + err);
+      }
+    }
+
+    function highlightActiveTrack(idx) {
+      const rows = document.querySelectorAll('#track-list > div');
+      rows.forEach((r, i) => {
+        if (i === idx) {
+          r.dataset.active = 'true';
+          r.style.background = 'rgba(245,158,11,0.25)';
+          r.style.borderLeft = '3px solid var(--amber)';
+        } else {
+          r.dataset.active = 'false';
+          r.style.background = 'transparent';
+          r.style.borderLeft = 'none';
+        }
+      });
+    }
+
+    async function nextTrack() {
+      const res = await fetch('/api/playlist/next', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'ok') highlightActiveTrack(data.index);
+    }
+
+    async function prevTrack() {
+      const res = await fetch('/api/playlist/prev', { method: 'POST' });
+      const data = await res.json();
+      if (data.status === 'ok') highlightActiveTrack(data.index);
+    }
+
+    async function stopPlaylist() {
+      await fetch('/api/playlist/stop', { method: 'POST' });
+      highlightActiveTrack(-1);
+    }
+
+    async function togglePlayTrack() {
+      await fetch('/api/pause', { method: 'POST' });
+    }
   </script>
 </body>
 </html>
@@ -1296,6 +1675,7 @@ def api_pause():
 def api_stop():
     if request.method == "OPTIONS":
         return "", 204
+    playlist_mgr.stop()
     res = session.stop()
     try:
         import requests
@@ -1305,6 +1685,59 @@ def api_stop():
     except Exception:
         pass
     return jsonify(res)
+
+@app.route("/api/playlist/load", methods=["POST", "OPTIONS"])
+def api_playlist_load():
+    if request.method == "OPTIONS":
+        return "", 204
+    data = request.get_json() or {}
+    url = data.get("url", "").strip()
+    esp_ip = data.get("esp_ip", session.esp_ip).strip()
+    if not url:
+        return jsonify({"status": "error", "error": "Thiếu URL playlist YouTube"}), 400
+    try:
+        res = playlist_mgr.load_playlist(url, esp_ip)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Lỗi tải playlist: {e}", exc_info=True)
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/playlist/play", methods=["POST", "OPTIONS"])
+def api_playlist_play():
+    if request.method == "OPTIONS":
+        return "", 204
+    data = request.get_json() or {}
+    index = int(data.get("index", 0))
+    res = playlist_mgr.play_track(index)
+    return jsonify(res)
+
+@app.route("/api/playlist/next", methods=["POST", "OPTIONS"])
+def api_playlist_next():
+    if request.method == "OPTIONS":
+        return "", 204
+    return jsonify(playlist_mgr.next_track())
+
+@app.route("/api/playlist/prev", methods=["POST", "OPTIONS"])
+def api_playlist_prev():
+    if request.method == "OPTIONS":
+        return "", 204
+    return jsonify(playlist_mgr.prev_track())
+
+@app.route("/api/playlist/stop", methods=["POST", "OPTIONS"])
+def api_playlist_stop():
+    if request.method == "OPTIONS":
+        return "", 204
+    return jsonify(playlist_mgr.stop())
+
+@app.route("/api/playlist/info", methods=["GET"])
+def api_playlist_info():
+    return jsonify({
+        "playlist_name": playlist_mgr.playlist_name,
+        "current_index": playlist_mgr.current_index,
+        "is_playing": playlist_mgr.is_playing,
+        "count": len(playlist_mgr.tracks),
+        "tracks": playlist_mgr.tracks
+    })
 
 @app.route("/api/volume", methods=["POST", "OPTIONS"])
 def api_volume():

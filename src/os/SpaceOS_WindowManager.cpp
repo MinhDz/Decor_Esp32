@@ -5264,6 +5264,9 @@ namespace TestDisplay {
   static uint16_t s40MediaDurations[24];
   static bool s40MediaFromSd[24];
   static size_t s40MediaFileSizes[24];
+  static bool s40MediaIsOnline = false;
+  static String s40MediaPlaylistTitle = "";
+  static String s40MediaTrackIds[24];
   static uint16_t s40MediaCurSec = 0;
   static float s40MediaDiscAngle = 0.0f;
   static float s40MediaWavePhase = 0.0f;
@@ -5273,6 +5276,10 @@ namespace TestDisplay {
   static void invalidateCoverArtCache();
 
   static void refreshMediaPlaylist() {
+    if (s40MediaIsOnline && s40MediaTrackCount > 0) {
+      // Giữ nguyên Playlist Trực Tuyến YouTube đang nạp, không quét SD đè lên
+      return;
+    }
     invalidateCoverArtCache();
     s40MediaTrackCount = 0;
     // 0. Quét thư mục /recording trên Thẻ nhớ SD (Chứa các bản ghi âm từ Mic INMP441)
@@ -5509,6 +5516,9 @@ namespace TestDisplay {
 
   static void stopMediaAudioPlayback() {
     TestAudio::stopVoicePlaybackAsync();
+    if (s40MediaIsOnline) {
+      WebStreamManager::stopAll();
+    }
   }
 
   static bool s_waitForAiTtsToPlayMedia = false;
@@ -5537,6 +5547,16 @@ namespace TestDisplay {
 
     String fn = s40MediaTracks[s40MediaTrackIdx];
     Serial.printf("▶️ [MEDIA PLAYER] Bat dau phat: %s\n", fn.c_str());
+
+    // Nếu là bài hát thuộc Playlist Trực Tuyến YouTube
+    if (s40MediaIsOnline) {
+      Serial.printf("🌐 [YOUTUBE ONLINE] Kích hoạt phát bài online: #%d - %s (ID: %s)\n",
+                    s40MediaTrackIdx + 1, fn.c_str(), s40MediaTrackIds[s40MediaTrackIdx].c_str());
+      s40MediaPlaying = true;
+      s40MediaCurSec = 0;
+      WebStreamManager::setStreamSessionActive(true);
+      return;
+    }
 
     // Nếu bài đang chọn là bản thu âm gần nhất từ Mic INMP441
     if (fn.indexOf("rec_latest") >= 0) {
@@ -5987,10 +6007,12 @@ namespace TestDisplay {
       return;
     }
 
-    // Nếu đang mở Danh sách Bài hát quét từ Thẻ SD (s40MediaSubState == 2)
+    // Nếu đang mở Danh sách Bài hát quét từ Thẻ SD hoặc Online (s40MediaSubState == 2)
     if (s40MediaSubState == 2) {
       tft->fillRect(0, 22, W, tft->height() - 44, C_DARK_BG);
-      drawSymbianChrome("DANH SÁCH BÀI HÁT (SD)", "[MENU:TùyChọn]", "[OK:Phát]", "[EXIT:QuayLại]");
+      String listHdr = s40MediaIsOnline ? ("PLAYLIST: " + (s40MediaPlaylistTitle.length() > 0 ? s40MediaPlaylistTitle : "YOUTUBE")) : "DANH SÁCH BÀI HÁT (SD)";
+      if (vnStrLen(listHdr) > 24) listHdr = vnSubstr(listHdr, 0, 24);
+      drawSymbianChrome(listHdr.c_str(), "[MENU:TùyChọn]", "[OK:Phát]", "[EXIT:QuayLại]");
       int startIdx = max(0, min(s40MediaTrackIdx - 2, max(0, s40MediaTrackCount - 6)));
       for (int row = 0; row < 6 && (startIdx + row) < s40MediaTrackCount; row++) {
         int idx = startIdx + row;
@@ -6005,9 +6027,12 @@ namespace TestDisplay {
         tft->setCursor(16, ry + 8);
         tft->printf("%02d. %s", idx + 1, name.c_str());
 
-        tft->setTextColor(s40MediaFromSd[idx] ? C_NEON_GREEN : C_NEON_PINK, sel ? 0x1949 : C_CARD_BG);
+        uint16_t subCol = s40MediaIsOnline ? C_NEON_AMBER : (s40MediaFromSd[idx] ? C_NEON_GREEN : C_NEON_PINK);
+        tft->setTextColor(subCol, sel ? 0x1949 : C_CARD_BG);
         tft->setCursor(16, ry + 22);
-        if (s40MediaFromSd[idx] && s40MediaFileSizes[idx] > 0) {
+        if (s40MediaIsOnline) {
+          tft->printf("[YOUTUBE ONLINE]   %02u:%02u", s40MediaDurations[idx] / 60, s40MediaDurations[idx] % 60);
+        } else if (s40MediaFromSd[idx] && s40MediaFileSizes[idx] > 0) {
           tft->printf("[THẺ SD: %.1f KB]   %02u:%02u", s40MediaFileSizes[idx] / 1024.0f,
                       s40MediaDurations[idx] / 60, s40MediaDurations[idx] % 60);
         } else {
@@ -6144,10 +6169,10 @@ namespace TestDisplay {
     if (vnStrLen(title) > 33) title = vnSubstr(title, 0, 33);
 
     tft->setTextSize(1);
-    tft->setTextColor(C_YELLOW, C_CARD_BG);
+    tft->setTextColor(s40MediaIsOnline ? C_NEON_AMBER : C_YELLOW, C_CARD_BG);
     tft->setCursor(14, 120);
-    tft->printf("BÀI %02d/%02d [%s]", s40MediaTrackIdx + 1, s40MediaTrackCount,
-                (s40MediaTrackCount > 0 && s40MediaFromSd[s40MediaTrackIdx]) ? "THẺ SD" : "MẪU");
+    const char* srcTag = s40MediaIsOnline ? "YOUTUBE" : ((s40MediaTrackCount > 0 && s40MediaFromSd[s40MediaTrackIdx]) ? "THẺ SD" : "MẪU");
+    tft->printf("BÀI %02d/%02d [%s]", s40MediaTrackIdx + 1, s40MediaTrackCount, srcTag);
 
     int vol = TestAudio::getMusicVolumePct();
     tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
@@ -9384,7 +9409,37 @@ namespace TestDisplay {
       } else if (currentMode == 12 && s40MediaSubState == 0 && s40MediaPlaying) {
         uint16_t tot = (s40MediaTrackCount > 0) ? s40MediaDurations[s40MediaTrackIdx] : 200;
         s40MediaCurSec++;
-        bool taskFinished = !TestAudio::isVoicePlaybackAsyncRunning() && (s40MediaCurSec >= 2);
+
+        // BẮT NGOẠI LỆ MẤT MẠNG KHI PHÁT YOUTUBE ONLINE:
+        if (s40MediaIsOnline) {
+          bool netLost = false;
+          String errorMsg = "";
+          if (WiFi.status() != WL_CONNECTED) {
+            netLost = true;
+            errorMsg = "MAT WI-FI! DUNG PHAT";
+          } else if (s40MediaCurSec >= 4 && (millis() - WebStreamManager::getLastAudioPcmMs() > 5000)) {
+            netLost = true;
+            errorMsg = "TIMEOUT MANG // DUNG PHAT";
+          }
+
+          if (netLost) {
+            Serial.printf("❌ [ONLINE STREAM EXCEPTION] %s - Ngắt phát an toàn.\n", errorMsg.c_str());
+            s40MediaPlaying = false;
+            stopMediaAudioPlayback();
+            WebStreamManager::stopAll();
+            showSymbianToast(errorMsg);
+            drawMediaPlayerAppScreen(false);
+            return;
+          }
+        }
+
+        bool taskFinished = false;
+        if (s40MediaIsOnline) {
+          taskFinished = (s40MediaCurSec >= tot);
+        } else {
+          taskFinished = !TestAudio::isVoicePlaybackAsyncRunning() && (s40MediaCurSec >= 2);
+        }
+
         if (s40MediaCurSec >= tot || taskFinished) {
           s40MediaCurSec = 0;
           if (s40MediaTrackCount > 0 && s40MediaTracks[s40MediaTrackIdx].indexOf("rec_latest") >= 0 && taskFinished) {
@@ -9823,7 +9878,7 @@ namespace TestDisplay {
       }
     } else if (action == "select") {
       if (trackName.length() > 0) {
-        refreshMediaPlaylist();
+        if (!s40MediaIsOnline) refreshMediaPlaylist();
         for (int i = 0; i < s40MediaTrackCount; i++) {
           if (s40MediaTracks[i].equalsIgnoreCase(trackName) || ("/Musics/" + s40MediaTracks[i]).equalsIgnoreCase(trackName)) {
             s40MediaTrackIdx = i;
@@ -10218,6 +10273,65 @@ namespace TestDisplay {
 
       s_lastOtaPct = pct;
     }
+  }
+
+  // ============================================================================
+  // HỖ TRỢ PLAYLIST NHẠC TRỰC TUYẾN (YOUTUBE ONLINE PLAYLIST TRÊN MODE 12)
+  // ============================================================================
+  void setOnlinePlaylist(const String titles[], const uint16_t durations[], const String ids[], int count, const String& playlistName) {
+    invalidateCoverArtCache();
+    s40MediaIsOnline = true;
+    s40MediaPlaylistTitle = playlistName;
+    s40MediaTrackCount = constrain(count, 0, 24);
+    s40MediaTrackIdx = 0;
+    s40MediaCurSec = 0;
+    s40MediaPlaying = false;
+
+    for (int i = 0; i < s40MediaTrackCount; i++) {
+      s40MediaTracks[i] = titles[i];
+      s40MediaDurations[i] = (durations && durations[i] > 0) ? durations[i] : 180;
+      s40MediaFromSd[i] = false;
+      s40MediaFileSizes[i] = 0;
+      if (ids) s40MediaTrackIds[i] = ids[i];
+      else s40MediaTrackIds[i] = "";
+    }
+
+    if (currentMode != 12) {
+      currentMode = 12;
+      s40MediaSubState = 0;
+      refreshActiveScreen();
+    } else {
+      drawMediaPlayerAppScreen(true);
+    }
+    showSymbianToast(String("NẠP PLAYLIST: ") + (playlistName.length() > 0 ? playlistName : "YOUTUBE"));
+  }
+
+  bool isOnlinePlaylistActive() {
+    return s40MediaIsOnline;
+  }
+
+  void clearOnlinePlaylist() {
+    s40MediaIsOnline = false;
+    s40MediaPlaylistTitle = "";
+    for (int i = 0; i < 24; i++) {
+      s40MediaTrackIds[i] = "";
+    }
+    refreshMediaPlaylist();
+    if (currentMode == 12) {
+      drawMediaPlayerAppScreen(true);
+    }
+    showSymbianToast("ĐÃ CHUYỂN VỀ THẺ SD");
+  }
+
+  String getOnlinePlaylistName() {
+    return s40MediaPlaylistTitle;
+  }
+
+  String getOnlineTrackId(int idx) {
+    if (idx >= 0 && idx < s40MediaTrackCount) {
+      return s40MediaTrackIds[idx];
+    }
+    return "";
   }
 
 } // namespace TestDisplay

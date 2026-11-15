@@ -46,6 +46,13 @@ Hệ thống được điều khiển bởi vi điều khiển hiệu năng cao 
 - **Web Server tích hợp**: Cho phép giám sát trạng thái trạm, điều khiển đèn decor, tốc độ cối xay, chat trực tiếp với AI và cấu hình mạng Wi-Fi ngay trên trình duyệt điện thoại/máy tính.
 - **Hệ thống phân vùng 16MB Flash Dual OTA**: Phân vùng `ota_0` và `ota_1` dung lượng lớn (hơn 3MB mỗi phân vùng), cho phép cập nhật phần mềm từ xa an toàn tuyệt đối, tự động chuyển đổi phân vùng khi có bản cập nhật mới.
 
+### 6. 🎵 Trình Phát Nhạc YouTube Online (Mode 12 Audio-Only & Phổ Âm Thanh FFT)
+- **Tận dụng giao diện Trình phát nhạc Symbian S40 (Mode 12)**: Phát trực tiếp âm thanh từ YouTube Playlist / Album qua trạm chuyển mã `tools/transcoder/transcoder.py` mà không chuyển tab sang Stream Web (Mode 17).
+- **Trải nghiệm nghe nhạc trực quan**:
+  - Màn hình IPS hiển thị tên bài hát `[YOUTUBE ONLINE]`, thời lượng, tiến trình thực tế cùng đĩa than Vinyl quay và phổ âm thanh FFT Visualizer (sóng Sin, cột VU 16 dải tần) nhảy theo nhạc.
+  - Hỗ trợ đổi bài, Next/Prev/Pause/Play bằng cả phím cứng trên trạm (Keypad GPIO 3 / TTP223 GPIO 20) lẫn giao diện Web Transcoder.
+- **Cơ chế ngắt ngoại lệ an toàn**: Tự động phát hiện khi mất kết nối Wi-Fi hoặc gián đoạn mạng giữa chừng (> 5s không có dữ liệu âm thanh), ngắt phát an toàn, dọn dẹp DMA buffer và hiển thị Toast thông báo lỗi trực quan mà không gây crash chip hay WDT panic.
+
 ---
 
 ## 🔌 Sơ Đồ Đấu Nối Chân Phần Cứng (Hardware Pinout)

@@ -238,6 +238,9 @@ namespace ApiMedia {
     doc["vis_mode"]    = visMode;
     doc["repeat_mode"] = repeatMode;
     doc["from_sd"]     = fromSd;
+    doc["is_online"]   = TestDisplay::isOnlinePlaylistActive();
+    doc["playlist_title"] = TestDisplay::getOnlinePlaylistName();
+    doc["track_id"]    = TestDisplay::getOnlineTrackId(trackIdx);
     doc["sd_mounted"]  = TestSDCard::isMounted();
     doc["mic_level"]   = TestAudio::getLastMicLevelPct();
     doc["ui_theme"]    = TestDisplay::getUiThemeIdx();
@@ -261,9 +264,11 @@ namespace ApiMedia {
     int cnt = TestDisplay::getMediaPlaylistItems(names, durs, fromSd, sizes, 24);
 
     JsonDocument doc;
-    doc["sd_mounted"]  = TestSDCard::isMounted();
-    doc["sd_total_mb"] = (uint32_t)TestSDCard::getTotalMB();
-    doc["sd_used_mb"]  = (uint32_t)TestSDCard::getUsedMB();
+    doc["is_online"]      = TestDisplay::isOnlinePlaylistActive();
+    doc["playlist_title"] = TestDisplay::getOnlinePlaylistName();
+    doc["sd_mounted"]     = TestSDCard::isMounted();
+    doc["sd_total_mb"]    = (uint32_t)TestSDCard::getTotalMB();
+    doc["sd_used_mb"]     = (uint32_t)TestSDCard::getUsedMB();
 
     JsonArray arr = doc["tracks"].to<JsonArray>();
     for (int i = 0; i < cnt; i++) {
@@ -272,6 +277,7 @@ namespace ApiMedia {
       obj["name"]     = names[i];
       obj["duration"] = durs[i];
       obj["from_sd"]  = fromSd[i];
+      obj["id"]       = TestDisplay::getOnlineTrackId(i);
       obj["size_kb"]  = (uint32_t)(sizes[i] / 1024);
     }
 
@@ -501,6 +507,58 @@ namespace ApiMedia {
     server.send(404, "text/plain", "Music file not found on SD");
   }
 
+  void handleOnlinePlaylistSet(WebServer& server) {
+    if (!server.hasArg("plain")) {
+      server.send(400, "application/json", "{\"error\":\"Missing body\"}");
+      return;
+    }
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, server.arg("plain"));
+    if (err) {
+      server.send(400, "application/json", "{\"error\":\"Invalid JSON\"}");
+      return;
+    }
+
+    String playlistName = "YouTube Playlist";
+    if (doc["playlist_name"].is<const char*>()) {
+      playlistName = doc["playlist_name"].as<String>();
+    }
+    JsonArray tracksArr = doc["tracks"].as<JsonArray>();
+    int count = tracksArr.size();
+    if (count <= 0) {
+      server.send(400, "application/json", "{\"error\":\"No tracks in playlist\"}");
+      return;
+    }
+
+    count = min(count, 24);
+    String titles[24];
+    uint16_t durations[24];
+    String ids[24];
+
+    for (int i = 0; i < count; i++) {
+      JsonObject t = tracksArr[i];
+      if (t["title"].is<const char*>()) {
+        titles[i] = t["title"].as<String>();
+      } else {
+        titles[i] = "Bai hat " + String(i + 1);
+      }
+      durations[i] = t["duration"].is<uint16_t>() ? t["duration"].as<uint16_t>() : 180;
+      if (t["id"].is<const char*>()) {
+        ids[i] = t["id"].as<String>();
+      } else {
+        ids[i] = "";
+      }
+    }
+
+    TestDisplay::setOnlinePlaylist(titles, durations, ids, count, playlistName);
+    server.send(200, "application/json", "{\"status\":\"ok\",\"count\":" + String(count) + ",\"playlist\":\"" + playlistName + "\"}");
+  }
+
+  void handleOnlinePlaylistClear(WebServer& server) {
+    TestDisplay::clearOnlinePlaylist();
+    server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Cleared online playlist, reverted to SD card\"}");
+  }
+
   // ================================================================
   //          REST APIS STREAM ĐA PHƯƠNG TIỆN (VIDEO & AUDIO)
   // ================================================================
@@ -726,10 +784,12 @@ namespace ApiMedia {
     server.on("/api/images/select", HTTP_POST, [&server]() { handleSelectImage(server); });
     server.on("/api/littlefs/upload", HTTP_POST, [&server]() { handleLittleFsUpload(server); }, [&server]() { handleLittleFsUploadChunk(server); });
 
-    // 2. Trình Phát Nhạc (/Musics trên Thẻ SD)
+    // 2. Trình Phát Nhạc (/Musics trên Thẻ SD & YouTube Online Playlist)
     server.on("/api/media/status", HTTP_GET, [&server]() { handleMediaStatus(server); });
     server.on("/api/media/list", HTTP_GET, [&server]() { handleMediaList(server); });
     server.on("/api/media/control", HTTP_POST, [&server]() { handleMediaControl(server); });
+    server.on("/api/media/playlist/set", HTTP_POST, [&server]() { handleOnlinePlaylistSet(server); });
+    server.on("/api/media/playlist/clear", HTTP_POST, [&server]() { handleOnlinePlaylistClear(server); });
     server.on("/api/media/upload", HTTP_POST, [&server]() { handleMediaUploadFinish(server); }, [&server]() { handleMediaUploadChunk(server); });
     server.on("/api/media/delete", HTTP_POST, [&server]() { handleMediaDelete(server); });
     server.on("/api/media/stream", HTTP_GET, [&server]() { handleMediaStream(server); });
