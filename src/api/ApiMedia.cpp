@@ -304,7 +304,9 @@ namespace ApiMedia {
         // 2. Lệnh điều khiển trình phát
         if (!doc["action"].isNull()) {
           String action = doc["action"].as<String>();
-          int val       = doc["value"] | 0;
+          int val       = 0;
+          if (doc["value"].is<int>()) val = doc["value"].as<int>();
+          else if (doc["index"].is<int>()) val = doc["index"].as<int>();
           String name   = doc["name"] | "";
           TestDisplay::controlMediaPlayer(action, val, name);
         }

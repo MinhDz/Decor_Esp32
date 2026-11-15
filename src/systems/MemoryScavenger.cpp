@@ -109,7 +109,7 @@ uint32_t MemoryScavenger::getStreamIdleSec() {
 }
 
 uint32_t MemoryScavenger::getXiaoZhiIdleSec() {
-  if (TestAudio::isVoiceStreamActive() || !XiaoZhiClient::isTtsFinished()) {
+  if (TestAudio::isVoiceStreamActive() || (XiaoZhiClient::isConversationActive() && !XiaoZhiClient::isTtsFinished())) {
     s_lastXiaoZhiActivity = millis();
     return 0;
   }

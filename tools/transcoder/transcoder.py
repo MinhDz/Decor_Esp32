@@ -837,6 +837,7 @@ class PlaylistManager:
     def __init__(self, stream_session):
         self.session = stream_session
         self.lock = threading.RLock()
+        self.state = "idle"  # idle, buffering, playing
         self.playlist_name = ""
         self.tracks = []
         self.current_index = -1
@@ -844,6 +845,37 @@ class PlaylistManager:
         self.esp_ip = "192.168.1.233"
         self.sync_thread = None
         self.sync_running = False
+        self.cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "playlist_cache.json")
+        self._load_cached_playlist()
+
+    def _load_cached_playlist(self):
+        try:
+            if os.path.exists(self.cache_file):
+                with open(self.cache_file, "r", encoding="utf-8") as f:
+                    c = json.load(f)
+                    self.playlist_name = c.get("playlist_name", "")
+                    self.tracks = c.get("tracks", [])
+                    self.esp_ip = c.get("esp_ip", "192.168.1.233")
+                    if self.tracks:
+                        self.current_index = 0
+                        logger.info(f"📂 Đã tự động nạp Playlist từ cache: '{self.playlist_name}' ({len(self.tracks)} bài hát)")
+                        if not self.sync_running:
+                            self.sync_running = True
+                            self.sync_thread = threading.Thread(target=self._sync_worker, daemon=True)
+                            self.sync_thread.start()
+        except Exception as e:
+            logger.warning(f"Không thể đọc playlist_cache.json: {e}")
+
+    def _save_cached_playlist(self):
+        try:
+            with open(self.cache_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "playlist_name": self.playlist_name,
+                    "tracks": self.tracks,
+                    "esp_ip": self.esp_ip
+                }, f, ensure_ascii=False, indent=2)
+        except Exception as e:
+            logger.warning(f"Không thể ghi playlist_cache.json: {e}")
 
     def load_playlist(self, url, esp_ip):
         with self.lock:
@@ -853,6 +885,8 @@ class PlaylistManager:
             self.playlist_name = p_data["playlist_name"]
             self.tracks = p_data["tracks"]
             self.current_index = 0 if len(self.tracks) > 0 else -1
+
+            self._save_cached_playlist()
 
             # Đẩy danh sách bài hát sang ESP32
             try:
@@ -897,7 +931,7 @@ class PlaylistManager:
             # Báo ESP32 chọn bài này trên giao diện S40
             try:
                 import requests
-                requests.post(f"http://{self.esp_ip}/api/media/control", json={"action": "select", "index": index}, timeout=1.5)
+                requests.post(f"http://{self.esp_ip}/api/media/control", json={"action": "select", "index": index, "value": index}, timeout=1.5)
             except Exception:
                 pass
 
@@ -949,7 +983,7 @@ class PlaylistManager:
         """Đồng bộ 2 chiều giữa ESP32 (Mode 12) và PC Transcoder"""
         import requests
         while self.sync_running:
-            time.sleep(1.0)
+            time.sleep(0.5)
             if not self.tracks or not self.esp_ip:
                 continue
             try:
@@ -962,12 +996,25 @@ class PlaylistManager:
                 res = requests.get(f"http://{self.esp_ip}/api/media/status", timeout=1.5)
                 if res.status_code == 200:
                     st = res.json()
-                    # 2. Phát hiện người dùng bấm nút NEXT / PREV / SELECT trên trạm ESP32
+                    is_online = st.get("is_online", False)
+                    is_esp_playing = st.get("playing", False)
                     esp_idx = st.get("track_idx", -1)
-                    if esp_idx >= 0 and esp_idx < len(self.tracks) and esp_idx != self.current_index:
-                        if self.is_playing:
-                            logger.info(f"🔄 ESP32 chuyển sang bài #{esp_idx+1}. PC bắt đầu stream bài mới...")
-                            self.play_track(esp_idx)
+
+                    if is_online:
+                        if is_esp_playing:
+                            # Nếu ESP32 đang yêu cầu phát nhưng PC chưa chạy stream và không ở trạng thái đang đệm
+                            if not self.session.is_running and getattr(self, "state", "") != "buffering":
+                                logger.info(f"▶️ ESP32 kích hoạt phát bài online #{esp_idx+1}. PC bắt đầu nạp stream...")
+                                self.play_track(esp_idx if (0 <= esp_idx < len(self.tracks)) else 0)
+                            # Hoặc nếu người dùng chuyển bài trên ESP32
+                            elif esp_idx >= 0 and esp_idx < len(self.tracks) and esp_idx != self.current_index and getattr(self, "state", "") != "buffering":
+                                logger.info(f"🔄 ESP32 chuyển sang bài #{esp_idx+1}. PC bắt đầu stream bài mới...")
+                                self.play_track(esp_idx)
+                        else:
+                            # Nếu ESP32 bấm Pause/Stop mà PC đang phát
+                            if self.session.is_running and getattr(self, "state", "") == "playing":
+                                logger.info("⏸️ ESP32 đã tạm dừng phát nhạc. PC dừng stream...")
+                                self.stop()
             except Exception:
                 pass
 
@@ -1115,8 +1162,9 @@ HTML_DASHBOARD = """
         <label>Đường link YouTube Playlist / Video Mix:</label>
         <div style="display:flex; gap:8px;">
           <input type="text" id="playlist_url" placeholder="https://www.youtube.com/playlist?list=... hoặc link video đơn">
-          <button class="btn btn-warning" style="white-space:nowrap;" onclick="loadPlaylist()">📥 Nạp Playlist Vào Trạm</button>
+          <button id="btn-load-playlist" class="btn btn-warning" style="white-space:nowrap;" onclick="loadPlaylist()">📥 Nạp Playlist Vào Trạm</button>
         </div>
+        <div id="pl-load-msg" style="margin-top:6px; font-size:0.75rem; color:#94a3b8; min-height: 16px;"></div>
         <div class="quick-chips">
           <span class="chip" onclick="setPlaylistUrl('https://www.youtube.com/playlist?list=PL4fGSIFgk533K29Wwt9o-j6f0b4oHwT7V')">🎶 Chill Lofi Beats (Sample Playlist)</span>
           <span class="chip" onclick="setPlaylistUrl('https://www.youtube.com/playlist?list=PLOzDu-MXXL3gvdq1tZ2F18y0_m59C7G7p')">☕ Acoustic Coffee Morning</span>
@@ -1462,12 +1510,19 @@ HTML_DASHBOARD = """
     async function loadPlaylist() {
       const url = document.getElementById('playlist_url').value.trim();
       const esp_ip = document.getElementById('esp_ip').value.trim() || '192.168.1.233';
-      if (!url) return alert("Vui lòng nhập link YouTube Playlist!");
+      const msg = document.getElementById('pl-load-msg');
+      if (!url) {
+        if (msg) { msg.style.color = "#ef4444"; msg.innerText = "❌ Vui lòng nhập link YouTube Playlist!"; }
+        return alert("Vui lòng nhập link YouTube Playlist!");
+      }
 
-      const btn = event.target;
-      const oldTxt = btn.innerText;
-      btn.innerText = "⏳ Đang tải...";
-      btn.disabled = true;
+      const btn = document.getElementById('btn-load-playlist') || (typeof event !== 'undefined' ? event.target : null);
+      const oldTxt = btn ? btn.innerText : "📥 Nạp Playlist Vào Trạm";
+      if (btn) { btn.innerText = "⏳ Đang tải..."; btn.disabled = true; }
+      if (msg) {
+        msg.style.color = "#f59e0b";
+        msg.innerText = "⏳ Đang phân tích YouTube Playlist bằng yt-dlp... Vui lòng đợi trong giây lát (khoảng 3-6 giây).";
+      }
 
       try {
         const res = await fetch('/api/playlist/load', {
@@ -1478,15 +1533,25 @@ HTML_DASHBOARD = """
         const data = await res.json();
         if (data.status === 'ok') {
           renderPlaylistUI(data);
-          alert(`Đã nạp ${data.count} bài hát vào Trạm! Bấm nút Play trên từng bài hoặc trên trạm để bắt đầu.`);
+          if (msg) {
+            msg.style.color = "#10b981";
+            msg.innerText = `✅ Đã nạp thành công ${data.count} bài hát từ '${data.playlist_name || 'Playlist'}' vào Trạm! Bấm Play trên trạm hoặc web để phát.`;
+          }
         } else {
+          if (msg) {
+            msg.style.color = "#ef4444";
+            msg.innerText = "❌ Lỗi: " + (data.error || "Không rõ");
+          }
           alert("Lỗi tải playlist: " + (data.error || "Không rõ"));
         }
       } catch (err) {
+        if (msg) {
+          msg.style.color = "#ef4444";
+          msg.innerText = "❌ Lỗi kết nối tới Transcoder: " + err;
+        }
         alert("Lỗi kết nối tới Transcoder: " + err);
       } finally {
-        btn.innerText = oldTxt;
-        btn.disabled = false;
+        if (btn) { btn.innerText = oldTxt; btn.disabled = false; }
       }
     }
 
@@ -1617,6 +1682,23 @@ HTML_DASHBOARD = """
       const box = document.getElementById('station-log-box');
       if (box) box.innerHTML = '<div style="color:#64748b;">Đã xóa màn hình log</div>';
     }
+
+    // Tự động khôi phục danh sách Playlist đã lưu trong bộ đệm khi mở trang Web
+    window.addEventListener('DOMContentLoaded', () => {
+      fetch('/api/playlist/info')
+        .then(r => r.json())
+        .then(data => {
+          if (data && data.tracks && data.tracks.length > 0) {
+            renderPlaylistUI(data);
+            if (data.current_index >= 0) highlightActiveTrack(data.current_index);
+            const msg = document.getElementById('pl-load-msg');
+            if (msg) {
+              msg.style.color = "#10b981";
+              msg.innerText = `📂 Đã khôi phục ${data.count} bài hát từ '${data.playlist_name || 'Playlist'}'`;
+            }
+          }
+        }).catch(() => {});
+    });
   </script>
 </body>
 </html>

@@ -5521,6 +5521,8 @@ namespace TestDisplay {
     if (s40MediaIsOnline) {
       WebStreamManager::stopAll();
     }
+    s40OnlineTrackStartMs = 0;
+    s40OnlineHasReceivedAudio = false;
   }
 
   static bool s_waitForAiTtsToPlayMedia = false;
@@ -9375,7 +9377,7 @@ namespace TestDisplay {
 
     // Kiểm tra cờ chờ Trợ lý AI dứt lời để tự động kích hoạt phát nhạc trên thẻ SD
     if (s_waitForAiTtsToPlayMedia && currentMode == 12) {
-      bool aiDone = !TestAudio::isStreamPcmAsyncPlaying() && XiaoZhiClient::isTtsFinished();
+      bool aiDone = !TestAudio::isStreamPcmAsyncPlaying() && (!XiaoZhiClient::isConversationActive() || XiaoZhiClient::isTtsFinished());
       if (aiDone) {
         if (s_aiTtsFinishWaitStartMs == 0) {
           s_aiTtsFinishWaitStartMs = now;
@@ -9438,7 +9440,7 @@ namespace TestDisplay {
             }
           } else {
             // Cho phép tối đa 25 giây để yt-dlp và ffmpeg trên PC giải mã link và nạp stream
-            if (millis() - s40OnlineTrackStartMs > 25000) {
+            if (s40OnlineTrackStartMs > 0 && (millis() - s40OnlineTrackStartMs > 25000)) {
               netLost = true;
               errorMsg = "CHUA KET NOI TRANSCODER PC";
             }
@@ -9831,7 +9833,7 @@ namespace TestDisplay {
       return;
     }
 
-    bool aiSpeaking = TestAudio::isStreamPcmAsyncPlaying() || !XiaoZhiClient::isTtsFinished();
+    bool aiSpeaking = TestAudio::isStreamPcmAsyncPlaying() || (XiaoZhiClient::isConversationActive() && !XiaoZhiClient::isTtsFinished());
 
     if (action == "play") {
       s40MediaPlaying = true;
