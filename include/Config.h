@@ -58,6 +58,14 @@
 #define PIN_TFT_CS          14  // CS         -> GPIO 14
 #define PIN_TFT_BL          7   // BLK (Đèn nền LED màn hình) -> GPIO 7 (Điều khiển độ sáng PWM 0..100%)
 
+// 6.1. Cấu hình Nâng Cấp Màn Hình 2.4" Cảm Ứng (Touch Screen Upgrade)
+// Chân GPIO 47 được phân bổ làm chân ngắt chạm cảm ứng (IRQ/INT) hoặc Touch CS khi nâng cấp
+// - Chuẩn cảm ứng I2C (CST816S, FT6236, v.v.): I2C SDA -> GPIO 8, I2C SCL -> GPIO 9, IRQ/INT -> GPIO 47
+// - Chuẩn cảm ứng SPI (XPT2046, v.v.): SCK -> GPIO 12, MOSI -> GPIO 11, MISO -> GPIO 41, Touch IRQ/CS -> GPIO 47
+#define PIN_TOUCH_SCREEN_INT    47  // Chân ngắt cảm ứng (IRQ / INT) cho màn hình 2.4" -> GPIO 47
+#define PIN_TOUCH_SCREEN_IRQ    PIN_TOUCH_SCREEN_INT
+#define PIN_TOUCH_SCREEN_CS     PIN_TOUCH_SCREEN_INT
+
 // 7. Module Shield Thẻ nhớ Micro SD (Wemos D1 Mini Shield: D5=CLK, D6=MISO, D7=MOSI, D8=CS)
 #define PIN_SD_SCK          42  // D5 (SD_SCK / CLK)  -> GPIO 42
 #define PIN_SD_MISO         41  // D6 (SD_MISO / DO)  -> GPIO 41

@@ -43,6 +43,10 @@ assets/drive_sync/*
 # Local logs
 log/
 
+# AI Lab experimental sandbox (Migrated to Decor_AI_Station)
+ai_lab/
+*.mp3
+
 # Python packaging & Companion App
 tools/companion/build/
 tools/companion/dist/
