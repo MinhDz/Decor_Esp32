@@ -1635,6 +1635,7 @@
       <button class="tab-btn" onclick="switchTab('chat')">💬 Trò Chuyện XiaoZhi</button>
       <button class="tab-btn" onclick="switchTab('images')">🖼️ Quản Lý Ảnh (<span id="tab-img-count">0/15</span>)</button>
       <button class="tab-btn" onclick="switchTab('wifi')">📶 Cài Đặt Wi-Fi</button>
+      <button class="tab-btn" onclick="switchTab('logs')">📜 Nhật Ký Hệ Thống</button>
     </div>
     <button class="tab-scroll-btn" onclick="scrollTabs(180)" title="Cuộn tab sang phải">▶</button>
   </div>
@@ -2801,6 +2802,58 @@
     </div>
   </div>
 </div>
+
+  <!-- ==================== TAB 5: NHẬT KÝ HỆ THỐNG TRỰC TIẾP (LIVE SYSTEM LOGS & TERMINAL) ==================== -->
+  <div id="tab-logs" class="section">
+    <div class="designer-panel">
+      <div class="designer-title">
+        <span>📜 Nhật Ký Trực Tiếp & Dòng Lệnh Hệ Thống (Live System Logs)</span>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <span id="log-status-badge" style="font-size:0.75rem; color:#10b981; font-weight:600;">● ĐANG THEO DÕI</span>
+        </div>
+      </div>
+
+      <!-- Thanh công cụ điều khiển Log -->
+      <div style="display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; margin-bottom: 12px; background: rgba(15, 23, 42, 0.6); padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.06);">
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <label style="font-size:0.78rem; color:#94a3b8; margin:0;">Mức Log:</label>
+          <select id="log-level-filter" onchange="fetchLogsOnce()" style="padding: 4px 8px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-size: 0.78rem;">
+            <option value="all">Tất cả (DEBUG+)</option>
+            <option value="info" selected>Thông tin (INFO+)</option>
+            <option value="warn">Cảnh báo (WARN+)</option>
+            <option value="error">Lỗi (ERROR+)</option>
+          </select>
+
+          <input type="text" id="log-search-filter" placeholder="🔍 Lọc từ khóa (VD: MEDIA, STREAM, WIFI)..." oninput="applyLogFilter()" style="padding: 4px 10px; background: #0f172a; border: 1px solid #334155; border-radius: 6px; color: #f8fafc; font-size: 0.78rem; width: 220px;">
+        </div>
+
+        <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <label style="display: flex; align-items: center; gap: 4px; font-size: 0.78rem; color: #94a3b8; cursor: pointer;">
+            <input type="checkbox" id="log-autoscroll" checked> Tự cuộn
+          </label>
+          <button class="btn btn-sm" id="btn-toggle-log-poll" onclick="toggleLogPolling()" style="background: rgba(56, 189, 248, 0.15); border: 1px solid #38bdf8; color: #38bdf8; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; cursor: pointer;">⏸ Tạm dừng</button>
+          <button class="btn btn-sm" onclick="clearLogConsoleScreen()" style="background: rgba(148, 163, 184, 0.15); border: 1px solid #64748b; color: #cbd5e1; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; cursor: pointer;">🗑️ Xóa màn</button>
+          <a href="/api/logs/download" class="btn btn-sm" style="background: rgba(16, 185, 129, 0.15); border: 1px solid #10b981; color: #10b981; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; text-decoration: none; display: inline-flex; align-items: center;">⬇ Tải file log</a>
+          <button class="btn btn-sm" onclick="clearSystemLogBuffer()" style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #ef4444; font-size: 0.75rem; padding: 4px 10px; border-radius: 6px; cursor: pointer;">🧹 Xóa sạch log trạm</button>
+        </div>
+      </div>
+
+      <!-- Màn hình Console Terminal -->
+      <div id="log-terminal-container" style="background: #030712; border: 1px solid #1e293b; border-radius: 8px; padding: 12px; height: 380px; overflow-y: auto; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.78rem; line-height: 1.45; color: #e2e8f0; white-space: pre-wrap; word-break: break-all; box-shadow: inset 0 2px 10px rgba(0,0,0,0.5);">
+        <div style="color: #64748b; font-style: italic;">Đang kết nối tới trạm để đọc nhật ký hệ thống...</div>
+      </div>
+
+      <!-- Khối nhập lệnh CLI Interactive Terminal -->
+      <div style="margin-top: 10px; display: flex; gap: 8px;">
+        <span style="display: flex; align-items: center; color: #38bdf8; font-family: monospace; font-weight: bold; font-size: 0.88rem;">spaceos&gt;</span>
+        <input type="text" id="cli-cmd-input" placeholder="Nhập lệnh điều khiển trực tiếp (VD: help, status, wifi, free, ls /)..." onkeydown="if(event.key==='Enter') executeCliCommand()" style="flex: 1; padding: 8px 12px; background: #0b1120; border: 1px solid #1e293b; border-radius: 6px; color: #fff; font-family: monospace; font-size: 0.85rem; outline: none;">
+        <button onclick="executeCliCommand()" style="background: #38bdf8; color: #020617; border: none; font-weight: bold; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.8rem;">Gửi Lệnh ↵</button>
+      </div>
+      <div style="font-size: 0.7rem; color: #64748b; margin-top: 4px;">
+        💡 Gợi ý lệnh nhanh: <code>help</code>, <code>status</code>, <code>free</code>, <code>wifi</code>, <code>modules</code>, <code>media play</code>, <code>media stop</code>, <code>light 3</code>, <code>ls /</code>
+      </div>
+    </div>
+  </div>
 
 <!-- ==================== MODAL DIALOG NHẬP MẬT KHẨU WI-FI ==================== -->
 <div id="wifi-modal-backdrop" class="wifi-modal-backdrop">
@@ -4066,6 +4119,14 @@
     } else if (tabName === 'wifi') {
       loadSavedWifiList();
       checkStatus();
+    } else if (tabName === 'logs') {
+      s_logPollingActive = true;
+      fetchLogsOnce();
+      if (!s_logPollTimer) s_logPollTimer = setInterval(fetchLogsOnce, 1500);
+    }
+    if (tabName !== 'logs' && s_logPollTimer) {
+      clearInterval(s_logPollTimer);
+      s_logPollTimer = null;
     }
 
     if (activeBtn) {
@@ -5907,6 +5968,134 @@
   setupHorizontalScroll(document.getElementById('quick-prompts-box'));
   setupHorizontalScroll(document.getElementById('hud-subcontrols'));
   setupHorizontalScroll(document.getElementById('chat-hud-subcontrols'));
+
+  // ==========================================
+  // LOG VIEWER & TERMINAL CLI CONSOLE
+  // ==========================================
+  let s_logPollTimer = null;
+  let s_logPollingActive = true;
+  let s_lastRawLogs = "";
+
+  function toggleLogPolling() {
+    s_logPollingActive = !s_logPollingActive;
+    const btn = document.getElementById('btn-toggle-log-poll');
+    const badge = document.getElementById('log-status-badge');
+    if (s_logPollingActive) {
+      if (btn) btn.innerText = '⏸ Tạm dừng';
+      if (badge) { badge.innerText = '● ĐANG THEO DÕI'; badge.style.color = '#10b981'; }
+      fetchLogsOnce();
+      if (!s_logPollTimer) s_logPollTimer = setInterval(fetchLogsOnce, 1500);
+    } else {
+      if (btn) btn.innerText = '▶ Tiếp tục';
+      if (badge) { badge.innerText = '⏸ ĐÃ TẠM DỪNG'; badge.style.color = '#f59e0b'; }
+      if (s_logPollTimer) { clearInterval(s_logPollTimer); s_logPollTimer = null; }
+    }
+  }
+
+  async function fetchLogsOnce() {
+    const lvl = (document.getElementById('log-level-filter') ? document.getElementById('log-level-filter').value : 'all') || 'all';
+    try {
+      const res = await fetch(`/api/logs?limit=150&format=text&level=${lvl}`);
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const text = await res.text();
+      if (text !== s_lastRawLogs) {
+        s_lastRawLogs = text;
+        renderLogs(text);
+      }
+    } catch(e) {
+      // Offline hoặc trạm chưa khởi động xong
+    }
+  }
+
+  function renderLogs(rawText) {
+    const container = document.getElementById('log-terminal-container');
+    if (!container) return;
+    const searchVal = (document.getElementById('log-search-filter') ? document.getElementById('log-search-filter').value.trim().toLowerCase() : '') || '';
+    
+    const lines = rawText.split('\n');
+    let html = '';
+    for (let l of lines) {
+      if (!l) continue;
+      if (searchVal && !l.toLowerCase().includes(searchVal)) continue;
+
+      let col = '#94a3b8';
+      if (l.includes('[ERROR]') || l.includes('[FATAL]') || l.includes('❌') || l.includes('Error')) {
+        col = '#f87171';
+      } else if (l.includes('[WARN]') || l.includes('⚠️') || l.includes('Warning')) {
+        col = '#fbbf24';
+      } else if (l.includes('[INFO]') || l.includes('✅') || l.includes('🚀') || l.includes('🌐')) {
+        col = '#38bdf8';
+      } else if (l.includes('[DEBUG]')) {
+        col = '#64748b';
+      }
+      const esc = l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      html += `<div style="color:${col}; margin-bottom:2px;">${esc}</div>`;
+    }
+    if (!html) {
+      html = '<div style="color:#64748b; font-style:italic;">Không có dòng nhật ký nào khớp bộ lọc...</div>';
+    }
+    container.innerHTML = html;
+
+    const autoScroll = document.getElementById('log-autoscroll');
+    if (autoScroll && autoScroll.checked) {
+      container.scrollTop = container.scrollHeight;
+    }
+  }
+
+  function applyLogFilter() {
+    renderLogs(s_lastRawLogs);
+  }
+
+  function clearLogConsoleScreen() {
+    const container = document.getElementById('log-terminal-container');
+    if (container) container.innerHTML = '<div style="color:#64748b; font-style:italic;">Đã xóa màn hình console. Đang chờ log mới...</div>';
+    s_lastRawLogs = "";
+  }
+
+  async function clearSystemLogBuffer() {
+    if (!confirm("Bạn có chắc chắn muốn xóa sạch toàn bộ nhật ký trong bộ nhớ trạm không?")) return;
+    try {
+      await fetch('/api/logs/clear', { method: 'POST' });
+      clearLogConsoleScreen();
+      showToast("Đã xóa sạch bộ đệm nhật ký hệ thống!", false);
+    } catch(e) {
+      alert("Lỗi xóa log: " + e);
+    }
+  }
+
+  async function executeCliCommand() {
+    const input = document.getElementById('cli-cmd-input');
+    if (!input) return;
+    const cmd = input.value.trim();
+    if (!cmd) return;
+    input.value = '';
+
+    const container = document.getElementById('log-terminal-container');
+    if (container) {
+      container.innerHTML += `<div style="color:#a855f7; font-weight:bold; margin-top:6px;">spaceos&gt; ${cmd}</div>`;
+      container.scrollTop = container.scrollHeight;
+    }
+
+    try {
+      const res = await fetch('/api/terminal/exec', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cmd: cmd })
+      });
+      const data = await res.json();
+      if (container) {
+        const out = data.output || (data.success ? "Lệnh đã thực thi thành công." : "Lỗi thực thi lệnh.");
+        const esc = out.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+        container.innerHTML += `<div style="color:#e2e8f0; white-space:pre-wrap; background:rgba(255,255,255,0.03); padding:4px 8px; border-radius:4px; margin:3px 0 6px 0;">${esc}</div>`;
+        container.scrollTop = container.scrollHeight;
+      }
+    } catch(e) {
+      if (container) {
+        container.innerHTML += `<div style="color:#ef4444;">Lỗi kết nối tới trạm: ${e}</div>`;
+        container.scrollTop = container.scrollHeight;
+      }
+    }
+  }
 </script>
 </body>
 </html>

@@ -41,7 +41,9 @@ static const char* getResetReasonStr(esp_reset_reason_t r) {
 }
 
 void handleExec(WebServer& server) {
-  if (!WebAuth::isAuthenticated(server)) {
+  IPAddress remIp = server.client().remoteIP();
+  bool isLocal = (remIp[0] == 192 && remIp[1] == 168) || (remIp[0] == 10) || (remIp[0] == 172 && (remIp[1] >= 16 && remIp[1] <= 31)) || (remIp[0] == 127) || (remIp == IPAddress(0,0,0,0));
+  if (!isLocal && !WebAuth::isAuthenticated(server)) {
     server.send(401, "application/json", "{\"success\":false,\"output\":\"Lỗi: Chưa xác thực quyền quản trị Web!\"}");
     return;
   }

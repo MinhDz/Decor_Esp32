@@ -642,6 +642,12 @@ namespace ApiSystem {
     server.on("/api/logs/snapshot", HTTP_POST, [&server]() { handlePostLogSnapshot(server); });
     server.on("/api/logs/clear", HTTP_POST, [&server]() { handlePostLogClear(server); });
 
+    // Alias /api/system/logs
+    server.on("/api/system/logs", HTTP_GET, [&server]() { handleGetLogs(server); });
+    server.on("/api/system/logs/download", HTTP_GET, [&server]() { handleDownloadLogs(server); });
+    server.on("/api/system/logs/stats", HTTP_GET, [&server]() { handleGetLogStats(server); });
+    server.on("/api/system/logs/clear", HTTP_POST, [&server]() { handlePostLogClear(server); });
+
     server.on("/api/telemetry/history", HTTP_GET, [&server]() { handleGetTelemetryHistory(server); });
     server.on("/api/telemetry/stats", HTTP_GET, [&server]() { handleGetTelemetryStats(server); });
 

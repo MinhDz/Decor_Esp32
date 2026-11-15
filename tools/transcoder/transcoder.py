@@ -889,9 +889,10 @@ class PlaylistManager:
 
             self.current_index = index
             track = self.tracks[index]
+            self.state = "buffering"
             self.is_playing = True
 
-            logger.info(f"🎵 Phát bài online #{index+1}/{len(self.tracks)}: \"{track['title']}\" ({track['url']})")
+            logger.info(f"🎵 Bắt đầu nạp & phát bài online #{index+1}/{len(self.tracks)}: \"{track['title']}\" ({track['url']})")
 
             # Báo ESP32 chọn bài này trên giao diện S40
             try:
@@ -902,7 +903,7 @@ class PlaylistManager:
 
             cfg = load_config()
             # Bắt đầu stream Audio-Only (không truyền video, không chuyển Mode 17)
-            self.session.start(
+            res = self.session.start(
                 url=track["url"],
                 esp_ip=self.esp_ip,
                 fps=15,
@@ -910,6 +911,7 @@ class PlaylistManager:
                 volume=cfg.get("volume", 100),
                 audio_only=True
             )
+            self.state = "playing"
 
             return {
                 "status": "ok",
@@ -933,6 +935,7 @@ class PlaylistManager:
 
     def stop(self):
         with self.lock:
+            self.state = "idle"
             self.is_playing = False
             self.session.stop()
             try:
@@ -950,15 +953,15 @@ class PlaylistManager:
             if not self.tracks or not self.esp_ip:
                 continue
             try:
+                # 1. Phát hiện bài đã phát xong (chỉ khi đang ở trạng thái playing và đã gửi audio)
+                if getattr(self, "state", "") == "playing" and not self.session.is_running and self.session.audio_bytes_sent > 32000:
+                    logger.info("🎵 Bài hát online hiện tại đã kết thúc. Tự động chuyển bài tiếp theo...")
+                    self.next_track()
+                    continue
+
                 res = requests.get(f"http://{self.esp_ip}/api/media/status", timeout=1.5)
                 if res.status_code == 200:
                     st = res.json()
-                    # 1. Phát hiện bài đã phát xong (session dừng nhưng playlist đang active)
-                    if self.is_playing and not self.session.is_running:
-                        logger.info("🎵 Bài hát online hiện tại đã kết thúc. Tự động chuyển bài tiếp theo...")
-                        self.next_track()
-                        continue
-
                     # 2. Phát hiện người dùng bấm nút NEXT / PREV / SELECT trên trạm ESP32
                     esp_idx = st.get("track_idx", -1)
                     if esp_idx >= 0 and esp_idx < len(self.tracks) and esp_idx != self.current_index:
@@ -1183,6 +1186,20 @@ HTML_DASHBOARD = """
           <span id="vol-val" style="font-weight: 600; color: var(--primary)">100%</span>
         </div>
         <input type="range" min="0" max="100" value="100" id="vol" style="width: 100%" oninput="changeVolume(this.value)">
+      </div>
+    </div>
+
+    <!-- Thẻ Nhật Ký Hoạt Động Trực Tiếp (Live Station Logs) -->
+    <div class="card" style="border: 1px solid rgba(56, 189, 248, 0.35);">
+      <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+        <span>📜 Nhật Ký Hoạt Động Trực Tiếp Trạm Decor (Live Station Logs)</span>
+        <div style="display:flex; gap:8px;">
+          <button class="btn btn-outline" style="padding:4px 8px; font-size:0.7rem;" onclick="clearStationLogView()">🗑️ Xóa Màn Hình</button>
+          <button class="btn btn-outline" style="padding:4px 8px; font-size:0.7rem;" onclick="fetchStationLogs()">🔄 Làm Mới</button>
+        </div>
+      </div>
+      <div id="station-log-box" style="background:#030712; border:1px solid #1e293b; border-radius:8px; padding:10px; height:220px; overflow-y:auto; font-family:monospace; font-size:0.75rem; color:#cbd5e1; line-height:1.45; white-space:pre-wrap;">
+        <span style="color:#64748b;">Đang kết nối tới trạm để đọc log...</span>
       </div>
     </div>
   </div>
@@ -1567,6 +1584,38 @@ HTML_DASHBOARD = """
 
     async function togglePlayTrack() {
       await fetch('/api/pause', { method: 'POST' });
+    }
+
+    async function fetchStationLogs() {
+      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.233';
+      try {
+        const res = await fetch('http://' + esp_ip + '/api/logs?limit=80&format=text');
+        if (res.ok) {
+          const txt = await res.text();
+          const box = document.getElementById('station-log-box');
+          if (box) {
+            const lines = txt.split('\n');
+            let html = '';
+            for (let l of lines) {
+              if (!l) continue;
+              let col = '#94a3b8';
+              if (l.includes('[ERROR]') || l.includes('❌') || l.includes('Error')) col = '#f87171';
+              else if (l.includes('[WARN]') || l.includes('⚠️') || l.includes('Warning')) col = '#fbbf24';
+              else if (l.includes('[INFO]') || l.includes('✅') || l.includes('🎵')) col = '#38bdf8';
+              const esc = l.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+              html += `<div style="color:${col};">${esc}</div>`;
+            }
+            box.innerHTML = html || '<div style="color:#64748b;">Chưa có log mới</div>';
+            box.scrollTop = box.scrollHeight;
+          }
+        }
+      } catch(e) {}
+    }
+    setInterval(fetchStationLogs, 2000);
+
+    function clearStationLogView() {
+      const box = document.getElementById('station-log-box');
+      if (box) box.innerHTML = '<div style="color:#64748b;">Đã xóa màn hình log</div>';
     }
   </script>
 </body>

@@ -5267,6 +5267,8 @@ namespace TestDisplay {
   static bool s40MediaIsOnline = false;
   static String s40MediaPlaylistTitle = "";
   static String s40MediaTrackIds[24];
+  static unsigned long s40OnlineTrackStartMs = 0;
+  static bool s40OnlineHasReceivedAudio = false;
   static uint16_t s40MediaCurSec = 0;
   static float s40MediaDiscAngle = 0.0f;
   static float s40MediaWavePhase = 0.0f;
@@ -5552,8 +5554,11 @@ namespace TestDisplay {
     if (s40MediaIsOnline) {
       Serial.printf("🌐 [YOUTUBE ONLINE] Kích hoạt phát bài online: #%d - %s (ID: %s)\n",
                     s40MediaTrackIdx + 1, fn.c_str(), s40MediaTrackIds[s40MediaTrackIdx].c_str());
+      SystemLogger::log(LOG_LVL_INFO, "MEDIA", "Phát bài YouTube Online: #%d - %s", s40MediaTrackIdx + 1, fn.c_str());
       s40MediaPlaying = true;
       s40MediaCurSec = 0;
+      s40OnlineTrackStartMs = millis();
+      s40OnlineHasReceivedAudio = false;
       WebStreamManager::setStreamSessionActive(true);
       return;
     }
@@ -9408,22 +9413,40 @@ namespace TestDisplay {
         drawClockSuiteAppScreen(false);
       } else if (currentMode == 12 && s40MediaSubState == 0 && s40MediaPlaying) {
         uint16_t tot = (s40MediaTrackCount > 0) ? s40MediaDurations[s40MediaTrackIdx] : 200;
-        s40MediaCurSec++;
 
         // BẮT NGOẠI LỆ MẤT MẠNG KHI PHÁT YOUTUBE ONLINE:
         if (s40MediaIsOnline) {
           bool netLost = false;
           String errorMsg = "";
+
+          // Kiểm tra xem audio từ Transcoder đã bắt đầu vào ESP32 chưa
+          if (!s40OnlineHasReceivedAudio) {
+            if (WebStreamManager::getLastAudioPcmMs() > s40OnlineTrackStartMs) {
+              s40OnlineHasReceivedAudio = true;
+              SystemLogger::log(LOG_LVL_INFO, "MEDIA", "Đã nhận luồng âm thanh online từ PC Transcoder.");
+            }
+          }
+
           if (WiFi.status() != WL_CONNECTED) {
             netLost = true;
             errorMsg = "MAT WI-FI! DUNG PHAT";
-          } else if (s40MediaCurSec >= 4 && (millis() - WebStreamManager::getLastAudioPcmMs() > 5000)) {
-            netLost = true;
-            errorMsg = "TIMEOUT MANG // DUNG PHAT";
+          } else if (s40OnlineHasReceivedAudio) {
+            // Đang phát bình thường nhưng sau 6 giây không có audio mới
+            if (millis() - WebStreamManager::getLastAudioPcmMs() > 6000) {
+              netLost = true;
+              errorMsg = "TIMEOUT MANG // DUNG PHAT";
+            }
+          } else {
+            // Cho phép tối đa 25 giây để yt-dlp và ffmpeg trên PC giải mã link và nạp stream
+            if (millis() - s40OnlineTrackStartMs > 25000) {
+              netLost = true;
+              errorMsg = "CHUA KET NOI TRANSCODER PC";
+            }
           }
 
           if (netLost) {
             Serial.printf("❌ [ONLINE STREAM EXCEPTION] %s - Ngắt phát an toàn.\n", errorMsg.c_str());
+            SystemLogger::log(LOG_LVL_WARN, "MEDIA", "[EXCEPTION] %s - Ngắt phát an toàn.", errorMsg.c_str());
             s40MediaPlaying = false;
             stopMediaAudioPlayback();
             WebStreamManager::stopAll();
@@ -9431,6 +9454,13 @@ namespace TestDisplay {
             drawMediaPlayerAppScreen(false);
             return;
           }
+
+          // Chỉ tăng tiến trình thời gian khi đã thực sự có âm thanh
+          if (s40OnlineHasReceivedAudio) {
+            s40MediaCurSec++;
+          }
+        } else {
+          s40MediaCurSec++;
         }
 
         bool taskFinished = false;
@@ -9778,6 +9808,8 @@ namespace TestDisplay {
 
   void controlMediaPlayer(const String& action, int value, const String& trackName) {
     lastUserActivityMs = millis();
+    SystemLogger::log(LOG_LVL_INFO, "MEDIA", "Điều khiển Media: action='%s', val=%d, track='%s'",
+                      action.c_str(), value, trackName.c_str());
     if (isScreenSleeping) {
       isScreenSleeping = false;
       setBacklightBrightness(screenBrightnessPct);
@@ -10286,6 +10318,7 @@ namespace TestDisplay {
     s40MediaTrackIdx = 0;
     s40MediaCurSec = 0;
     s40MediaPlaying = false;
+    SystemLogger::log(LOG_LVL_INFO, "MEDIA", "Đã nạp Playlist Online mới: '%s' (%d bài hát)", playlistName.c_str(), s40MediaTrackCount);
 
     for (int i = 0; i < s40MediaTrackCount; i++) {
       s40MediaTracks[i] = titles[i];
@@ -10311,6 +10344,7 @@ namespace TestDisplay {
   }
 
   void clearOnlinePlaylist() {
+    SystemLogger::log(LOG_LVL_INFO, "MEDIA", "Đã xóa Playlist Online, hoàn nguyên về Thẻ SD");
     s40MediaIsOnline = false;
     s40MediaPlaylistTitle = "";
     for (int i = 0; i < 24; i++) {
