@@ -23,6 +23,8 @@ import socket
 import logging
 import threading
 import subprocess
+import re
+import urllib.parse
 from pathlib import Path
 from flask import Flask, request, jsonify, Response, render_template_string
 
@@ -168,6 +170,11 @@ def parse_youtube_playlist(url, max_tracks=24):
         entries = [data]
     entries = entries or []
 
+    # Trích xuất ảnh bìa của toàn bộ Playlist (chọn thumbnail nét nhất)
+    playlist_thumb = data.get("thumbnail") or ""
+    if not playlist_thumb and data.get("thumbnails"):
+        playlist_thumb = data["thumbnails"][-1].get("url", "")
+
     tracks = []
     for idx, entry in enumerate(entries[:max_tracks]):
         vid_id = entry.get("id") or ""
@@ -176,16 +183,37 @@ def parse_youtube_playlist(url, max_tracks=24):
         v_url = entry.get("url") or f"https://www.youtube.com/watch?v={vid_id}"
         if not v_url.startswith("http"):
             v_url = f"https://www.youtube.com/watch?v={v_url}"
+
+        # Ảnh thumbnail của từng bài hát
+        t_thumb = entry.get("thumbnail") or ""
+        if not t_thumb and entry.get("thumbnails"):
+            t_thumb = entry["thumbnails"][-1].get("url", "")
+        if not t_thumb and vid_id:
+            t_thumb = f"https://i.ytimg.com/vi/{vid_id}/hqdefault.jpg"
+
+        mins = v_duration // 60
+        secs = v_duration % 60
+        dur_str = f"{mins}:{secs:02d}"
+
         tracks.append({
             "id": vid_id,
             "title": v_title,
             "duration": v_duration,
-            "url": v_url
+            "duration_str": dur_str,
+            "url": v_url,
+            "thumbnail": t_thumb
         })
 
-    logger.info(f"Đã trích xuất thành công {len(tracks)} bài hát từ Playlist '{playlist_title}'")
+    # Nếu playlist chưa có ảnh bìa riêng, lấy thumbnail của bài hát đầu tiên làm ảnh bìa
+    if not playlist_thumb and tracks:
+        playlist_thumb = tracks[0].get("thumbnail", "")
+
+    logger.info(f"Đã trích xuất thành công {len(tracks)} bài hát từ Playlist '{playlist_title}' (Bìa: {'Có' if playlist_thumb else 'Không'})")
     return {
         "playlist_name": playlist_title,
+        "playlist_url": url,
+        "cover_url": playlist_thumb,
+        "total_tracks": len(tracks),
         "tracks": tracks
     }
 
@@ -864,13 +892,18 @@ class PlaylistManager:
         self.lock = threading.RLock()
         self.state = "idle"  # idle, buffering, playing
         self.playlist_name = ""
+        self.playlist_url = ""
+        self.cover_url = ""
         self.tracks = []
         self.current_index = -1
         self.is_playing = False
         self.esp_ip = "192.168.1.233"
         self.sync_thread = None
         self.sync_running = False
+
         app_dir = os.path.dirname(sys.executable) if getattr(sys, 'frozen', False) else os.path.dirname(os.path.abspath(__file__))
+        self.playlists_dir = os.path.join(app_dir, "playlists")
+        os.makedirs(self.playlists_dir, exist_ok=True)
         self.cache_file = os.path.join(app_dir, "playlist_cache.json")
         self._load_cached_playlist()
         if not self.sync_running:
@@ -884,9 +917,21 @@ class PlaylistManager:
                 with open(self.cache_file, "r", encoding="utf-8") as f:
                     c = json.load(f)
                     self.playlist_name = c.get("playlist_name", "")
+                    self.playlist_url = c.get("playlist_url", "")
+                    self.cover_url = c.get("cover_url", "")
                     self.tracks = c.get("tracks", [])
                     self.esp_ip = c.get("esp_ip", "192.168.1.233")
                     if self.tracks:
+                        for t in self.tracks:
+                            if not t.get("thumbnail") and t.get("id"):
+                                t["thumbnail"] = f"https://i.ytimg.com/vi/{t['id']}/hqdefault.jpg"
+                            if not t.get("duration_str") and t.get("duration"):
+                                mins = int(t["duration"]) // 60
+                                secs = int(t["duration"]) % 60
+                                t["duration_str"] = f"{mins}:{secs:02d}"
+                        if not self.cover_url and self.tracks:
+                            self.cover_url = self.tracks[0].get("thumbnail", "")
+
                         self.current_index = 0
                         logger.info(f"📂 Đã tự động nạp Playlist từ cache: '{self.playlist_name}' ({len(self.tracks)} bài hát)")
                         if not self.sync_running:
@@ -901,11 +946,181 @@ class PlaylistManager:
             with open(self.cache_file, "w", encoding="utf-8") as f:
                 json.dump({
                     "playlist_name": self.playlist_name,
+                    "playlist_url": self.playlist_url,
+                    "cover_url": self.cover_url,
                     "tracks": self.tracks,
                     "esp_ip": self.esp_ip
                 }, f, ensure_ascii=False, indent=2)
         except Exception as e:
             logger.warning(f"Không thể ghi playlist_cache.json: {e}")
+
+    def save_to_json(self, filename=None, custom_name=None):
+        with self.lock:
+            if not self.tracks:
+                raise ValueError("Danh sách bài hát rỗng, không thể lưu")
+
+            p_name = custom_name.strip() if custom_name else (self.playlist_name or "YouTube_Playlist")
+            if not filename:
+                safe_name = re.sub(r'[\\/*?:"<>|\s]+', '_', p_name).strip('_')
+                if not safe_name:
+                    safe_name = f"playlist_{int(time.time())}"
+                filename = f"{safe_name}.json"
+            elif not filename.lower().endswith(".json"):
+                filename = f"{filename}.json"
+
+            file_path = os.path.join(self.playlists_dir, filename)
+
+            cover = self.cover_url or (self.tracks[0].get("thumbnail", "") if self.tracks else "")
+            saved_time = time.strftime("%Y-%m-%d %H:%M:%S")
+            payload = {
+                "playlist_name": p_name,
+                "playlist_url": self.playlist_url or "",
+                "cover_url": cover,
+                "saved_at": saved_time,
+                "total_tracks": len(self.tracks),
+                "tracks": self.tracks
+            }
+
+            with open(file_path, "w", encoding="utf-8") as f:
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"💾 Đã lưu Playlist vào tệp JSON: {file_path} (Tên: '{p_name}', {len(self.tracks)} bài, Bìa: {'Có' if cover else 'Không'})")
+
+            return {
+                "status": "ok",
+                "filename": filename,
+                "file_path": file_path,
+                "playlist_name": p_name,
+                "cover_url": cover,
+                "total_tracks": len(self.tracks),
+                "saved_at": saved_time
+            }
+
+    def list_saved_playlists(self):
+        results = []
+        if not os.path.exists(self.playlists_dir):
+            return results
+        for fn in os.listdir(self.playlists_dir):
+            if fn.lower().endswith(".json"):
+                fpath = os.path.join(self.playlists_dir, fn)
+                try:
+                    with open(fpath, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    p_name = data.get("playlist_name") or fn[:-5]
+                    cover = data.get("cover_url") or ""
+                    tracks = data.get("tracks") or []
+                    if not cover and tracks:
+                        cover = tracks[0].get("thumbnail", "")
+                    results.append({
+                        "filename": fn,
+                        "playlist_name": p_name,
+                        "playlist_url": data.get("playlist_url", ""),
+                        "cover_url": cover,
+                        "total_tracks": len(tracks),
+                        "saved_at": data.get("saved_at", time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(os.path.getmtime(fpath)))),
+                        "file_size": os.path.getsize(fpath)
+                    })
+                except Exception as e:
+                    logger.warning(f"Lỗi đọc file playlist {fn}: {e}")
+        results.sort(key=lambda x: x.get("saved_at", ""), reverse=True)
+        return results
+
+    def load_from_json(self, filename, esp_ip=None):
+        with self.lock:
+            target_fn = os.path.basename(filename)
+            fpath = os.path.join(self.playlists_dir, target_fn)
+            if not os.path.exists(fpath):
+                raise FileNotFoundError(f"Không tìm thấy file playlist: {target_fn}")
+
+            with open(fpath, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            return self._apply_playlist_data(data, esp_ip)
+
+    def import_from_json_data(self, data, esp_ip=None, save_copy=True):
+        with self.lock:
+            if not isinstance(data, dict) or "tracks" not in data:
+                raise ValueError("Dữ liệu JSON không hợp lệ, thiếu danh sách tracks")
+
+            p_name = data.get("playlist_name", "Imported Playlist")
+            if save_copy:
+                safe_name = re.sub(r'[\\/*?:"<>|\s]+', '_', p_name).strip('_') or f"imported_{int(time.time())}"
+                fpath = os.path.join(self.playlists_dir, f"{safe_name}.json")
+                with open(fpath, "w", encoding="utf-8") as f:
+                    json.dump(data, f, ensure_ascii=False, indent=2)
+
+            return self._apply_playlist_data(data, esp_ip)
+
+    def _apply_playlist_data(self, data, esp_ip=None):
+        self.stop()
+        if esp_ip:
+            self.esp_ip = esp_ip.strip()
+
+        if self.esp_ip:
+            try:
+                import requests
+                requests.post(f"http://{self.esp_ip}/api/stream/stop", timeout=1.0)
+                requests.post(f"http://{self.esp_ip}/api/media/playlist/clear", timeout=1.5)
+            except Exception:
+                pass
+
+        self.playlist_name = data.get("playlist_name") or "YouTube Playlist"
+        self.playlist_url = data.get("playlist_url") or ""
+        self.cover_url = data.get("cover_url") or ""
+        self.tracks = data.get("tracks") or []
+        self.current_index = -1
+
+        for t in self.tracks:
+            if not t.get("thumbnail") and t.get("id"):
+                t["thumbnail"] = f"https://i.ytimg.com/vi/{t['id']}/hqdefault.jpg"
+            if not t.get("duration_str") and t.get("duration"):
+                mins = int(t["duration"]) // 60
+                secs = int(t["duration"]) % 60
+                t["duration_str"] = f"{mins}:{secs:02d}"
+
+        if not self.cover_url and self.tracks:
+            self.cover_url = self.tracks[0].get("thumbnail", "")
+
+        self._save_cached_playlist()
+
+        if self.esp_ip:
+            try:
+                import requests
+                payload = {
+                    "playlist_name": self.playlist_name,
+                    "tracks": [
+                        {"title": t["title"], "duration": t["duration"], "id": t.get("id", "")}
+                        for t in self.tracks
+                    ]
+                }
+                requests.post(f"http://{self.esp_ip}/api/media/playlist/set", json=payload, timeout=4.0)
+                requests.post(f"http://{self.esp_ip}/api/screen/state", json={"mode": "music"}, timeout=1.5)
+            except Exception as e:
+                logger.warning(f"Không thể gửi playlist tới ESP32 ({self.esp_ip}): {e}")
+
+        if not self.sync_running:
+            self.sync_running = True
+            self.sync_thread = threading.Thread(target=self._sync_worker, daemon=True)
+            self.sync_thread.start()
+
+        logger.info(f"⚡ [PLAYLIST NẠP NHANH] Đã nạp thành công '{self.playlist_name}' ({len(self.tracks)} bài hát) từ file JSON trong 0.05s!")
+        return {
+            "status": "ok",
+            "playlist_name": self.playlist_name,
+            "cover_url": self.cover_url,
+            "playlist_url": self.playlist_url,
+            "count": len(self.tracks),
+            "tracks": self.tracks
+        }
+
+    def delete_saved_playlist(self, filename):
+        target_fn = os.path.basename(filename)
+        fpath = os.path.join(self.playlists_dir, target_fn)
+        if os.path.exists(fpath):
+            os.remove(fpath)
+            logger.info(f"🗑️ Đã xóa file playlist: {target_fn}")
+            return {"status": "ok", "deleted": target_fn}
+        return {"status": "error", "error": "Tệp không tồn tại"}
 
     def load_playlist(self, url, esp_ip):
         with self.lock:
@@ -922,10 +1137,18 @@ class PlaylistManager:
 
             p_data = parse_youtube_playlist(url, max_tracks=24)
             self.playlist_name = p_data["playlist_name"]
+            self.playlist_url = p_data.get("playlist_url", url)
+            self.cover_url = p_data.get("cover_url", "")
             self.tracks = p_data["tracks"]
             self.current_index = -1  # Đặt -1 để bất kỳ bài nào được chọn (kể cả bài #0) đều kích hoạt phát mới
 
             self._save_cached_playlist()
+
+            # Tự động lưu 1 bản vào thư mục playlists/ để người dùng có thể tái sử dụng ngay lập tức!
+            try:
+                self.save_to_json()
+            except Exception as e:
+                logger.warning(f"Không thể tự động lưu playlist: {e}")
 
             # Đẩy danh sách bài hát sang ESP32
             try:
@@ -951,6 +1174,8 @@ class PlaylistManager:
             return {
                 "status": "ok",
                 "playlist_name": self.playlist_name,
+                "cover_url": self.cover_url,
+                "playlist_url": self.playlist_url,
                 "count": len(self.tracks),
                 "tracks": self.tracks
             }
@@ -1260,9 +1485,21 @@ HTML_DASHBOARD = """
 
       <!-- Khối điều khiển Playlist -->
       <div id="playlist-box" style="display:none; margin-top: 14px; background: #0b1120; border-radius: 8px; padding: 12px; border: 1px solid var(--card-border);">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
-          <div style="font-weight:600; font-size:0.9rem; color:var(--amber);" id="pl-title">YouTube Playlist</div>
-          <div style="font-size:0.75rem; color:var(--subtext);" id="pl-count">0 bài hát</div>
+        <div style="display:flex; gap:12px; align-items:center; margin-bottom: 12px; background: rgba(255,255,255,0.02); padding: 10px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.05);">
+          <img id="pl-cover" src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='64' height='64'><rect width='64' height='64' fill='%231e293b'/><text x='50%' y='54%' font-size='24' text-anchor='middle' fill='%23f59e0b'>🎵</text></svg>" 
+               style="width:68px; height:68px; border-radius:8px; object-fit:cover; border:1px solid rgba(245,158,11,0.4); box-shadow:0 4px 10px rgba(0,0,0,0.5); flex-shrink:0;">
+          <div style="flex:1; overflow:hidden;">
+            <div style="font-weight:700; font-size:1.0rem; color:var(--amber); white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" id="pl-title">YouTube Playlist</div>
+            <div style="display:flex; gap:8px; align-items:center; margin-top:4px; flex-wrap:wrap;">
+              <span style="font-size:0.75rem; color:var(--subtext);" id="pl-count">0 bài hát</span>
+              <span id="pl-saved-badge" style="font-size:0.68rem; padding:1px 6px; border-radius:4px; background:rgba(16,185,129,0.15); color:#10b981; display:none;">Đã lưu JSON</span>
+            </div>
+            <div id="pl-action-msg" style="font-size:0.72rem; color:#10b981; margin-top:3px; min-height:15px;"></div>
+          </div>
+          <div style="display:flex; flex-direction:column; gap:6px;">
+            <button class="btn btn-warning" style="padding:5px 10px; font-size:0.75rem; white-space:nowrap;" onclick="saveCurrentPlaylist()">💾 Lưu Playlist (.json)</button>
+            <button class="btn btn-outline" style="padding:5px 10px; font-size:0.75rem; white-space:nowrap;" onclick="exportCurrentPlaylist()">📥 Tải Tệp JSON</button>
+          </div>
         </div>
         
         <div class="row" style="margin-bottom: 12px;">
@@ -1272,8 +1509,25 @@ HTML_DASHBOARD = """
           <button class="btn btn-danger" onclick="stopPlaylist()">⏹ Dừng Playlist</button>
         </div>
 
-        <div id="track-list" style="max-height: 220px; overflow-y: auto; border: 1px solid #1e293b; border-radius: 6px;">
+        <div id="track-list" style="max-height: 240px; overflow-y: auto; border: 1px solid #1e293b; border-radius: 6px;">
           <!-- Các bài hát được nạp động -->
+        </div>
+      </div>
+
+      <!-- Thư Viện Playlist JSON Đã Lưu -->
+      <div style="margin-top: 14px; background: rgba(30, 41, 59, 0.3); border-radius: 8px; padding: 12px; border: 1px solid #1e293b;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 8px;">
+          <div style="font-size:0.84rem; font-weight:600; color:#e2e8f0; display:flex; align-items:center; gap:6px;">
+            📁 Thư Viện Playlist JSON Đã Lưu (<span id="saved-pl-count">0</span>)
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button class="btn btn-outline" style="padding:4px 8px; font-size:0.72rem;" onclick="document.getElementById('import-file-input').click()">📤 Nhập File JSON</button>
+            <input type="file" id="import-file-input" accept=".json" style="display:none;" onchange="importPlaylistFromFile(event)">
+            <button class="btn btn-outline" style="padding:4px 8px; font-size:0.72rem;" onclick="fetchSavedPlaylists()">🔄 Làm mới</button>
+          </div>
+        </div>
+        <div id="saved-playlists-list" style="display:grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap:8px; max-height: 200px; overflow-y: auto; padding-right:2px;">
+          <div style="color:#64748b; font-size:0.78rem; padding:8px;">Chưa có playlist JSON nào được lưu</div>
         </div>
       </div>
     </div>
@@ -1648,6 +1902,15 @@ HTML_DASHBOARD = """
       document.getElementById('pl-title').innerText = pl.playlist_name || 'YouTube Playlist';
       document.getElementById('pl-count').innerText = (pl.tracks ? pl.tracks.length : 0) + ' bài hát';
 
+      const coverImg = document.getElementById('pl-cover');
+      if (coverImg) {
+        if (pl.cover_url) {
+          coverImg.src = pl.cover_url;
+        } else if (pl.tracks && pl.tracks.length > 0 && pl.tracks[0].thumbnail) {
+          coverImg.src = pl.tracks[0].thumbnail;
+        }
+      }
+
       const listDiv = document.getElementById('track-list');
       listDiv.innerHTML = '';
       (pl.tracks || []).forEach((t, idx) => {
@@ -1656,7 +1919,7 @@ HTML_DASHBOARD = """
         row.style.display = 'flex';
         row.style.justifyContent = 'space-between';
         row.style.alignItems = 'center';
-        row.style.padding = '8px 12px';
+        row.style.padding = '6px 10px';
         row.style.borderBottom = '1px solid #1e293b';
         row.style.cursor = 'pointer';
         row.style.fontSize = '0.82rem';
@@ -1668,11 +1931,13 @@ HTML_DASHBOARD = """
 
         const mins = Math.floor(t.duration / 60);
         const secs = t.duration % 60;
-        const durStr = `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        const durStr = t.duration_str || `${mins}:${secs < 10 ? '0' : ''}${secs}`;
+        const thumbHtml = t.thumbnail ? `<img src="${t.thumbnail}" style="width:38px; height:26px; border-radius:3px; object-fit:cover; flex-shrink:0;" onerror="this.style.display='none'">` : '';
 
         row.innerHTML = `
           <div style="display:flex; align-items:center; gap:8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:80%;">
-            <span style="color:var(--amber); font-weight:600;">#${idx+1}</span>
+            <span style="color:var(--amber); font-weight:600; min-width:22px; font-size:0.75rem;">#${idx+1}</span>
+            ${thumbHtml}
             <span style="color:#fff;" title="${t.title}">${t.title}</span>
           </div>
           <div style="display:flex; align-items:center; gap:8px;">
@@ -1682,6 +1947,173 @@ HTML_DASHBOARD = """
         `;
         listDiv.appendChild(row);
       });
+    }
+
+    async function saveCurrentPlaylist() {
+      const msg = document.getElementById('pl-action-msg');
+      try {
+        const res = await fetch('/api/playlist/save', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          if (msg) {
+            msg.style.color = '#10b981';
+            msg.innerText = `✅ Đã lưu vào file '${data.filename}'`;
+            setTimeout(() => { if (msg) msg.innerText = ''; }, 4000);
+          }
+          const badge = document.getElementById('pl-saved-badge');
+          if (badge) badge.style.display = 'inline-block';
+          fetchSavedPlaylists();
+        } else {
+          alert('Lỗi lưu playlist: ' + (data.error || ''));
+        }
+      } catch (e) {
+        alert('Lỗi kết nối: ' + e);
+      }
+    }
+
+    function exportCurrentPlaylist() {
+      window.open('/api/playlist/export', '_blank');
+    }
+
+    function exportSavedPlaylist(filename) {
+      window.open('/api/playlist/export?filename=' + encodeURIComponent(filename), '_blank');
+    }
+
+    async function fetchSavedPlaylists() {
+      try {
+        const res = await fetch('/api/playlist/saved');
+        const data = await res.json();
+        const container = document.getElementById('saved-playlists-list');
+        const countSpan = document.getElementById('saved-pl-count');
+        if (countSpan) countSpan.innerText = (data.playlists || []).length;
+        if (!container) return;
+
+        if (!data.playlists || data.playlists.length === 0) {
+          container.innerHTML = '<div style="color:#64748b; font-size:0.78rem; padding:8px;">Chưa có playlist JSON nào được lưu</div>';
+          return;
+        }
+
+        container.innerHTML = '';
+        data.playlists.forEach(pl => {
+          const card = document.createElement('div');
+          card.style.background = '#0b1120';
+          card.style.border = '1px solid #1e293b';
+          card.style.borderRadius = '6px';
+          card.style.padding = '8px';
+          card.style.display = 'flex';
+          card.style.gap = '8px';
+          card.style.alignItems = 'center';
+          card.style.justifyContent = 'space-between';
+
+          const thumb = pl.cover_url || 'data:image/svg+xml;utf8,<svg xmlns="http://www.w3.org/2000/svg" width="48" height="48"><rect width="48" height="48" fill="%231e293b"/><text x="50%" y="54%" font-size="18" text-anchor="middle" fill="%23f59e0b">🎵</text></svg>';
+
+          card.innerHTML = `
+            <div style="display:flex; gap:8px; align-items:center; overflow:hidden; flex:1;">
+              <img src="${thumb}" style="width:44px; height:44px; border-radius:5px; object-fit:cover; flex-shrink:0; border:1px solid #334155;">
+              <div style="overflow:hidden;">
+                <div style="font-weight:600; font-size:0.8rem; color:#f8fafc; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;" title="${pl.playlist_name}">${pl.playlist_name}</div>
+                <div style="font-size:0.7rem; color:var(--subtext);">${pl.total_tracks} bài • ${pl.saved_at.split(' ')[0]}</div>
+              </div>
+            </div>
+            <div style="display:flex; gap:4px; flex-shrink:0;">
+              <button class="btn btn-warning" style="padding:4px 8px; font-size:0.7rem;" title="Nạp và phát ngay xuống Trạm ESP32" onclick="loadSavedPlaylist('${pl.filename}')">▶</button>
+              <button class="btn btn-outline" style="padding:4px 6px; font-size:0.7rem;" title="Tải file JSON về máy" onclick="exportSavedPlaylist('${pl.filename}')">📥</button>
+              <button class="btn btn-danger" style="padding:4px 6px; font-size:0.7rem;" title="Xóa playlist này" onclick="deleteSavedPlaylist('${pl.filename}')">🗑️</button>
+            </div>
+          `;
+          container.appendChild(card);
+        });
+      } catch (e) {}
+    }
+
+    async function loadSavedPlaylist(filename) {
+      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.233';
+      const msg = document.getElementById('pl-load-msg');
+      if (msg) {
+        msg.style.color = '#f59e0b';
+        msg.innerText = `⏳ Đang nạp nhanh playlist từ '${filename}' xuống Trạm...`;
+      }
+      try {
+        const res = await fetch('/api/playlist/load_saved', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ filename, esp_ip })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          renderPlaylistUI(data);
+          if (msg) {
+            msg.style.color = '#10b981';
+            msg.innerText = `⚡ Đã nạp thành công ${data.count} bài hát từ '${data.playlist_name}' trong 0.05s!`;
+          }
+          const badge = document.getElementById('pl-saved-badge');
+          if (badge) badge.style.display = 'inline-block';
+        } else {
+          alert('Lỗi nạp playlist: ' + (data.error || ''));
+        }
+      } catch (e) {
+        alert('Lỗi kết nối: ' + e);
+      }
+    }
+
+    async function deleteSavedPlaylist(filename) {
+      if (!confirm(`Bạn có chắc muốn xóa playlist đã lưu '${filename}' không?`)) return;
+      try {
+        const res = await fetch('/api/playlist/delete_saved', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ filename })
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          fetchSavedPlaylists();
+        } else {
+          alert('Lỗi xóa: ' + (data.error || ''));
+        }
+      } catch (e) {
+        alert('Lỗi: ' + e);
+      }
+    }
+
+    async function importPlaylistFromFile(ev) {
+      const file = ev.target.files[0];
+      if (!file) return;
+      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.233';
+      const fd = new FormData();
+      fd.append('file', file);
+      fd.append('esp_ip', esp_ip);
+
+      const msg = document.getElementById('pl-load-msg');
+      if (msg) {
+        msg.style.color = '#f59e0b';
+        msg.innerText = `⏳ Đang nhập playlist từ tệp '${file.name}'...`;
+      }
+
+      try {
+        const res = await fetch('/api/playlist/import', {
+          method: 'POST',
+          body: fd
+        });
+        const data = await res.json();
+        if (data.status === 'ok') {
+          renderPlaylistUI(data);
+          if (msg) {
+            msg.style.color = '#10b981';
+            msg.innerText = `✅ Đã nhập thành công ${data.count} bài hát từ file '${file.name}'!`;
+          }
+          fetchSavedPlaylists();
+        } else {
+          alert('Lỗi nhập file: ' + (data.error || ''));
+        }
+      } catch (e) {
+        alert('Lỗi kết nối: ' + e);
+      } finally {
+        ev.target.value = '';
+      }
     }
 
     async function playTrackIndex(idx) {
@@ -1772,6 +2204,7 @@ HTML_DASHBOARD = """
 
     // Tự động khôi phục danh sách Playlist đã lưu trong bộ đệm khi mở trang Web
     window.addEventListener('DOMContentLoaded', () => {
+      fetchSavedPlaylists();
       fetch('/api/playlist/info')
         .then(r => r.json())
         .then(data => {
@@ -1958,11 +2391,112 @@ def api_playlist_stop():
 def api_playlist_info():
     return jsonify({
         "playlist_name": playlist_mgr.playlist_name,
+        "playlist_url": playlist_mgr.playlist_url,
+        "cover_url": playlist_mgr.cover_url,
         "current_index": playlist_mgr.current_index,
         "is_playing": playlist_mgr.is_playing,
         "count": len(playlist_mgr.tracks),
         "tracks": playlist_mgr.tracks
     })
+
+@app.route("/api/playlist/save", methods=["POST", "OPTIONS"])
+def api_playlist_save():
+    if request.method == "OPTIONS":
+        return "", 204
+    data = request.get_json() or {}
+    filename = data.get("filename")
+    custom_name = data.get("name")
+    try:
+        res = playlist_mgr.save_to_json(filename=filename, custom_name=custom_name)
+        return jsonify(res)
+    except Exception as e:
+        return jsonify({"status": "error", "error": str(e)}), 400
+
+@app.route("/api/playlist/saved", methods=["GET", "OPTIONS"])
+def api_playlist_saved():
+    if request.method == "OPTIONS":
+        return "", 204
+    items = playlist_mgr.list_saved_playlists()
+    return jsonify({"status": "ok", "playlists": items, "count": len(items)})
+
+@app.route("/api/playlist/load_saved", methods=["POST", "OPTIONS"])
+def api_playlist_load_saved():
+    if request.method == "OPTIONS":
+        return "", 204
+    data = request.get_json() or {}
+    filename = data.get("filename", "").strip()
+    esp_ip = data.get("esp_ip", session.esp_ip).strip()
+    if not filename:
+        return jsonify({"status": "error", "error": "Thiếu tên file playlist"}), 400
+    try:
+        res = playlist_mgr.load_from_json(filename, esp_ip)
+        return jsonify(res)
+    except Exception as e:
+        logger.error(f"Lỗi nạp playlist từ file {filename}: {e}")
+        return jsonify({"status": "error", "error": str(e)}), 500
+
+@app.route("/api/playlist/delete_saved", methods=["POST", "OPTIONS"])
+def api_playlist_delete_saved():
+    if request.method == "OPTIONS":
+        return "", 204
+    data = request.get_json() or {}
+    filename = data.get("filename", "").strip()
+    if not filename:
+        return jsonify({"status": "error", "error": "Thiếu tên file"}), 400
+    res = playlist_mgr.delete_saved_playlist(filename)
+    return jsonify(res)
+
+@app.route("/api/playlist/export", methods=["GET"])
+def api_playlist_export():
+    import urllib.parse
+    filename = request.args.get("filename", "").strip()
+    if filename:
+        target_fn = os.path.basename(filename)
+        fpath = os.path.join(playlist_mgr.playlists_dir, target_fn)
+        if not os.path.exists(fpath):
+            return jsonify({"status": "error", "error": "Không tìm thấy file"}), 404
+        with open(fpath, "r", encoding="utf-8") as f:
+            content = f.read()
+        out_fn = target_fn
+    else:
+        cover = playlist_mgr.cover_url or (playlist_mgr.tracks[0].get("thumbnail", "") if playlist_mgr.tracks else "")
+        payload = {
+            "playlist_name": playlist_mgr.playlist_name or "YouTube_Playlist",
+            "playlist_url": playlist_mgr.playlist_url or "",
+            "cover_url": cover,
+            "saved_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "total_tracks": len(playlist_mgr.tracks),
+            "tracks": playlist_mgr.tracks
+        }
+        content = json.dumps(payload, ensure_ascii=False, indent=2)
+        safe_name = re.sub(r'[\\/*?:"<>|\s]+', '_', playlist_mgr.playlist_name or "playlist").strip('_')
+        out_fn = f"{safe_name}.json"
+
+    resp = Response(content, mimetype="application/json")
+    resp.headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{urllib.parse.quote(out_fn)}"
+    return resp
+
+@app.route("/api/playlist/import", methods=["POST", "OPTIONS"])
+def api_playlist_import():
+    if request.method == "OPTIONS":
+        return "", 204
+    esp_ip = request.form.get("esp_ip", session.esp_ip).strip()
+    if "file" in request.files:
+        file = request.files["file"]
+        try:
+            content = file.read().decode("utf-8")
+            data = json.loads(content)
+            res = playlist_mgr.import_from_json_data(data, esp_ip)
+            return jsonify(res)
+        except Exception as e:
+            return jsonify({"status": "error", "error": f"Lỗi đọc file JSON: {e}"}), 400
+    else:
+        data = request.get_json() or {}
+        try:
+            res = playlist_mgr.import_from_json_data(data, esp_ip)
+            return jsonify(res)
+        except Exception as e:
+            return jsonify({"status": "error", "error": str(e)}), 400
 
 @app.route("/api/volume", methods=["POST", "OPTIONS"])
 def api_volume():
