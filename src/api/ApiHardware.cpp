@@ -10,6 +10,7 @@
 #include "PcStatsManager.h"
 #include "WifiManager.h"
 #include "WebAuth.h"
+#include "drivers/TouchDriver.h"
 
 #include "drivers/StorageDriver.h"
 #include <ArduinoJson.h>
@@ -414,6 +415,53 @@ namespace ApiHardware {
 
     server.on("/api/pc/metrics", HTTP_GET, [&server]() { handlePcMetricsGet(server); });
     server.on("/api/pc/metrics", HTTP_POST, [&server]() { handlePcMetricsPost(server); });
+
+    server.on("/api/touch/config", HTTP_GET, [&server]() {
+      int16_t minX, maxX, minY, maxY;
+      bool swapXY, invertX, invertY;
+      TouchDriver::getCalibration(minX, maxX, minY, maxY, swapXY, invertX, invertY);
+      TouchDriver::TouchPoint pt = TouchDriver::getPoint();
+      JsonDocument doc;
+      doc["min_x"] = minX;
+      doc["max_x"] = maxX;
+      doc["min_y"] = minY;
+      doc["max_y"] = maxY;
+      doc["swap_xy"] = swapXY;
+      doc["invert_x"] = invertX;
+      doc["invert_y"] = invertY;
+      doc["cur_x"] = pt.x;
+      doc["cur_y"] = pt.y;
+      doc["is_touched"] = pt.isTouched;
+      String out;
+      serializeJson(doc, out);
+      server.send(200, "application/json", out);
+    });
+
+    server.on("/api/touch/config", HTTP_POST, [&server]() {
+      if (!server.hasArg("plain")) {
+        server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing body\"}");
+        return;
+      }
+      JsonDocument doc;
+      DeserializationError err = deserializeJson(doc, server.arg("plain"));
+      if (err) {
+        server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
+        return;
+      }
+      int16_t minX, maxX, minY, maxY;
+      bool swapXY, invertX, invertY;
+      TouchDriver::getCalibration(minX, maxX, minY, maxY, swapXY, invertX, invertY);
+      if (doc["min_x"].is<int>()) minX = doc["min_x"];
+      if (doc["max_x"].is<int>()) maxX = doc["max_x"];
+      if (doc["min_y"].is<int>()) minY = doc["min_y"];
+      if (doc["max_y"].is<int>()) maxY = doc["max_y"];
+      if (doc["swap_xy"].is<bool>()) swapXY = doc["swap_xy"];
+      if (doc["invert_x"].is<bool>()) invertX = doc["invert_x"];
+      if (doc["invert_y"].is<bool>()) invertY = doc["invert_y"];
+      TouchDriver::setCalibration(minX, maxX, minY, maxY, swapXY, invertX, invertY);
+      TouchDriver::saveConfig();
+      server.send(200, "application/json", "{\"status\":\"ok\",\"message\":\"Đã lưu cấu hình cảm ứng thành công!\"}");
+    });
 
     server.on("/api/emoji_preview", HTTP_GET, [&server]() {
       int style = server.hasArg("style") ? server.arg("style").toInt() : 1;

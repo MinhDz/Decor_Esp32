@@ -44,6 +44,42 @@ static volatile bool s_localIntentHandled = false;
 static uint32_t s_localIntentHandledMs = 0;
 static String s_localIntentReplyText = "";
 
+// Cấu hình AI Backend: 0 = XiaoZhi Cloud Hub, 1 = PC Local AI Gateway (Decor AI)
+static int s_aiBackend = 1;
+static String s_pcGatewayIp = "192.168.1.8";
+static int s_pcGatewayPort = 8765;
+static String s_aiModel = "gemini-pro";
+static String s_ttsVoice = "vi-VN-HoaiMyNeural";
+static bool s_aiConfigLoaded = false;
+
+static void loadAIConfigIfNeeded() {
+  if (s_aiConfigLoaded) return;
+  s_aiConfigLoaded = true;
+  if (LittleFS.exists(FILE_CONFIG)) {
+    File file = LittleFS.open(FILE_CONFIG, "r");
+    JsonDocument doc;
+    DeserializationError err = deserializeJson(doc, file);
+    file.close();
+    if (!err) {
+      if (doc["ai_backend"].is<int>()) {
+        s_aiBackend = doc["ai_backend"].as<int>();
+      }
+      if (doc["pc_gateway_ip"].is<const char*>()) {
+        s_pcGatewayIp = doc["pc_gateway_ip"].as<String>();
+      }
+      if (doc["pc_gateway_port"].is<int>()) {
+        s_pcGatewayPort = doc["pc_gateway_port"].as<int>();
+      }
+      if (doc["ai_model"].is<const char*>()) {
+        s_aiModel = doc["ai_model"].as<String>();
+      }
+      if (doc["tts_voice"].is<const char*>()) {
+        s_ttsVoice = doc["tts_voice"].as<String>();
+      }
+    }
+  }
+}
+
 static OpusDecoder* s_opusDecoder = nullptr;
 static int16_t s_pcmDecodeBuf[1920]; // Tối đa 120ms âm thanh @ 16000Hz Mono
 
@@ -212,6 +248,7 @@ String XiaoZhiClient::queryOTA(bool printToSerial) {
 }
 
 void XiaoZhiClient::getAIConfig(JsonDocument& doc) {
+  loadAIConfigIfNeeded();
   if (LittleFS.exists(FILE_CONFIG)) {
     File file = LittleFS.open(FILE_CONFIG, "r");
     deserializeJson(doc, file);
@@ -230,6 +267,13 @@ void XiaoZhiClient::getAIConfig(JsonDocument& doc) {
     doc["mac"] = hwMac;
   }
   doc["uuid"] = getOrCreateDeviceUuid();
+
+  // Bổ sung cấu hình Backend PC Gateway
+  doc["ai_backend"] = s_aiBackend;
+  doc["pc_gateway_ip"] = s_pcGatewayIp;
+  doc["pc_gateway_port"] = s_pcGatewayPort;
+  doc["ai_model"] = s_aiModel;
+  doc["tts_voice"] = s_ttsVoice;
 }
 
 bool XiaoZhiClient::saveAIConfig(const String& body) {
@@ -237,21 +281,46 @@ bool XiaoZhiClient::saveAIConfig(const String& body) {
   DeserializationError err = deserializeJson(doc, body);
   if (err) return false;
 
+  if (doc["ai_backend"].is<int>()) s_aiBackend = doc["ai_backend"].as<int>();
+  if (doc["pc_gateway_ip"].is<const char*>()) s_pcGatewayIp = doc["pc_gateway_ip"].as<String>();
+  if (doc["pc_gateway_port"].is<int>()) s_pcGatewayPort = doc["pc_gateway_port"].as<int>();
+  if (doc["ai_model"].is<const char*>()) s_aiModel = doc["ai_model"].as<String>();
+  if (doc["tts_voice"].is<const char*>()) s_ttsVoice = doc["tts_voice"].as<String>();
+
   File file = LittleFS.open(FILE_CONFIG, "w");
   if (!file) return false;
   file.print(body);
   file.close();
 
   s_lastBoundCheckMs = 0; // Xóa cache để cập nhật ngay trạng thái bound
-  Serial.println("✅ Đã cập nhật cấu hình XiaoZhi AI vào LittleFS!");
+  s_aiConfigLoaded = true;
+  Serial.println("✅ Đã cập nhật cấu hình AI (Backend, PC Gateway, Model) vào LittleFS!");
+
+  // Khởi động lại kết nối WebSocket với backend mới
+  stopWebSocket();
   return true;
 }
+
+int XiaoZhiClient::getAiBackend() { loadAIConfigIfNeeded(); return s_aiBackend; }
+void XiaoZhiClient::setAiBackend(int backend) { s_aiBackend = backend; }
+String XiaoZhiClient::getPcGatewayIp() { loadAIConfigIfNeeded(); return s_pcGatewayIp; }
+void XiaoZhiClient::setPcGatewayIp(const String& ip) { s_pcGatewayIp = ip; }
+int XiaoZhiClient::getPcGatewayPort() { loadAIConfigIfNeeded(); return s_pcGatewayPort; }
+void XiaoZhiClient::setPcGatewayPort(int port) { s_pcGatewayPort = port; }
+String XiaoZhiClient::getAiModel() { loadAIConfigIfNeeded(); return s_aiModel; }
+void XiaoZhiClient::setAiModel(const String& model) { s_aiModel = model; }
+String XiaoZhiClient::getTtsVoice() { loadAIConfigIfNeeded(); return s_ttsVoice; }
+void XiaoZhiClient::setTtsVoice(const String& voice) { s_ttsVoice = voice; }
+bool XiaoZhiClient::isPcGatewayMode() { loadAIConfigIfNeeded(); return (s_aiBackend == 1); }
 
 String XiaoZhiClient::getLastAuthCode() {
   return s_lastAuthCode;
 }
 
 bool XiaoZhiClient::isDeviceBound() {
+  if (isPcGatewayMode()) {
+    return true; // Chế độ PC Gateway nội bộ LAN luôn sẵn sàng kết nối, không cần xiaozhi.me
+  }
   if (s_lastAuthCode.length() > 0) {
     s_cachedDeviceBound = false;
     return false;
@@ -989,6 +1058,12 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       s_wsConnected = true;
       s_lastWsDisconnectMs = 0;
       s_wsReconnectBackoffMs = 3000;
+      if (XiaoZhiClient::isPcGatewayMode()) {
+        Serial.println("\n=======================================================");
+        Serial.println("🟢 [PC GATEWAY WS] ĐÃ KẾT NỐI THÀNH CÔNG TỚI PC AI GATEWAY!");
+        Serial.println("=======================================================");
+        break;
+      }
       ensureOpusDecoder();
       if (s_opusDecoder) {
         opus_decoder_ctl(s_opusDecoder, OPUS_RESET_STATE);
@@ -1168,51 +1243,85 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                   "]}";
                 esp_websocket_client_send_text(s_wsClient, stateResp.c_str(), stateResp.length(), pdMS_TO_TICKS(1000));
               }
+            } else if (strcmp(type, "answer") == 0) {
+              const char* txt = doc["text"] | "";
+              if (strlen(txt) > 0) {
+                s_lastAiFullReply = String(txt);
+                s_llmReceived = true;
+                s_ttsReceived = true;
+                s_lastAiReplyTime = millis();
+                const char* emo = doc["emotion"] | "";
+                if (strlen(emo) > 0) {
+                  s_lastEmotion = String(emo);
+                } else {
+                  s_lastEmotion = XiaoZhiClient::detectEmotionFromText(s_lastAiFullReply);
+                }
+                Serial.printf("🤖 [PC GATEWAY ANSWER]: \"%s\" | Emotion: %s\n", s_lastAiFullReply.c_str(), s_lastEmotion.c_str());
+                executeLocalVoiceIntent(s_lastAiFullReply, true);
+              }
+            } else if (strcmp(type, "done") == 0) {
+              s_ttsFinished = true;
+              Serial.println("⏹️ [PC GATEWAY DONE]: Đã nhận xong toàn bộ câu thoại từ PC Gateway.");
             } else if (strcmp(type, "mcp") == 0 || doc["payload"].is<JsonObjectConst>()) {
               if (doc["payload"].is<JsonObjectConst>() || doc["method"].is<const char*>()) {
                 handleMcpMessage(doc);
               }
             }
           }
-        } else if (data->op_code == 0x02) { // Binary frame: Opus compressed audio từ XiaoZhi TTS
+        } else if (data->op_code == 0x02) { // Binary frame
           if (data->data_len > 0 && data->data_ptr != nullptr) {
             static uint32_t s_binFrames = 0;
             s_binFrames++;
 
-            ensureOpusDecoder();
-            int decodedSamples = -1;
-            if (s_opusDecoder != nullptr) {
-              decodedSamples = opus_decode(
-                s_opusDecoder,
-                (const unsigned char*)data->data_ptr,
-                data->data_len,
-                s_pcmDecodeBuf,
-                1920,
-                0
-              );
-            }
-
-            if (decodedSamples > 0) {
-              if (s_binFrames <= 3 || s_binFrames % 25 == 0) {
-                Serial.printf("🔊 [XIAOZHI OPUS RX] Frame #%u | Opus: %d bytes -> Giải mã %d mẫu PCM 16kHz -> MAX98357A\n",
-                              s_binFrames, data->data_len, decodedSamples);
-              }
-              TestAudio::playStreamPcmAsync(s_pcmDecodeBuf, (size_t)decodedSamples);
-            } else {
-              // Nếu giải mã Opus thất bại (lỗi gói hoặc mất gói Wi-Fi):
-              // Kích hoạt cơ chế che giấu mất gói (Packet Loss Concealment - PLC) của Opus
-              if (s_opusDecoder != nullptr) {
-                int plcSamples = opus_decode(s_opusDecoder, NULL, 0, s_pcmDecodeBuf, 960, 0);
-                if (plcSamples > 0) {
-                  TestAudio::playStreamPcmAsync(s_pcmDecodeBuf, (size_t)plcSamples);
-                  if (s_binFrames <= 5 || s_binFrames % 25 == 0) {
-                    Serial.printf("🛡️ [XIAOZHI OPUS PLC] Khung bị hỏng -> Bù suy hao %d mẫu mượt mà\n", plcSamples);
-                  }
+            if (XiaoZhiClient::isPcGatewayMode()) {
+              // PC AI GATEWAY: Dữ liệu nhận được là Raw PCM 16kHz 16-bit Mono đã giải mã sẵn từ Edge-TTS!
+              size_t sampleCount = data->data_len / sizeof(int16_t);
+              if (sampleCount > 0) {
+                if (s_binFrames <= 3 || s_binFrames % 30 == 0) {
+                  Serial.printf("🔊 [PC GATEWAY PCM RX] Frame #%u | %d bytes PCM (%u mẫu) -> MAX98357A\n",
+                                s_binFrames, data->data_len, (unsigned)sampleCount);
                 }
-              } else if (data->data_len >= 640 && (data->data_len % 2 == 0)) {
-                // Chỉ dự phòng raw PCM nếu kích thước lớn thực sự
-                size_t sampleCount = data->data_len / sizeof(int16_t);
                 TestAudio::playStreamPcmAsync((const int16_t*)data->data_ptr, sampleCount);
+                s_ttsReceived = true;
+                s_lastAiReplyTime = millis();
+              }
+            } else {
+              // XIAOZHI CLOUD: Dữ liệu nén Opus từ máy chủ Trung Quốc -> Giải mã Opus
+              ensureOpusDecoder();
+              int decodedSamples = -1;
+              if (s_opusDecoder != nullptr) {
+                decodedSamples = opus_decode(
+                  s_opusDecoder,
+                  (const unsigned char*)data->data_ptr,
+                  data->data_len,
+                  s_pcmDecodeBuf,
+                  1920,
+                  0
+                );
+              }
+
+              if (decodedSamples > 0) {
+                if (s_binFrames <= 3 || s_binFrames % 25 == 0) {
+                  Serial.printf("🔊 [XIAOZHI OPUS RX] Frame #%u | Opus: %d bytes -> Giải mã %d mẫu PCM 16kHz -> MAX98357A\n",
+                                s_binFrames, data->data_len, decodedSamples);
+                }
+                TestAudio::playStreamPcmAsync(s_pcmDecodeBuf, (size_t)decodedSamples);
+              } else {
+                // Nếu giải mã Opus thất bại (lỗi gói hoặc mất gói Wi-Fi):
+                // Kích hoạt cơ chế che giấu mất gói (Packet Loss Concealment - PLC) của Opus
+                if (s_opusDecoder != nullptr) {
+                  int plcSamples = opus_decode(s_opusDecoder, NULL, 0, s_pcmDecodeBuf, 960, 0);
+                  if (plcSamples > 0) {
+                    TestAudio::playStreamPcmAsync(s_pcmDecodeBuf, (size_t)plcSamples);
+                    if (s_binFrames <= 5 || s_binFrames % 25 == 0) {
+                      Serial.printf("🛡️ [XIAOZHI OPUS PLC] Khung bị hỏng -> Bù suy hao %d mẫu mượt mà\n", plcSamples);
+                    }
+                  }
+                } else if (data->data_len >= 640 && (data->data_len % 2 == 0)) {
+                  // Chỉ dự phòng raw PCM nếu kích thước lớn thực sự
+                  size_t sampleCount = data->data_len / sizeof(int16_t);
+                  TestAudio::playStreamPcmAsync((const int16_t*)data->data_ptr, sampleCount);
+                }
               }
             }
           }
@@ -1231,6 +1340,8 @@ void XiaoZhiClient::startWebSocket() {
   if (WiFi.status() != WL_CONNECTED) {
     return;
   }
+  loadAIConfigIfNeeded();
+
   if (!isDeviceBound()) {
     return;
   }
@@ -1244,6 +1355,48 @@ void XiaoZhiClient::startWebSocket() {
     stopWebSocket();
   }
 
+  if (isPcGatewayMode()) {
+    // KẾT NỐI PC LOCAL AI GATEWAY (DECOR AI STATION)
+    String host = s_pcGatewayIp.length() > 0 ? s_pcGatewayIp : "192.168.1.8";
+    int port = s_pcGatewayPort > 0 ? s_pcGatewayPort : 8765;
+    s_wsUri = "ws://" + host + ":" + String(port) + "/ws";
+    s_wsHeaders = "";
+
+    esp_websocket_client_config_t ws_cfg = {};
+    ws_cfg.uri = s_wsUri.c_str();
+    ws_cfg.headers = nullptr;
+    ws_cfg.user_agent = "Decor_Esp32_Station/2.0";
+    ws_cfg.cert_pem = nullptr; // Không SSL trên mạng nội bộ LAN
+    ws_cfg.skip_cert_common_name_check = true;
+    ws_cfg.ping_interval_sec = 10;
+    ws_cfg.pingpong_timeout_sec = 15;
+    ws_cfg.disable_pingpong_discon = false;
+    ws_cfg.keep_alive_enable = true;
+    ws_cfg.task_stack = 8192;
+    ws_cfg.task_prio = 5;
+    ws_cfg.buffer_size = 8192;
+
+    Serial.println("\n🚀 [PC GATEWAY WS] Đang mở kết nối WebSocket tới PC Local AI Gateway...");
+    Serial.printf("🌐 Endpoint : %s\n", s_wsUri.c_str());
+
+    s_wsClient = esp_websocket_client_init(&ws_cfg);
+    if (!s_wsClient) {
+      Serial.println("❌ [PC GATEWAY WS] Không thể khởi tạo esp_websocket_client!");
+      return;
+    }
+
+    esp_websocket_register_events(s_wsClient, WEBSOCKET_EVENT_ANY, ws_event_handler, (void*)s_wsClient);
+    esp_err_t err = esp_websocket_client_start(s_wsClient);
+    if (err != ESP_OK) {
+      Serial.printf("❌ [PC GATEWAY WS] Lỗi khởi động WebSocket (0x%x)\n", err);
+      esp_websocket_client_destroy(s_wsClient);
+      s_wsClient = nullptr;
+      s_wsConnected = false;
+    }
+    return;
+  }
+
+  // KẾT NỐI XIAOZHI CLOUD (TIÊU CHUẨN TRUNG QUỐC)
   String endpoint = getStoredEndpoint();
   if (endpoint.length() == 0 || !endpoint.startsWith("ws")) {
     endpoint = XIAOZHI_DEFAULT_ENDPOINT;
@@ -1484,21 +1637,32 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
   // Đặt lại dữ liệu hội thoại cho lượt mới
   clearLastTurn();
 
-  // 1. Gửi listen start
-  String sid = s_sessionId.length() > 0 ? s_sessionId : "";
-  String startMsg = "{\"session_id\":\"" + sid + "\",\"type\":\"listen\",\"state\":\"start\",\"mode\":\"manual\"}";
-  int retStart = esp_websocket_client_send_text(s_wsClient, startMsg.c_str(), startMsg.length(), pdMS_TO_TICKS(1500));
-  if (retStart < 0) {
-    Serial.println("❌ [XIAOZHI AUDIO] Gửi listen start thất bại!");
-    return false;
+  // 1. Gửi bản tin bắt đầu thu âm
+  if (isPcGatewayMode()) {
+    String startMsg = "{\"type\":\"start\",\"model\":\"" + s_aiModel + "\",\"search\":true,\"sample_rate\":" + String(sampleRate) + "}";
+    int retStart = esp_websocket_client_send_text(s_wsClient, startMsg.c_str(), startMsg.length(), pdMS_TO_TICKS(1500));
+    if (retStart < 0) {
+      Serial.println("❌ [PC GATEWAY AUDIO] Gửi start message thất bại!");
+      return false;
+    }
+    Serial.printf("🎤 [PC GATEWAY AUDIO] Bắt đầu truyền %u mẫu PCM (%.1f giây @ %u Hz) tới PC Gateway...\n",
+                  (unsigned)sampleCount, (float)sampleCount / sampleRate, (unsigned)sampleRate);
+  } else {
+    String sid = s_sessionId.length() > 0 ? s_sessionId : "";
+    String startMsg = "{\"session_id\":\"" + sid + "\",\"type\":\"listen\",\"state\":\"start\",\"mode\":\"manual\"}";
+    int retStart = esp_websocket_client_send_text(s_wsClient, startMsg.c_str(), startMsg.length(), pdMS_TO_TICKS(1500));
+    if (retStart < 0) {
+      Serial.println("❌ [XIAOZHI AUDIO] Gửi listen start thất bại!");
+      return false;
+    }
+    Serial.printf("🎤 [XIAOZHI AUDIO] Bắt đầu truyền %u mẫu PCM (%.1f giây @ %u Hz) qua WebSocket...\n",
+                  (unsigned)sampleCount, (float)sampleCount / sampleRate, (unsigned)sampleRate);
   }
-  Serial.printf("🎤 [XIAOZHI AUDIO] Bắt đầu truyền %u mẫu PCM (%.1f giây @ %u Hz) qua WebSocket...\n",
-                (unsigned)sampleCount, (float)sampleCount / sampleRate, (unsigned)sampleRate);
 
-  // 2. Truyền các khung âm thanh PCM (960 mẫu = 1920 byte @ 16kHz tương đương 60ms)
+  // 2. Truyền các khung âm thanh PCM (1024 mẫu = 2048 byte @ 16kHz)
   const uint8_t* bytePtr = (const uint8_t*)pcmSamples;
   size_t totalBytes = sampleCount * sizeof(int16_t);
-  const size_t FRAME_BYTES = 960 * sizeof(int16_t); // 1920 byte
+  const size_t FRAME_BYTES = 2048; // 2048 byte
 
   size_t offset = 0;
   bool sendOk = true;
@@ -1506,40 +1670,61 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
     size_t chunk = (totalBytes - offset > FRAME_BYTES) ? FRAME_BYTES : (totalBytes - offset);
     int bSent = esp_websocket_client_send_bin(s_wsClient, (const char*)(bytePtr + offset), chunk, pdMS_TO_TICKS(1000));
     if (bSent < 0) {
-      Serial.printf("❌ [XIAOZHI AUDIO] Gửi khung nhị phân thất bại tại offset %u!\n", (unsigned)offset);
+      Serial.printf("❌ [AI AUDIO] Gửi khung nhị phân thất bại tại offset %u!\n", (unsigned)offset);
       sendOk = false;
       break;
     }
     offset += chunk;
-    delay(5);
+    delay(3);
   }
 
-  // 3. Gửi listen stop
+  // 3. Gửi bản tin kết thúc thu âm
   if (sendOk && isWebSocketConnected()) {
-    String stopMsg = "{\"session_id\":\"" + sid + "\",\"type\":\"listen\",\"state\":\"stop\"}";
-    esp_websocket_client_send_text(s_wsClient, stopMsg.c_str(), stopMsg.length(), pdMS_TO_TICKS(1500));
-    Serial.println("⏹️ [XIAOZHI AUDIO] Đã kết thúc truyền âm thanh. Đang chờ XiaoZhi Hub phản hồi...");
+    if (isPcGatewayMode()) {
+      String stopMsg = "{\"type\":\"end\"}";
+      esp_websocket_client_send_text(s_wsClient, stopMsg.c_str(), stopMsg.length(), pdMS_TO_TICKS(1500));
+      Serial.println("⏹️ [PC GATEWAY AUDIO] Đã kết thúc gửi âm thanh. Đang chờ PC suy luận & Edge-TTS Stream...");
+    } else {
+      String sid = s_sessionId.length() > 0 ? s_sessionId : "";
+      String stopMsg = "{\"session_id\":\"" + sid + "\",\"type\":\"listen\",\"state\":\"stop\"}";
+      esp_websocket_client_send_text(s_wsClient, stopMsg.c_str(), stopMsg.length(), pdMS_TO_TICKS(1500));
+      Serial.println("⏹️ [XIAOZHI AUDIO] Đã kết thúc truyền âm thanh. Đang chờ XiaoZhi Hub phản hồi...");
+    }
   } else {
-    Serial.println("⚠️ [XIAOZHI AUDIO] Quá trình gửi âm thanh bị gián đoạn do mất kết nối socket.");
+    Serial.println("⚠️ [AI AUDIO] Quá trình gửi âm thanh bị gián đoạn do mất kết nối socket.");
     return false;
   }
 
-  // 4. Chờ nhận phản hồi STT và LLM/TTS từ server (tối đa 12.0s để nhận trọn vẹn toàn bộ các câu thoại)
+  // 4. Chờ nhận phản hồi STT và LLM/TTS từ server (hỗ trợ đọc bài báo dài lên đến 120 giây)
   uint32_t waitStart = millis();
-  while ((millis() - waitStart < 12000) && isWebSocketConnected()) {
+  while ((millis() - waitStart < 120000) && isWebSocketConnected()) {
     String currentPartial = (s_lastAiFullReply.length() > 0) ? s_lastAiFullReply : s_lastLlmText;
     if (onProgress) {
       onProgress(s_lastSttText, currentPartial, s_lastEmotion, false);
     }
 
-    // Nếu máy chủ đã phát tín hiệu kết thúc TTS (type: tts, state: stop) -> đã hoàn tất trọn vẹn toàn bộ chuỗi câu
-    if ((s_ttsReceived || s_llmReceived) && s_ttsFinished) {
-      Serial.println("✅ [XIAOZHI AUDIO] Máy chủ đã gửi xong toàn bộ câu thoại (TTS STOP). Hoàn tất nhận phản hồi.");
+    // Nếu máy chủ đã phát tín hiệu kết thúc TTS (type: tts/done, state: stop) VÀ loa đã phát xong hết dữ liệu PCM
+    if ((s_ttsReceived || s_llmReceived) && s_ttsFinished && !TestAudio::isStreamPcmAsyncPlaying()) {
+      Serial.println("✅ [AI AUDIO] Máy chủ đã gửi xong và Loa MAX98357A đã hoàn tất phát âm thanh.");
       break;
     }
-    // Nếu đã nhận được câu trả lời nhưng chưa có tín hiệu stop, chờ tối thiểu 3.2 giây không có câu mới từ server
-    if ((s_ttsReceived || s_llmReceived) && s_lastAiReplyTime > 0 && (millis() - s_lastAiReplyTime >= 3200)) {
-      Serial.println("⏱️ [XIAOZHI AUDIO] Đã qua 3.2s không có thêm câu thoại mới từ máy chủ. Kết thúc chờ đồng bộ.");
+
+    // Nếu sau 15 giây mà không nhận được bất kỳ phản hồi STT hay LLM nào -> Timeout
+    if (!s_ttsReceived && !s_llmReceived && (millis() - waitStart > 15000)) {
+      Serial.println("⏱️ [AI AUDIO] Timeout 15s không nhận được phản hồi từ AI Server.");
+      break;
+    }
+
+    // Nếu đã hoàn tất gửi từ server (s_ttsFinished) nhưng loa vẫn đang phát bài dài thì tiếp tục chờ loa phát hết
+    if (s_ttsFinished && TestAudio::isStreamPcmAsyncPlaying()) {
+      delay(50);
+      continue;
+    }
+
+    // Nếu không còn câu mới trong 5 giây và loa đã dừng
+    if ((s_ttsReceived || s_llmReceived) && s_lastAiReplyTime > 0 &&
+        (millis() - s_lastAiReplyTime >= 5000) && !TestAudio::isStreamPcmAsyncPlaying()) {
+      Serial.println("⏱️ [AI AUDIO] Đã qua 5s không có thêm câu thoại mới và Loa đã phát xong.");
       break;
     }
 

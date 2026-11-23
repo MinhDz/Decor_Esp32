@@ -58,6 +58,7 @@ void WifiManager::begin() {
   // Tự động lưu mạng quen thuộc & xóa mạng không dùng nữa
   deleteSavedWifiNetwork("SPA YEN TRANG");
   saveOrUpdateWifiNetwork("Yen Long", "02082003@#");
+  saveOrUpdateWifiNetwork("oplus_co_apavpj", "88888888");
 
   bool connected = smartConnect();
   if (connected) {

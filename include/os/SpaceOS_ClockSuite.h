@@ -43,6 +43,9 @@ namespace SpaceOS_ClockSuite {
   int  getAlarmTuneIdx();
   void setAlarmTuneIdx(int idx);
 
+  int  getAlarmCursor();
+  void setAlarmCursor(int c);
+
   bool isPushAlertActive();
   void dismissPushAlert(bool okPressed);
   void triggerPushAlert(uint8_t alertType, uint8_t alarmIdx, const String& title, const String& subTitle, const String& bigDigits);

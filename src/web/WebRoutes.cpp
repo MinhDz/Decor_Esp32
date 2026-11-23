@@ -39,46 +39,26 @@ size_t WebRoutes::trimMemory() {
 
 static void handleRoot() {
   WebRoutes::markWebActivity();
+
+  // 1. Ưu tiên phục vụ file nén gzip (/index.html.gz, ~132 KB) siêu tốc độ, giải phóng 100% tài nguyên CPU & WiFi
+  if (LittleFS.exists("/index.html.gz")) {
+    File file = LittleFS.open("/index.html.gz", "r");
+    server.sendHeader("Cache-Control", "no-cache");
+    server.streamFile(file, "text/html");
+    file.close();
+    return;
+  }
+
+  // 2. Phục vụ index.html trực tiếp bằng streamFile chuẩn non-blocking
   if (LittleFS.exists("/index.html")) {
     File file = LittleFS.open("/index.html", "r");
-    server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
-    server.sendHeader("Pragma", "no-cache");
-    server.sendHeader("Expires", "0");
-    server.sendHeader("Connection", "close");
-    server.setContentLength(CONTENT_LENGTH_UNKNOWN);
-    server.send(200, "text/html", "");
-    uint8_t buf[2048];
-    while (file.available()) {
-      if (!server.client().connected()) {
-        file.close();
-        return;
-      }
-      size_t n = file.read(buf, sizeof(buf));
-      if (n > 0) server.sendContent((const char*)buf, n);
-    }
+    server.sendHeader("Cache-Control", "no-cache");
+    server.streamFile(file, "text/html");
     file.close();
-
-    const char* scripts[] = {
-      SD_CONVERTER_INJECT_SCRIPT,
-      MEDIA_PAGE_INJECT_SCRIPT,
-      XIAOZHI_CHAT_INJECT_SCRIPT,
-      STREAM_PAGE_INJECT_SCRIPT,
-      DECOR_PAGE_INJECT_SCRIPT,
-      KEYPAD_PAGE_INJECT_SCRIPT,
-      TELEMETRY_WEATHER_INJECT_SCRIPT,
-      AUTH_FACTORY_INJECT_SCRIPT,
-      EMOJI_STYLE_INJECT_SCRIPT
-    };
-    for (const char* scr : scripts) {
-      if (!server.client().connected()) return;
-      server.sendContent_P(scr);
-    }
-    if (server.client().connected()) {
-      server.sendContent("");
-    }
-  } else {
-    server.send(404, "text/plain", "Chưa tìm thấy index.html trên LittleFS!");
+    return;
   }
+
+  server.send(404, "text/plain", "Chưa tìm thấy index.html trên LittleFS!");
 }
 
 // ---------------- KHỞI TẠO BỘ ĐIỀU HƯỚNG WEB & ĐĂNG KÝ CONTROLLERS ----------------
@@ -140,26 +120,19 @@ void WebRoutes::begin() {
     else if (uri.startsWith("sd:")) uri = uri.substring(3);
     if (!uri.startsWith("/")) uri = "/" + uri;
 
-    // 6b. Phục vụ file từ thẻ nhớ SD an toàn với Mutex
+    // 6b. Phục vụ file từ thẻ nhớ SD an toàn với Chunked Non-Blocking Stream
     if (TestSDCard::isMounted() && StorageDriver::isHealthy()) {
-      if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
-        if (SD.exists(uri)) {
-          File f = SD.open(uri, FILE_READ);
-          if (f) {
-            String contentType = "application/octet-stream";
-            String low = uri;
-            low.toLowerCase();
-            if (low.endsWith(".png")) contentType = "image/png";
-            else if (low.endsWith(".jpg") || low.endsWith(".jpeg")) contentType = "image/jpeg";
-            else if (low.endsWith(".bmp")) contentType = "image/bmp";
-            server.streamFile(f, contentType);
-            f.close();
-            StorageDriver::notifyIoSuccess();
-            StorageDriver::unlock();
-            return;
-          }
-        }
-        StorageDriver::unlock();
+      String contentType = "application/octet-stream";
+      String low = uri;
+      low.toLowerCase();
+      if (low.endsWith(".png")) contentType = "image/png";
+      else if (low.endsWith(".jpg") || low.endsWith(".jpeg")) contentType = "image/jpeg";
+      else if (low.endsWith(".bmp")) contentType = "image/bmp";
+      else if (low.endsWith(".wav")) contentType = "audio/wav";
+      else if (low.endsWith(".mp3")) contentType = "audio/mpeg";
+
+      if (StorageDriver::streamFileSafely(server, uri, contentType, true)) {
+        return;
       }
     }
 

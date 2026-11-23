@@ -3,11 +3,13 @@
 """
 Trạm Decor ESP32 - Build Script for Decor Space Companion
 Tự động đóng gói toàn bộ ứng dụng thành 1 file thực thi .exe duy nhất bằng PyInstaller.
+Bao gồm: System Tray, Transcoder Server, Telemetry Monitor và AI Gateway Audio Streaming.
 """
 
 import os
 import sys
 import shutil
+import tempfile
 import subprocess
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -15,12 +17,15 @@ MAIN_PY = os.path.join(SCRIPT_DIR, "main.py")
 ICON_ICO = os.path.join(SCRIPT_DIR, "icon.ico")
 TRANSCODER_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", "transcoder"))
 DIST_DIR = os.path.join(SCRIPT_DIR, "dist")
-BUILD_DIR = os.path.join(SCRIPT_DIR, "build")
+BUILD_DIR = os.path.join(tempfile.gettempdir(), "DecorSpaceCompanion_build")
 
 def build_exe():
     print("=" * 65)
     print("  🔨 ĐANG ĐÓNG GÓI DECOR SPACE COMPANION SANG TỆP .EXE")
     print("=" * 65)
+
+    os.makedirs(DIST_DIR, exist_ok=True)
+    os.makedirs(BUILD_DIR, exist_ok=True)
 
     pyinstaller_cmd = [
         sys.executable, "-m", "PyInstaller",
@@ -55,6 +60,12 @@ def build_exe():
         "--hidden-import=pynvml",
         "--hidden-import=imageio_ffmpeg",
         "--hidden-import=yt_dlp",
+        "--hidden-import=aiohttp",
+        "--hidden-import=aiohttp.web",
+        "--hidden-import=edge_tts",
+        "--hidden-import=ai_gateway_worker",
+        "--hidden-import=wave",
+        "--hidden-import=xml.etree.ElementTree",
         MAIN_PY
     ]
 

@@ -1,4 +1,4 @@
-﻿#pragma once
+#pragma once
 #include <Arduino.h>
 
 static const char SD_CONVERTER_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
@@ -2553,11 +2553,8 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     injectSystemTabAndPage();
     injectLogsTabAndPage();
     injectWifiQrShortcut();
-    window.loadMusicPlaylist();
-    window.pollMediaStatus();
-    window.loadSystemInfo();
-    setInterval(window.pollMediaStatus, 1200);
-    setInterval(window.loadSystemInfo, 3000);
+    setInterval(window.pollMediaStatus, 3500);
+    setInterval(window.loadSystemInfo, 5000);
     setInterval(renderWebMediaVisualizerFrame, 50);
 
     // Tự động chuyển sang Tab "Cài Đặt Wi-Fi" và quét mạng nếu đang truy cập SoftAP (192.168.4.1) hoặc hash #wifi
@@ -2945,6 +2942,60 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       chatPanel.appendChild(dock);
     }
 
+    // 2B. Đảm bảo Khung Chat Văn Bản (AI Text Chat Card) và Ô Gõ Chat luôn hiển thị
+    let textCard = document.querySelector('.ai-text-chat-card');
+    if (!textCard) {
+      const chatPanel = document.querySelector('#tab-chat .chat-panel') || document.getElementById('tab-chat') || document.getElementById('tab-xiaozhi');
+      textCard = document.createElement('div');
+      textCard.className = 'ai-text-chat-card';
+      textCard.innerHTML = `
+        <div class="chat-card-header">
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span style="font-size:1.2rem;">💬</span>
+            <div>
+              <div style="font-weight:bold; font-size:0.92rem; color:#38bdf8;">Trò Chuyện Trực Tiếp Với Trợ Lý AI</div>
+              <div style="font-size:0.72rem; color:#94a3b8;">Gõ tin nhắn để AI trả lời & tự động stream phát âm thanh ra loa trạm Decor</div>
+            </div>
+          </div>
+          <button class="chat-clear-btn" onclick="window.clearAiChatLog()" title="Xóa lịch sử trò chuyện">🗑️ Xóa Lịch Sử</button>
+        </div>
+        <div class="suggest-scroll" style="display:flex; gap:6px; overflow-x:auto; margin-bottom:8px;">
+          <span class="suggest-chip" onclick="window.fillAiChatText(this.innerText)">"Phát nhạc đi"</span>
+          <span class="suggest-chip" onclick="window.fillAiChatText(this.innerText)">"Mấy giờ rồi?"</span>
+          <span class="suggest-chip" onclick="window.fillAiChatText(this.innerText)">"Thời tiết hôm nay thế nào?"</span>
+          <span class="suggest-chip" onclick="window.fillAiChatText(this.innerText)">"Kể chuyện cười đi"</span>
+          <span class="suggest-chip" onclick="window.fillAiChatText(this.innerText)">"Đọc báo hôm nay"</span>
+        </div>
+        <div id="ai-chat-history" class="ai-chat-history" style="max-height:260px; min-height:80px; overflow-y:auto; display:flex; flex-direction:column; gap:8px; padding:8px; background:rgba(11,15,25,0.6); border-radius:8px; border:1px solid rgba(51,65,85,0.5);">
+          <div class="chat-item ai" style="display:flex; gap:8px;">
+            <div class="chat-bubble" style="background:#1e293b; color:#e2e8f0; padding:8px 12px; border-radius:10px; font-size:0.85rem; border:1px solid #334155;">
+              Chào bạn! Bạn có thể gõ câu hỏi vào ô trên. Trợ lý AI sẽ trả lời và tự động stream phát âm thanh ra loa trạm Decor! 🛰️
+            </div>
+          </div>
+        </div>
+      `;
+      if (chatPanel) chatPanel.appendChild(textCard);
+    }
+
+    // Đảm bảo Ô GÕ CHAT VĂN BẢN (chat-input-wrapper) LUÔN XUẤT HIỆN Ở ĐẦU THẺ CHAT
+    if (!document.getElementById('ai-chat-text-input')) {
+      const inputWrap = document.createElement('div');
+      inputWrap.className = 'chat-input-wrapper';
+      inputWrap.style.cssText = 'display:flex; gap:8px; background:#0f172a; padding:6px; border-radius:10px; border:2px solid #38bdf8; margin:10px 0 8px 0; box-shadow:0 0 14px rgba(56,189,248,0.35);';
+      inputWrap.innerHTML = `
+        <input type="text" id="ai-chat-text-input" class="chat-text-input" style="flex:1; background:transparent; border:none; padding:10px 14px; color:#f8fafc; font-size:0.92rem; outline:none;" placeholder="💬 Nhập câu hỏi cho AI (ví dụ: Kể chuyện cười, thời tiết hôm nay...)..." onkeydown="if(event.key==='Enter') window.sendAiChatWebMessage()" />
+        <button id="btn-ai-chat-send" class="chat-send-btn" style="background:linear-gradient(135deg,#0ea5e9,#2563eb); border:none; border-radius:8px; color:white; font-weight:700; padding:10px 20px; cursor:pointer; font-size:0.9rem;" onclick="window.sendAiChatWebMessage()">
+          <span>Gửi</span> 🚀
+        </button>
+      `;
+      const header = textCard.querySelector('.chat-card-header');
+      if (header && header.nextSibling) {
+        textCard.insertBefore(inputWrap, header.nextSibling);
+      } else {
+        textCard.prepend(inputWrap);
+      }
+    }
+
     // 3. Cập nhật header trạng thái
     const badge = document.getElementById('chat-status-badge');
     if (badge) {
@@ -2992,6 +3043,103 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       });
     } catch(e) {}
   };
+
+  window.fillAiChatText = function(text) {
+    const input = document.getElementById('ai-chat-text-input');
+    if (input) {
+      input.value = text.replace(/^"|"$/g, '');
+      input.focus();
+    }
+  };
+
+  window.clearAiChatLog = function() {
+    const hist = document.getElementById('ai-chat-history');
+    if (hist) {
+      hist.innerHTML = '<div style="color:#64748b; font-size:0.8rem; text-align:center; padding:10px;">Đã xóa cuộc trò chuyện. Hãy gõ câu hỏi mới để bắt đầu nhé! 🛰️</div>';
+    }
+  };
+
+  window.appendAiChatMessage = function(role, text) {
+    const hist = document.getElementById('ai-chat-history');
+    if (!hist) return null;
+    const item = document.createElement('div');
+    item.className = 'chat-item ' + (role === 'user' ? 'user' : 'ai');
+    item.style.display = 'flex';
+    item.style.gap = '8px';
+    item.style.justifyContent = (role === 'user') ? 'flex-end' : 'flex-start';
+    const bubble = document.createElement('div');
+    bubble.className = 'chat-bubble';
+    bubble.style.cssText = (role === 'user')
+      ? 'background:linear-gradient(135deg,#059669,#047857); color:#ecfdf5; padding:8px 12px; border-radius:10px; font-size:0.85rem; max-width:85%; word-break:break-word;'
+      : 'background:#1e293b; color:#f1f5f9; padding:8px 12px; border-radius:10px; font-size:0.85rem; max-width:85%; border:1px solid #334155; word-break:break-word;';
+    bubble.innerText = text;
+    item.appendChild(bubble);
+    hist.appendChild(item);
+    hist.scrollTop = hist.scrollHeight;
+    return item;
+  };
+
+  if (!window.sendAiChatWebMessage) {
+    window.sendAiChatWebMessage = async function() {
+      const input = document.getElementById('ai-chat-text-input');
+      const btn = document.getElementById('btn-ai-chat-send');
+      if (!input) return;
+      const msg = input.value.trim();
+      if (!msg) return;
+
+      window.appendAiChatMessage('user', msg);
+      input.value = '';
+      if (btn) btn.disabled = true;
+
+      const thinkingItem = window.appendAiChatMessage('ai', '🤖 Trợ lý AI đang suy nghĩ & stream âm thanh ra loa trạm...');
+
+      let pcIp = '192.168.1.8';
+      let pcPort = 8765;
+      if (typeof aiConfig !== 'undefined') {
+        if (aiConfig.pc_gateway_ip) pcIp = aiConfig.pc_gateway_ip;
+        if (aiConfig.pc_gateway_port) pcPort = aiConfig.pc_gateway_port;
+      }
+
+      try {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 60000);
+        const res = await fetch(`http://${pcIp}:${pcPort}/chat`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            message: msg,
+            model: (typeof aiConfig !== 'undefined' && aiConfig.ai_model) ? aiConfig.ai_model : 'gemini-pro',
+            voice: (typeof aiConfig !== 'undefined' && aiConfig.tts_voice) ? aiConfig.tts_voice : 'vi-VN-HoaiMyNeural',
+            stream_audio: true
+          }),
+          signal: controller.signal
+        });
+        clearTimeout(timeoutId);
+
+        if (res.ok) {
+          const data = await res.json();
+          if (thinkingItem) {
+            const b = thinkingItem.querySelector('.chat-bubble');
+            if (b) b.innerText = data.reply || '(Không nhận được văn bản phản hồi)';
+          }
+        } else {
+          if (thinkingItem) {
+            const b = thinkingItem.querySelector('.chat-bubble');
+            if (b) b.innerText = `❌ Lỗi từ AI Gateway (HTTP ${res.status}).`;
+          }
+        }
+      } catch (err) {
+        if (thinkingItem) {
+          const b = thinkingItem.querySelector('.chat-bubble');
+          if (b) b.innerText = `❌ Không thể kết nối tới PC Gateway (${pcIp}:${pcPort})! Hãy kiểm tra xem Decor Space Companion đã chạy chưa.`;
+        }
+      } finally {
+        if (btn) btn.disabled = false;
+        const hist = document.getElementById('ai-chat-history');
+        if (hist) hist.scrollTop = hist.scrollHeight;
+      }
+    };
+  }
 
   function formatTime(d = new Date()) {
     return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
@@ -4753,6 +4901,8 @@ static const char DECOR_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
   window.fetchDecorStatus = async function() {
     if (document.hidden) return;
+    const decSec = document.getElementById('tab-decor');
+    if (!decSec || !decSec.classList.contains('active')) return;
     try {
       const res = await fetch('/api/decor/status');
       if (res.ok) {
@@ -4789,9 +4939,8 @@ static const char DECOR_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
   setTimeout(() => {
     injectDecorTabAndPage();
-    window.fetchDecorStatus();
-    setInterval(window.fetchDecorStatus, 3000);
-  }, 350);
+    setInterval(window.fetchDecorStatus, 5000);
+  }, 1000);
 })();
 </script>
 )rawliteral";
@@ -6104,15 +6253,14 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
 
   setTimeout(() => {
     injectKeypadTabAndPage();
-    window.fetchKeypadStatus();
     window.syncKeypadStandbyTheme();
     setInterval(() => {
       const sec = document.getElementById('tab-keypad');
       if (sec && sec.classList.contains('active')) {
         window.fetchKeypadStatus();
       }
-    }, 450);
-  }, 400);
+    }, 2000);
+  }, 1200);
 })();
 </script>
 )rawliteral";
@@ -6931,10 +7079,7 @@ input.spaceos-auth-input[type="password"]:focus {
 
   document.addEventListener('visibilitychange', () => {
     if (!document.hidden) {
-      if (typeof window.loadSystemInfo === 'function') window.loadSystemInfo();
-      if (typeof window.fetchWeatherStatus === 'function') window.fetchWeatherStatus();
-      if (typeof window.fetchDecorStatus === 'function') window.fetchDecorStatus();
-      if (typeof window.pollMediaStatus === 'function') window.pollMediaStatus();
+      if (typeof window.checkStatus === 'function') window.checkStatus();
     }
   });
 

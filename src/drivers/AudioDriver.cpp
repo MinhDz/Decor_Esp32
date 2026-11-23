@@ -130,8 +130,8 @@ namespace AudioDriver {
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT, // 16-bit Stereo (xuất cả 2 kênh để hỗ trợ mọi cấu hình SD_MODE)
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = 8,  // 8 bộ đệm DMA
-      .dma_buf_len = 256,  // 256 mẫu mỗi đệm -> 8 * 256 = 2048 mẫu = 128ms buffer phần cứng tối ưu độ trễ thấp
+      .dma_buf_count = 12, // 12 bộ đệm DMA phần cứng (tăng từ 8)
+      .dma_buf_len = 512,  // 512 mẫu mỗi đệm -> 12 * 512 = 6144 mẫu (~140ms buffer phần cứng chống drop hoàn hảo)
       .use_apll = false,
       .tx_desc_auto_clear = true, // Tự động xóa DMA buffer bằng silence để triệt tiêu tiếng rè/ù
       .fixed_mclk = 0
@@ -597,6 +597,7 @@ namespace AudioDriver {
 
   bool startVoiceRecording() {
     if (!installMicRx()) return false;
+    resumeMic();
     if (!pcmRecBuffer) {
       if (psramFound()) {
         pcmRecBuffer = (int16_t*)ps_malloc(MAX_REC_SAMPLES_16K * sizeof(int16_t));
@@ -662,14 +663,21 @@ namespace AudioDriver {
     // Đọc liên tục các khung dữ liệu I2S 16kHz Stereo từ DMA
     int32_t stereoRaw[128 * 2];
     size_t bytesRead = 0;
-    esp_err_t err = i2s_read(I2S_PORT_MIC, stereoRaw, sizeof(stereoRaw), &bytesRead, pdMS_TO_TICKS(5));
+    esp_err_t err = i2s_read(I2S_PORT_MIC, stereoRaw, sizeof(stereoRaw), &bytesRead, pdMS_TO_TICKS(15));
     if (err != ESP_OK || bytesRead < 16) return;
 
     int frames = bytesRead / (2 * sizeof(int32_t));
     if (frames <= 0) return;
 
-    // 1. Kênh thu chuẩn từ INMP441 (Chân L/R nối GND nên dữ liệu chuẩn luôn nằm ở kênh LEFT)
-    int chIdx = 0;
+    // 1. Tự động kiểm tra và khóa kênh thu thực từ INMP441 (Kênh 0 Left hay Kênh 1 Right)
+    //    Tránh hoàn toàn tình trạng mất tiếng do mạch đảo pha WS hoặc chân L/R bị nổi/kéo 3.3V
+    int64_t mag0 = 0, mag1 = 0;
+    int checkFrames = min(frames, 32);
+    for (int k = 0; k < checkFrames; k++) {
+      mag0 += abs(stereoRaw[k * 2] >> 8);
+      mag1 += abs(stereoRaw[k * 2 + 1] >> 8);
+    }
+    int chIdx = (mag1 > mag0 * 2 && mag1 > 2000) ? 1 : 0;
 
     // 2. Hệ số khuếch đại (AGC Gain) theo cài đặt người dùng
     float gain = 3.5f;
@@ -715,7 +723,7 @@ namespace AudioDriver {
 
     // 4. Cập nhật thước đo VU Meter thực tế cho giao diện ST7789
     float rms = sqrtf(blockSumSq / frames);
-    int pct = constrain((int)((rms * 100.0f) / 16000.0f), 0, 100);
+    int pct = constrain((int)((rms * 100.0f) / 6000.0f), 0, 100);
     lastMicPct = pct;
     if (pct > recMaxVuPct) recMaxVuPct = pct;
 
@@ -1206,48 +1214,63 @@ namespace AudioDriver {
       Serial.printf("🎵 [MP3 DECODER] Bắt đầu giải mã & phát MP3: %s (%u bytes)...\n",
                     asyncSdFilePath.c_str(), (unsigned)f.size());
 
-      // Cấp phát trong DRAM nội bộ (SRAM) để tránh 100% lỗi DMA và căn lề bộ nhớ của Octal PSRAM
+      // Cấp phát trong Octal PSRAM (nếu có) hoặc DRAM: 64KB đệm nạp trước (Pre-buffering 3-5 giây nhạc)
       mp3dec_t* mp3d = (mp3dec_t*)malloc(sizeof(mp3dec_t));
-      const int MP3_BUF_SIZE = 8192; // 8KB đệm DRAM an toàn tuyệt đối
-      uint8_t* mp3Buf = (uint8_t*)malloc(MP3_BUF_SIZE);
+      const int MP3_BUF_SIZE = 64 * 1024; // 64KB đệm nạp trước chống giật 100%
+      uint8_t* mp3Buf = psramFound() ? (uint8_t*)ps_malloc(MP3_BUF_SIZE) : (uint8_t*)malloc(32768);
+      const int effectiveBufSize = mp3Buf ? (psramFound() ? MP3_BUF_SIZE : 32768) : 0;
       mp3d_sample_t* pcmOut = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
       int16_t* stereoPcm = (int16_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t));
 
       if (mp3d && mp3Buf && pcmOut && stereoPcm) {
         mp3dec_init(mp3d);
         int bufValid = 0;
+        int readOffset = 0;
         currentSampleRate = 44100;
         i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
 
+        // Nạp trước dữ liệu ban đầu (Pre-buffering)
+        if (StorageDriver::lock(pdMS_TO_TICKS(500))) {
+          size_t initialRead = f.read(mp3Buf, effectiveBufSize);
+          bufValid = (int)initialRead;
+          StorageDriver::unlock();
+        }
+
         while (audioPlayRunning && (f.available() || bufValid > 0)) {
-          if (bufValid < (MP3_BUF_SIZE - 2048) && f.available()) {
-            if (StorageDriver::lock(pdMS_TO_TICKS(120))) {
-              size_t toRead = MP3_BUF_SIZE - bufValid;
-              size_t nRead = f.read(mp3Buf + bufValid, toRead);
+          // 1. Sliding Window: Khi đã đọc qua nửa bộ đệm, dồn phần còn lại về đầu
+          if (readOffset >= (effectiveBufSize / 2)) {
+            if (bufValid > 0) {
+              memmove(mp3Buf, mp3Buf + readOffset, bufValid);
+            }
+            readOffset = 0;
+          }
+
+          // 2. Nạp thêm dữ liệu từ thẻ nhớ theo khối sector 512B căn lề khi còn khoảng trống lớn (>= 16KB)
+          size_t freeSpace = effectiveBufSize - (readOffset + bufValid);
+          if (freeSpace >= 16384 && f.available()) {
+            size_t toRead = (freeSpace / 512) * 512;
+            if (toRead > 0 && StorageDriver::lock(pdMS_TO_TICKS(300))) {
+              size_t nRead = f.read(mp3Buf + readOffset + bufValid, toRead);
               bufValid += nRead;
               StorageDriver::unlock();
-            } else {
-              vTaskDelay(pdMS_TO_TICKS(3));
             }
           }
 
           if (bufValid <= 0) break;
 
+          // 3. Giải mã khung MP3 từ vị trí readOffset
           mp3dec_frame_info_t info;
-          int samplesPerChannel = mp3dec_decode_frame(mp3d, mp3Buf, bufValid, pcmOut, &info);
+          int samplesPerChannel = mp3dec_decode_frame(mp3d, mp3Buf + readOffset, bufValid, pcmOut, &info);
 
           if (info.frame_bytes > 0) {
-            bufValid -= info.frame_bytes;
-            if (bufValid > 0) {
-              memmove(mp3Buf, mp3Buf + info.frame_bytes, bufValid);
-            }
+            readOffset += info.frame_bytes;
+            bufValid   -= info.frame_bytes;
           } else if (samplesPerChannel == 0) {
+            readOffset++;
             bufValid--;
-            if (bufValid > 0) {
-              memmove(mp3Buf, mp3Buf + 1, bufValid);
-            }
           }
 
+          // 4. Đẩy ra I2S DAC
           if (samplesPerChannel > 0) {
             if (info.hz > 0 && (uint32_t)info.hz != currentSampleRate) {
               currentSampleRate = info.hz;
@@ -1272,7 +1295,7 @@ namespace AudioDriver {
             }
 
             size_t written = 0;
-            i2s_write(I2S_PORT_SPK, stereoPcm, samplesPerChannel * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(100));
+            i2s_write(I2S_PORT_SPK, stereoPcm, samplesPerChannel * 2 * sizeof(int16_t), &written, pdMS_TO_TICKS(150));
             audioPlayCurSample += samplesPerChannel;
 
             // Cập nhật phổ âm thanh cho ST7789
@@ -1305,7 +1328,7 @@ namespace AudioDriver {
     } else {
       currentSampleRate = wavSampleRate;
       i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
-      const size_t WAV_CHUNK = 512;
+      const size_t WAV_CHUNK = 2048; // Nâng từ 512 lên 2048 mẫu (4096 bytes)
       int16_t* chunk = (int16_t*)malloc(WAV_CHUNK * sizeof(int16_t));
       int16_t* stereoChunk = (int16_t*)malloc(WAV_CHUNK * 2 * sizeof(int16_t));
       size_t totalBytes = (f.size() > 44) ? (f.size() - 44) : 0;
@@ -1314,13 +1337,13 @@ namespace AudioDriver {
       if (chunk && stereoChunk) {
         while (audioPlayRunning && bytesRead < totalBytes && f.available()) {
           size_t nReadBytes = 0;
-          if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
+          if (StorageDriver::lock(pdMS_TO_TICKS(300))) {
             if (f.available()) {
               nReadBytes = f.read((uint8_t*)chunk, WAV_CHUNK * sizeof(int16_t));
             }
             StorageDriver::unlock();
           } else {
-            vTaskDelay(pdMS_TO_TICKS(3));
+            vTaskDelay(pdMS_TO_TICKS(2));
             continue;
           }
 

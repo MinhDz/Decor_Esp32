@@ -11,15 +11,15 @@
 namespace DisplayDriver {
 
   // Pin definitions (defaults from Config.h)
-  static const int PIN_SCK   = PIN_TFT_SCK;  // GPIO 12
-  static const int PIN_MOSI  = PIN_TFT_MOSI; // GPIO 11
+  static const int PIN_SCK   = PIN_TFT_SCK;  // GPIO 11
+  static const int PIN_MOSI  = PIN_TFT_MOSI; // GPIO 12
   static const int PIN_RST   = PIN_TFT_RST;  // GPIO 10
   static const int PIN_DC    = PIN_TFT_DC;   // GPIO 13
   static const int PIN_CS    = PIN_TFT_CS;   // GPIO 14
   static const int PIN_BL    = PIN_TFT_BL;   // GPIO 7 (PWM)
   static const int PIN_TOUCH = PIN_TOUCH_TTP223; // GPIO 20/21
 
-  static const uint32_t SPI_MAX_SPEED_HZ = 80000000; // 80 MHz max hardware SPI on ESP32-S3
+  static const uint32_t SPI_MAX_SPEED_HZ = 40000000; // 40 MHz an toàn tuyệt đối cho ST7789V & XPT2046 qua dây cắm breadboard
 
   // Backlight & Sleep state
   void initBacklight(uint8_t channel = 0, double freq = 5000, uint8_t resolution = 8);

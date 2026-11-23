@@ -57,6 +57,19 @@ public:
   // Thu hồi bộ nhớ Opus Decoder khi nhàn rỗi (Memory Scavenger)
   static size_t trimMemory();
   static bool hasAllocatedDecoder();
+
+  // --- CẤU HÌNH BACKEND AI: 0: XiaoZhi Cloud Hub, 1: PC Local AI Gateway ---
+  static int getAiBackend();
+  static void setAiBackend(int backend);
+  static String getPcGatewayIp();
+  static void setPcGatewayIp(const String& ip);
+  static int getPcGatewayPort();
+  static void setPcGatewayPort(int port);
+  static String getAiModel();
+  static void setAiModel(const String& model);
+  static String getTtsVoice();
+  static void setTtsVoice(const String& voice);
+  static bool isPcGatewayMode();
 };
 
 

@@ -1,4 +1,5 @@
 #include "SpaceOS_GameCenter.h"
+#include "drivers/DisplayDriver.h"
 #include <Preferences.h>
 
 namespace SpaceOS_GameCenter {
@@ -20,6 +21,9 @@ namespace SpaceOS_GameCenter {
   uint8_t  getActiveGameId() { return s40GameActiveId; }
   void     setActiveGameId(uint8_t id) { s40GameActiveId = id; }
   uint8_t& getActiveGameIdRef() { return s40GameActiveId; }
+
+  int  getMenuCursor() { return s40GameMenuCursor; }
+  void setMenuCursor(int cursor) { s40GameMenuCursor = constrain(cursor, 0, 2); }
 
   // --- TRẠNG THÁI GAME 1: RẮN SĂN MỒI (SNAKE XENZIA) ---
   static const int SNAKE_COLS = 20;
@@ -506,11 +510,11 @@ namespace SpaceOS_GameCenter {
     }
     if (!canvas) return;
 
-    // Kết xuất 3 dải ngang (3 x 72px = 224 x 216px) chống nháy 100% và không tốn thêm RAM
+    // Kết xuất 3 dải ngang (3 x 72px = 224 x 216px) chống nháy 100% bằng fastBlockTransfer tốc độ cao 40MHz
     for (int band = 0; band < 3; band++) {
       int yOff = band * 72;
       renderGameBandToCanvas(canvas, yOff);
-      tft->drawRGBBitmap(8, 54 + yOff, canvas->getBuffer(), 224, 72);
+      DisplayDriver::fastBlockTransfer(8, 54 + yOff, canvas->getBuffer(), 224, 72);
     }
   }
 

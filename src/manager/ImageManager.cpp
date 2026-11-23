@@ -266,6 +266,8 @@ bool ImageManager::deleteImage(const String& filename) {
   return false;
 }
 
+static String s_cachedActiveImg = "";
+
 bool ImageManager::selectActiveImage(const String& filename) {
   String path = filename;
   if (path.startsWith("sd:")) path = path.substring(3);
@@ -274,14 +276,17 @@ bool ImageManager::selectActiveImage(const String& filename) {
   imgPrefs.begin("sys", false);
   imgPrefs.putString("active_img", path);
   imgPrefs.end();
+  s_cachedActiveImg = path;
   return true;
 }
 
 String ImageManager::getActiveImage() {
+  if (s_cachedActiveImg.length() > 0) return s_cachedActiveImg;
   imgPrefs.begin("sys", true);
   String active = imgPrefs.getString("active_img", "/wallpaper.jpg");
   imgPrefs.end();
   if (active.startsWith("sd:")) active = active.substring(3);
+  s_cachedActiveImg = active;
   return active;
 }
 

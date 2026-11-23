@@ -1,0 +1,12 @@
+{
+  "listen_host": "0.0.0.0",
+  "listen_port": 8765,
+  "gemini_api_key": "YOUR_GEMINI_API_KEY",
+  "openai_compatible": {
+    "api_key": "YOUR_DEEPSEEK_OR_OPENAI_KEY",
+    "base_url": "https://api.deepseek.com",
+    "model": "deepseek-reasoner"
+  },
+  "tts_voice": "vi-VN-HoaiMyNeural",
+  "system_prompt": "Bạn là Trợ lý AI siêu thông minh của Trạm Decor Vũ Trụ. Hãy trả lời tiếng Việt tự nhiên, súc tích (3-5 câu để nghe qua loa), chính xác tuyệt đối, ưu tiên cập nhật thông tin mới nhất từ kết quả tìm kiếm thời gian thực."
+}

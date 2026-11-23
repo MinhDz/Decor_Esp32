@@ -6,6 +6,7 @@
 #include "services/PeripheralControlService.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
 
 namespace ApiXiaoZhi {
 
@@ -83,6 +84,11 @@ namespace ApiXiaoZhi {
     doc["ws_connected"] = XiaoZhiClient::isWebSocketConnected();
     doc["mac"] = WiFi.macAddress();
     doc["otp"] = XiaoZhiClient::getLastAuthCode();
+    doc["ai_backend"] = XiaoZhiClient::getAiBackend();
+    doc["pc_gateway_ip"] = XiaoZhiClient::getPcGatewayIp();
+    doc["pc_gateway_port"] = XiaoZhiClient::getPcGatewayPort();
+    doc["ai_model"] = XiaoZhiClient::getAiModel();
+    doc["tts_voice"] = XiaoZhiClient::getTtsVoice();
 
     String response;
     serializeJson(doc, response);
@@ -113,6 +119,47 @@ namespace ApiXiaoZhi {
     handleXiaoZhiChatStatus(server);
   }
 
+  void handleXiaoZhiChat(WebServer& server) {
+    String message = "";
+    if (server.hasArg("plain")) {
+      JsonDocument doc;
+      deserializeJson(doc, server.arg("plain"));
+      if (doc["message"].is<const char*>()) message = doc["message"].as<String>();
+    }
+    if (message.length() == 0 && server.hasArg("message")) {
+      message = server.arg("message");
+    }
+
+    if (message.length() == 0) {
+      server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Vui lòng nhập nội dung 'message'!\"}");
+      return;
+    }
+
+    // Forward sang PC AI Gateway: http://<s_pcGatewayIp>:<s_pcGatewayPort>/api/chat
+    String gatewayUrl = "http://" + XiaoZhiClient::getPcGatewayIp() + ":" + String(XiaoZhiClient::getPcGatewayPort()) + "/api/chat";
+    HTTPClient http;
+    http.begin(gatewayUrl);
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(15000);
+
+    JsonDocument reqDoc;
+    reqDoc["message"] = message;
+    reqDoc["model"] = XiaoZhiClient::getAiModel();
+    reqDoc["voice"] = XiaoZhiClient::getTtsVoice();
+    reqDoc["stream_to_station"] = true;
+    String reqBody;
+    serializeJson(reqDoc, reqBody);
+
+    int httpCode = http.POST(reqBody);
+    if (httpCode > 0) {
+      String payload = http.getString();
+      server.send(httpCode, "application/json", payload);
+    } else {
+      server.send(502, "application/json", "{\"status\":\"error\",\"message\":\"Không thể kết nối PC AI Gateway (" + gatewayUrl + "): " + http.errorToString(httpCode) + "\"}");
+    }
+    http.end();
+  }
+
   void handleGetDailyNews(WebServer& server) {
     int limit = server.hasArg("limit") ? server.arg("limit").toInt() : 5;
     PeripheralControlResult res = PeripheralControlService::getDailyNews(limit);
@@ -133,6 +180,8 @@ namespace ApiXiaoZhi {
     server.on("/api/xiaozhi/unbind", HTTP_POST, [&server]() { handleXiaoZhiUnbind(server); });
     server.on("/api/xiaozhi/chat_status", HTTP_GET, [&server]() { handleXiaoZhiChatStatus(server); });
     server.on("/api/xiaozhi/action", HTTP_POST, [&server]() { handleXiaoZhiAction(server); });
+    server.on("/api/ai/chat", HTTP_POST, [&server]() { handleXiaoZhiChat(server); });
+    server.on("/api/ai/chat", HTTP_GET, [&server]() { handleXiaoZhiChat(server); });
     server.on("/api/news", HTTP_GET, [&server]() { handleGetDailyNews(server); });
     server.on("/api/daily_news", HTTP_GET, [&server]() { handleGetDailyNews(server); });
   }

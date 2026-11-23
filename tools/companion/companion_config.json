@@ -1,0 +1,19 @@
+{
+  "esp32_ip": "192.168.1.82",
+  "monitor_enabled": true,
+  "monitor_interval": 1.2,
+  "transcoder_enabled": true,
+  "transcoder_port": 5050,
+  "transcoder_fps": 15,
+  "transcoder_quality": 5,
+  "transcoder_res": "240x240",
+  "ai_gateway_enabled": true,
+  "ai_gateway_port": 8765,
+  "ai_gateway_voice": "vi-VN-HoaiMyNeural",
+  "gemini_api_key": "",
+  "openai_api_key": "",
+  "openai_base_url": "https://api.deepseek.com",
+  "openai_model": "deepseek-reasoner",
+  "autostart": true,
+  "notify_on_startup": true
+}

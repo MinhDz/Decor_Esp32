@@ -285,6 +285,12 @@ void SystemLogger::flushBufferToSd() {
     return;
   }
 
+  // Tạm hoãn xả log xuống thẻ SD khi đang phát nhạc để nhường 100% băng thông bus cho Audio
+  if (TestAudio::isMusicPlaying()) {
+    s_stats.sdLoggingActive = false;
+    return;
+  }
+
   if (!TestSDCard::lock(pdMS_TO_TICKS(100))) return;
 
   ensureLogDirExists();

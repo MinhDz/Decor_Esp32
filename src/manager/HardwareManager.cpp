@@ -150,10 +150,21 @@ uint32_t HardwareManager::getAllocFailures() {
 }
 
 float HardwareManager::getFsUsedMb() {
-  return (float)LittleFS.usedBytes() / (1024.0 * 1024.0);
+  static float s_cachedUsedMb = 0.0f;
+  static unsigned long s_lastCheckMs = 0;
+  unsigned long now = millis();
+  if (s_cachedUsedMb <= 0.0f || (now - s_lastCheckMs > 60000)) {
+    s_lastCheckMs = now;
+    s_cachedUsedMb = (float)LittleFS.usedBytes() / (1024.0f * 1024.0f);
+  }
+  return s_cachedUsedMb;
 }
 
 float HardwareManager::getFsTotalMb() {
-  return (float)LittleFS.totalBytes() / (1024.0 * 1024.0);
+  static float s_cachedTotalMb = 0.0f;
+  if (s_cachedTotalMb <= 0.0f) {
+    s_cachedTotalMb = (float)LittleFS.totalBytes() / (1024.0f * 1024.0f);
+  }
+  return s_cachedTotalMb;
 }
 

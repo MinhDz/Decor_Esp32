@@ -48,14 +48,14 @@ Sơ đồ nhìn từ mặt trước khi cổng USB hướng lên trên:
 | 10 | GPIO 17 | **17** | **Loa MAX98357A LRC** | **Xung chọn kênh phát loa (I2S1 Word Select)** |
 | 11 | GPIO 18 | **18** | **LED Nước Chảy Phải (R)** | **Cực (+) Thanh LED sao băng bên PHẢI mặt lưng (qua trở $22\,\Omega$)** |
 | 12 | GPIO 8 | **8** | **Cảm biến SHT31 SDA** | Dữ liệu I2C Data |
-| 13 | GPIO 19 | 19 | USB D- | Dành riêng Native USB (Tránh dùng) |
+| 13 | GPIO 19 | **19** | **Cảm ứng Màn hình 2.4" T_DO (MISO)** | Chân dữ liệu SPI MISO từ chip cảm ứng XPT2046 về ESP32 (Độc lập hoàn toàn, không chung thẻ SD) |
 | 14 | GPIO 20 | **20** | **Cảm biến Chạm TTP223** | Tín hiệu chạm Digital SIG (Active HIGH), RTC_GPIO20 hỗ trợ đánh thức Deep Sleep |
 | 15 | GPIO 3 | **3** | **Bàn phím KEY_ADC** | Đọc cụm thang điện trở 7 nút (ADC1_CH2) |
 | 16 | GPIO 46 | **46** | **Trạng Thái Sạc Vin MH-CD42** | Đọc trạng thái High/Low sạc pin từ Vin MH-CD42 (HIGH: Đang sạc, LOW: Không sạc, Input-Only) |
 | 17 | GPIO 9 | **9** | **Cảm biến SHT31 SCL** | Xung nhịp I2C Clock |
 | 18 | GPIO 10 | **10** | **Màn hình ST7789 RST** | Reset phần cứng LCD |
-| 19 | GPIO 11 | **11** | **Màn hình ST7789 MOSI** | SPI Data Out (SDA / SDI) |
-| 20 | GPIO 12 | **12** | **Màn hình ST7789 SCK** | SPI Clock (SCL) |
+| 19 | GPIO 11 | **11** | **Màn hình ST7789 SCK** | SPI Clock (SCL) |
+| 20 | GPIO 12 | **12** | **Màn hình ST7789 MOSI** | SPI Data Out (SDA / SDI) |
 | 21 | GPIO 13 | **13** | **Màn hình ST7789 DC** | SPI Data / Command |
 | 22 | GPIO 14 | **14** | **Màn hình ST7789 CS** | SPI Chip Select LCD |
 
@@ -149,11 +149,15 @@ Khi nâng cấp từ màn hình ST7789 thường sang **màn hình 2.4" có lớ
   - `SCL`: Nối chung vào Bus I2C phần cứng trên **`GPIO 9`**.
   - `INT / IRQ`: Nối vào **`GPIO 45`** (tín hiệu ngắt khi phát hiện chạm hoặc vuốt cử chỉ).
   - `RST`: Nối chung chân Reset LCD **`GPIO 10`** hoặc treo lên 3.3V.
-- **Chuẩn cảm ứng SPI (ví dụ chip XPT2046)**:
-  - `T_CLK`: Dùng chung SPI Clock **`GPIO 12`**.
-  - `T_DIN` (MOSI): Dùng chung SPI MOSI **`GPIO 11`**.
-  - `T_DO` (MISO): Dùng chung chân SPI MISO thẻ nhớ **`GPIO 41`**.
+- **Chuẩn cảm ứng SPI (ví dụ chip XPT2046 trên màn hình FEIYANG ST7789V 2.4" 240x320)**:
+  - `T_CLK`: Dùng chung SPI Clock **`GPIO 11`**.
+  - `T_DIN` (MOSI): Dùng chung SPI MOSI **`GPIO 12`**.
+  - `T_DO` (MISO): Nối vào **`GPIO 19`** (Header J1 chân 13, chân I/O tự do độc lập hoàn toàn, không đụng thẻ SD).
   - `T_CS` / `T_IRQ`: Nối vào **`GPIO 45`** (tín hiệu Chip Select hoặc ngắt chạm).
+  - **Quy tắc hiệu chuẩn góc nhìn màn hình dọc (Portrait Orientation)**:
+    - Màn hình dựng dọc với hàng chân cắm vật lý nằm ở phía TRÊN (hiển thị nội dung từ phía dưới lên đỉnh hàng chân).
+    - Cấu hình ma trận tọa độ chuẩn: **`SwapXY = false`**, **`InvertX = true`**, **`InvertY = true`**.
+    - Dải ADC hiệu chuẩn: X[250..3850], Y[250..3850], tự động lọc nhiễu jitter và chặn hoàn toàn hiện tượng chạm ảo / lệch vị trí con trỏ.
 - *Ưu điểm layout*: Sử dụng chân tự do **`GPIO 45`** giúp bảo toàn nguyên vẹn chân **`GPIO 47`** cho **Cặp LED Ống Edison Trái** và **`GPIO 21`** cho **Cặp LED Edison Phải**, không gây bất kỳ xung đột nào với các hiệu ứng ánh sáng của trạm.
 
 ---
@@ -166,8 +170,8 @@ flowchart TD
         direction TB
 
         subgraph SPI_LCD["Màn Hình SPI ST7789 (2.4 inch Hỗ Trợ Cảm Ứng)"]
-            TFT_MOSI["GPIO 11 (MOSI)"]
-            TFT_SCK["GPIO 12 (SCK)"]
+            TFT_MOSI["GPIO 12 (MOSI)"]
+            TFT_SCK["GPIO 11 (SCK)"]
             TFT_DC["GPIO 13 (DC)"]
             TFT_CS["GPIO 14 (CS)"]
             TFT_RST["GPIO 10 (RST)"]

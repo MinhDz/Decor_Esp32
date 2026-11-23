@@ -5,6 +5,7 @@
 #include <SPI.h>
 #include <SD.h>
 #include <LittleFS.h>
+#include <WebServer.h>
 #include <driver/gpio.h>
 
 namespace StorageDriver {
@@ -286,9 +287,9 @@ namespace StorageDriver {
     sdSpi->begin(sck, miso, mosi, cs);
     delay(5);
 
-    if (!SD.begin(cs, *sdSpi, 20000000)) {
+    if (!SD.begin(cs, *sdSpi, 12000000)) {
       SD.end();
-      if (!SD.begin(cs, *sdSpi, 10000000)) {
+      if (!SD.begin(cs, *sdSpi, 8000000)) {
         SD.end();
         if (!SD.begin(cs, *sdSpi, 4000000)) {
           SD.end();
@@ -636,6 +637,99 @@ namespace StorageDriver {
   String getFirstFileNames() { return firstFilesStr; }
   uint32_t getScanCount() { return scanCounter; }
   const SdPinDiag* getPinDiags() { return pinDiags; }
+
+  // ============================================================================
+  // STREAM FILE AN TOÀN QUA HTTP THEO KHỐI 4KB (CHUNKED NON-BLOCKING STREAMING)
+  // Giải phóng 100% bus SPI giữa các chunk để AudioDriver & ST7789 không bị nghẽn
+  // ============================================================================
+  bool streamFileSafely(WebServer& server, const String& path, const String& contentType, bool enableCache) {
+    if (!sdMounted || !isHealthy()) return false;
+
+    String fullPath = path;
+    if (!fullPath.startsWith("/")) fullPath = "/" + fullPath;
+
+    // Chờ khóa SD tối đa 1000ms (đủ để luồng AudioDriver nạp xong 1 block 16KB nếu đang đọc)
+    if (!lock(pdMS_TO_TICKS(1000))) {
+      LOG_W("SD", "streamFileSafely: The SD dang ban, lock timeout!");
+      return false;
+    }
+
+    if (!SD.exists(fullPath)) {
+      unlock();
+      return false;
+    }
+
+    File f = SD.open(fullPath, FILE_READ);
+    if (!f) {
+      notifyIoError(false, "streamFileSafely open failed");
+      unlock();
+      return false;
+    }
+
+    size_t totalBytes = f.size();
+    if (totalBytes == 0) {
+      f.close();
+      unlock();
+      return false;
+    }
+
+    // Nhả lock ngay khi lấy xong kích thước tệp, không chiếm giữ trong lúc gửi header HTTP
+    unlock();
+
+    // Thiết lập HTTP Header với Cache-Control để trình duyệt lưu cache 24h
+    server.sendHeader("Connection", "close");
+    server.sendHeader("Access-Control-Allow-Origin", "*");
+    if (enableCache) {
+      server.sendHeader("Cache-Control", "public, max-age=86400");
+    }
+    server.setContentLength(totalBytes);
+    server.send(200, contentType, "");
+
+    // Đọc và truyền theo từng chunk 4KB xen kẽ lock/unlock
+    const size_t CHUNK_SIZE = 4096;
+    uint8_t* chunk = (uint8_t*)malloc(CHUNK_SIZE);
+    if (!chunk) {
+      if (lock(pdMS_TO_TICKS(500))) {
+        f.close();
+        unlock();
+      }
+      return false;
+    }
+
+    size_t bytesSent = 0;
+    while (bytesSent < totalBytes && server.client().connected()) {
+      size_t toRead = (totalBytes - bytesSent < CHUNK_SIZE) ? (totalBytes - bytesSent) : CHUNK_SIZE;
+      size_t nRead = 0;
+
+      // Khóa SD trong thời gian cực ngắn (~2-3ms cho khối 4KB)
+      if (lock(pdMS_TO_TICKS(1000))) {
+        nRead = f.read(chunk, toRead);
+        unlock();
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(5));
+        continue;
+      }
+
+      if (nRead == 0) break;
+
+      // Gửi chunk qua WiFi Socket MÀ HOÀN TOÀN KHÔNG GIỮ MUTEX THẺ NHỚ
+      server.sendContent((const char*)chunk, nRead);
+      bytesSent += nRead;
+
+      // Nhường 1ms CPU cho AudioDriver trên Core 0 tiếp tục giải mã nhạc
+      vTaskDelay(pdMS_TO_TICKS(1));
+    }
+
+    free(chunk);
+
+    if (lock(pdMS_TO_TICKS(500))) {
+      f.close();
+      notifyIoSuccess();
+      unlock();
+    }
+
+    return (bytesSent == totalBytes);
+  }
 
   bool handleSerial(char cmd) {
     if (cmd == 'k' || cmd == 'K') {

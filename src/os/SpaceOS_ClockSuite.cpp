@@ -73,6 +73,9 @@ namespace SpaceOS_ClockSuite {
   int  getAlarmTuneIdx() { return s40AlarmTuneIdx; }
   void setAlarmTuneIdx(int idx) { s40AlarmTuneIdx = (idx % 4 + 4) % 4; }
 
+  int  getAlarmCursor() { return s40AlarmCursor; }
+  void setAlarmCursor(int c) { s40AlarmCursor = constrain(c, 0, 3); }
+
   bool isPushAlertActive() { return s40PushAlertActive; }
   bool isTimerRunning() { return s40TimerRunning; }
   uint32_t getTimerPresetSec() { return s40TimerPresetSec; }

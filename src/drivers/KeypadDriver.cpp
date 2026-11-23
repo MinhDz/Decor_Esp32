@@ -17,9 +17,9 @@ namespace KeypadDriver {
   };
 
   static const AdcButtonSpec BUTTON_SPECS[7] = {
-    { "OK (Giữa)",    "OK", "0 Ohm (GND)",  0.00f,    0,  175 }, // Chuẩn: < 0.15V (0 - 150mV)
-    { "UP (Lên)",     "UP", "1.0 kOhm",     0.30f,  180,  465 }, // Chuẩn: 0.20V - 0.45V (~0.30V)
-    { "DOWN (Xuống)", "DN", "2.2 kOhm",     0.60f,  470,  820 }, // Chuẩn: 0.50V - 0.75V (~0.60V)
+    { "OK (Giữa)",    "OK", "0 Ohm (GND)",  0.00f,    0,  260 }, // Chuẩn: < 0.26V (0 - 260mV, mở rộng vùng nhận)
+    { "UP (Lên)",     "UP", "1.0 kOhm",     0.30f,  265,  475 }, // Chuẩn: 0.26V - 0.47V (~0.30V)
+    { "DOWN (Xuống)", "DN", "2.2 kOhm",     0.60f,  480,  820 }, // Chuẩn: 0.50V - 0.75V (~0.60V)
     { "LEFT (Trái)",  "LF", "4.7 kOhm",     1.05f,  830, 1340 }, // Chuẩn: 0.90V - 1.20V (~1.05V)
     { "RIGHT (Phải)", "RT", "10 kOhm",      1.65f, 1350, 1940 }, // Chuẩn: 1.45V - 1.85V (~1.65V)
     { "MENU",         "MN", "20 kOhm",      2.18f, 1920, 2325 }, // Thực tế 3.27V: ~2.18V (1.92V - 2.32V)
@@ -33,6 +33,7 @@ namespace KeypadDriver {
   static int candidateBtnIndex = -1;
   static unsigned long candidateStartMs = 0;
   static bool buttonActionTriggered = false;
+  static bool s_keypadHardwareConnected = false; // Tự động phát hiện mạch phím ngoài có cắm hay không
 
   static String lastButtonStr = "NONE (3.30V)";
   static bool liveAdcSerialStream = true; // Mặc định in log khi ở màn hình 4 (DIO/ADC) hoặc khi bấm phím
@@ -124,23 +125,38 @@ namespace KeypadDriver {
       lastAdcRaw = raw;
       lastAdcMv  = mv;
 
-      int detected = classifyButtonFromMv(mv);
+      if (!s_keypadHardwareConnected) {
+        // Đang ở trạng thái tháo phím ngoài: Chỉ khi cắm bàn phím (trở 10k kéo áp lên > 2.5V) mới kích hoạt lại
+        if (mv >= 2500) {
+          s_keypadHardwareConnected = true;
+          candidateBtnIndex = -1;
+          activeBtnIndex = -1;
+          buttonActionTriggered = false;
+          Serial.printf("🎮 [KEYPAD] Đã cắm lại bàn phím ngoài (Áp: %.2fV) -> Kích hoạt lại cụm phím ADC IO3!\n", mv / 1000.0f);
+        }
+      } else {
+        // Bàn phím đang kết nối: Trở kéo 10kΩ lên 3.3V giữ mức nghỉ ở ~3.27V.
+        // Nút OK (0Ω) nối thẳng GND sẽ đo được 0.00V (raw=0, mv<=30). Cho phép người dùng
+        // nhấn giữ nút OK bao lâu tùy thích để đàm thoại Push-to-Talk mà không bị ngắt phím nhầm!
+        if (s_keypadHardwareConnected) {
+          int detected = classifyButtonFromMv(mv);
+          if (detected != candidateBtnIndex) {
+            candidateBtnIndex = detected;
+            candidateStartMs  = now;
+          } else if (now - candidateStartMs >= 25) { // 25ms debounce (3 chu kỳ)
+            if (activeBtnIndex != candidateBtnIndex) {
+              int prevBtn = activeBtnIndex;
+              activeBtnIndex = candidateBtnIndex;
 
-      if (detected != candidateBtnIndex) {
-        candidateBtnIndex = detected;
-        candidateStartMs  = now;
-      } else if (now - candidateStartMs >= 25) { // 25ms debounce (3 chu kỳ)
-        if (activeBtnIndex != candidateBtnIndex) {
-          int prevBtn = activeBtnIndex;
-          activeBtnIndex = candidateBtnIndex;
-
-          if (activeBtnIndex >= 0 && !buttonActionTriggered) {
-            buttonActionTriggered = true;
-            onButtonConfirmed(activeBtnIndex, mv, raw);
-          } else if (activeBtnIndex < 0 && prevBtn >= 0) {
-            buttonActionTriggered = false;
-            Serial.printf("⚪ [ADC KEYPAD GPIO %d] NHẢ NÚT -> Về mức nghỉ: %.2fV (%4d mV | ADC: %4d)\n",
-                          activeAdcPin, mv / 1000.0f, mv, raw);
+              if (activeBtnIndex >= 0 && !buttonActionTriggered) {
+                buttonActionTriggered = true;
+                onButtonConfirmed(activeBtnIndex, mv, raw);
+              } else if (activeBtnIndex < 0 && prevBtn >= 0) {
+                buttonActionTriggered = false;
+                Serial.printf("⚪ [ADC KEYPAD GPIO %d] NHẢ NÚT -> Về mức nghỉ: %.2fV (%4d mV | ADC: %4d)\n",
+                              activeAdcPin, mv / 1000.0f, mv, raw);
+              }
+            }
           }
         }
       }
@@ -184,10 +200,20 @@ namespace KeypadDriver {
 
     analogReadResolution(12);
     analogSetPinAttenuation(activeAdcPin, ADC_11db); // Đọc toàn dải 0.00V .. 3.30V
-    pinMode(activeAdcPin, INPUT); // Trở kéo lên 10kOhm phần cứng chuẩn xác
+    pinMode(activeAdcPin, INPUT_PULLUP); // Bật trở kéo lên nội bộ để chống trôi về 0V khi tháo bàn phím ngoài
     pinMode(PIN_TOUCH_TTP223, INPUT_PULLDOWN);
 
     readFilteredAdc(lastAdcRaw, lastAdcMv);
+    if (lastAdcMv >= 2000) {
+      s_keypadHardwareConnected = true;
+      Serial.printf("🎮 [KEYPAD] Đã nhận diện bàn phím ngoài (Áp nghỉ: %.2fV)\n", lastAdcMv / 1000.0f);
+    } else {
+      s_keypadHardwareConnected = false;
+      activeBtnIndex = -1;
+      candidateBtnIndex = -1;
+      buttonActionTriggered = false;
+      Serial.printf("ℹ️ [KEYPAD] Không phát hiện bàn phím ngoài (Áp: %.2fV) -> Tự động cô lập ADC IO3 (Dùng Web / Cảm ứng)!\n", lastAdcMv / 1000.0f);
+    }
     printAdcTableGuide();
 
     if (s_keypadQueue == nullptr) {
@@ -255,7 +281,7 @@ namespace KeypadDriver {
 
     // 3. Khi đang ở màn hình 4 (Kiểm tra DIO & ADC) hoặc khi đang nhấn giữ nút, in thông số ADC mỗi 300ms
     if (liveAdcSerialStream && (now - lastSerialPrintMs >= 300) &&
-        (TestDisplay::getScreenModeName() == "diag" || activeBtnIndex >= 0)) {
+        (TestDisplay::getScreenModeName() == "diag" || (s_keypadHardwareConnected && activeBtnIndex >= 0))) {
       lastSerialPrintMs = now;
       const char* btnName = (activeBtnIndex >= 0) ? BUTTON_SPECS[activeBtnIndex].name : "KHÔNG BẤM (Hở mạch)";
       const char* resName = (activeBtnIndex >= 0) ? BUTTON_SPECS[activeBtnIndex].resistorLabel : "∞ (Pull-up 10k)";

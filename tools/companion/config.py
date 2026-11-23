@@ -17,7 +17,7 @@ APP_TITLE = "Decor Space Station Companion"
 REG_RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
 
 DEFAULT_CONFIG = {
-    "esp32_ip": "192.168.1.233",
+    "esp32_ip": "192.168.1.82",
     "monitor_enabled": True,
     "monitor_interval": 1.2,
     "transcoder_enabled": True,
@@ -25,6 +25,13 @@ DEFAULT_CONFIG = {
     "transcoder_fps": 15,
     "transcoder_quality": 5,
     "transcoder_res": "240x240",
+    "ai_gateway_enabled": True,
+    "ai_gateway_port": 8765,
+    "ai_gateway_voice": "vi-VN-HoaiMyNeural",
+    "gemini_api_key": "",
+    "openai_api_key": "",
+    "openai_base_url": "https://api.deepseek.com",
+    "openai_model": "deepseek-reasoner",
     "autostart": True,
     "notify_on_startup": True
 }

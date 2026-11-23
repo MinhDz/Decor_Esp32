@@ -51,5 +51,7 @@ ai_lab/
 tools/companion/build/
 tools/companion/dist/
 *.spec
+*.log
+.gemini/
 
 

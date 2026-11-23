@@ -2,7 +2,7 @@
 #include <Arduino.h>
 
 // ====================================================================
-//          ĐỊNH NGHĨA SƠ ĐỒ CHÂN PHẦN CỨNG CHÍNH THỨC (ESP32-S3)
+//          ĐỊNH NGHĨA SƠ ĐỒ CHÂN PHẦN CỨNG (ESP32-S3)
 // ====================================================================
 
 // 1. Đèn RGB Onboard (WS2812 NeoPixel có sẵn trên kit)
@@ -50,9 +50,9 @@
 #define PIN_I2S_DIN         PIN_I2S_MIC_SD
 #define PIN_I2S_DOUT        PIN_I2S_SPK_DIN
 
-// 6. Màn hình ST7789 SPI 2.4" (240x320 - SPI Bus tốc độ cao 40MHz-80MHz)
-#define PIN_TFT_SCK         12  // SCL (SCK)  -> GPIO 12
-#define PIN_TFT_MOSI        11  // SDA (MOSI) -> GPIO 11
+// 6. Màn hình ST7789 SPI 2.4" (240x320 - SPI Bus tốc độ cao 40MHz)
+#define PIN_TFT_SCK         11  // SCL (SCK)  -> GPIO 11 (Khớp thực tế phần cứng đã hàn)
+#define PIN_TFT_MOSI        12  // SDA (MOSI) -> GPIO 12 (Khớp thực tế phần cứng đã hàn)
 #define PIN_TFT_RST         10  // RES (Reset)-> GPIO 10
 #define PIN_TFT_DC          13  // DC         -> GPIO 13
 #define PIN_TFT_CS          14  // CS         -> GPIO 14
@@ -62,10 +62,11 @@
 // Chân GPIO 45 (Chân I/O tự do trên Header J3) được phân bổ làm chân ngắt chạm cảm ứng (IRQ/INT) hoặc Touch CS
 // Giữ nguyên GPIO 47 cho Cặp LED Edison Trái (PIN_EDISON_TUBE_L)
 // - Chuẩn cảm ứng I2C (CST816S, FT6236, v.v.): I2C SDA -> GPIO 8, I2C SCL -> GPIO 9, IRQ/INT -> GPIO 45
-// - Chuẩn cảm ứng SPI (XPT2046, v.v.): SCK -> GPIO 12, MOSI -> GPIO 11, MISO -> GPIO 41, Touch IRQ/CS -> GPIO 45
+// - Chuẩn cảm ứng SPI (XPT2046, v.v.): SCK -> GPIO 11, MOSI -> GPIO 12, MISO -> GPIO 41, Touch IRQ/CS -> GPIO 45
 #define PIN_TOUCH_SCREEN_INT    45  // Chân ngắt cảm ứng (IRQ / INT) cho màn hình 2.4" -> GPIO 45
 #define PIN_TOUCH_SCREEN_IRQ    PIN_TOUCH_SCREEN_INT
 #define PIN_TOUCH_SCREEN_CS     PIN_TOUCH_SCREEN_INT
+#define PIN_TOUCH_SCREEN_MISO   19  // Chân MISO (T_DO) cảm ứng XPT2046 -> GPIO 19 (Header J1 chân 13, hoàn toàn tự do)
 
 // 7. Module Shield Thẻ nhớ Micro SD (Wemos D1 Mini Shield: D5=CLK, D6=MISO, D7=MOSI, D8=CS)
 #define PIN_SD_SCK          42  // D5 (SD_SCK / CLK)  -> GPIO 42

@@ -1,5 +1,6 @@
 #define REAL_DISPLAY_DRIVER_CPP 1
 #include "os/SpaceOS_WindowManager.h"
+#include "drivers/TouchDriver.h"
 #include "tests/TestSensors.h"
 #include "tests/TestAudio.h"
 #include "tests/TestButtons.h"
@@ -124,6 +125,8 @@ namespace TestDisplay {
   static String s40AiBindStatus = "Dang dong bo voi XiaoZhi Cloud...";
   static unsigned long s40AiLastOtpPollMs = 0;
   static uint32_t s40AiTurnId = 1;
+  static bool s_aiTouchHolding = false;
+  static unsigned long s_aiTouchDownMs = 0;
 
   static String s40ToastMsg = "";
   static unsigned long s40ToastExpireMs = 0;
@@ -4013,36 +4016,51 @@ namespace TestDisplay {
       XiaoZhiClient::unbindDevice();
     }
 
-    if (WiFi.status() == WL_CONNECTED) {
-      s40AiBindStatus = "Dang dong bo voi XiaoZhi Hub...";
-      s40AiOtpCode = "...";
-      drawXiaoZhiBindingScreen();
-      XiaoZhiClient::queryOTA(true);
+    // 1. Chế độ PC Local AI Gateway (kết nối trực tiếp PC Companion qua LAN):
+    //    Không cần xác thực OTP qua Cloud XiaoZhi, sẵn sàng trò chuyện ngay lập tức!
+    if (XiaoZhiClient::isPcGatewayMode()) {
+      s40AiState = AI_STATE_IDLE;
+      eyeState = 0;
+      s40AiEmotionTag = "IDLE";
+      s40AiReplyText = "Xin chao! Tro ly AI da san sang.\nNhan giu man hinh hoac bam [OK] de noi.";
+      s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+      s40AiScrollLine = 0;
+      drawXiaoZhiAssistantScreen(true);
+      return;
     }
 
+    // 2. Chế độ XiaoZhi Cloud AI: Nếu đã liên kết, vào thẳng màn hình sẵn sàng
     if (!forceBinding && XiaoZhiClient::isDeviceBound()) {
       s40AiState = AI_STATE_IDLE;
       eyeState = 0;
       s40AiEmotionTag = "IDLE";
       s40AiReplyText = "Xin chao! Toi la Tro ly XiaoZhi AI.\nBam [OK] de bat dau tro chuyen.";
+      s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+      s40AiScrollLine = 0;
       drawXiaoZhiAssistantScreen(true);
-    } else {
-      s40AiState = AI_STATE_BINDING;
-      if (WiFi.status() != WL_CONNECTED) {
-        s40AiBindStatus = "Chua co Wi-Fi! Hay ket noi Wi-Fi truoc.";
-        s40AiOtpCode = "NO WIFI";
-      } else {
-        String authCode = XiaoZhiClient::getLastAuthCode();
-        if (authCode.length() > 0) {
-          s40AiOtpCode = authCode;
-          s40AiBindStatus = "Da co ma OTP! Vui long nhap tren Hub.";
-        } else {
-          s40AiOtpCode = "CHO OTP";
-          s40AiBindStatus = "Dang cho phan hoi tu may chu XiaoZhi...";
-        }
-      }
-      drawXiaoZhiBindingScreen();
+      return;
     }
+
+    // 3. Nếu chưa liên kết XiaoZhi Cloud: hiển thị mã OTP để ghép nối
+    s40AiState = AI_STATE_BINDING;
+    if (WiFi.status() == WL_CONNECTED) {
+      s40AiBindStatus = "Dang dong bo voi XiaoZhi Hub...";
+      s40AiOtpCode = "...";
+      drawXiaoZhiBindingScreen();
+      XiaoZhiClient::queryOTA(true);
+      String authCode = XiaoZhiClient::getLastAuthCode();
+      if (authCode.length() > 0) {
+        s40AiOtpCode = authCode;
+        s40AiBindStatus = "Da co ma OTP! Vui long nhap tren Hub.";
+      } else {
+        s40AiOtpCode = "CHO OTP";
+        s40AiBindStatus = "Dang cho phan hoi tu may chu XiaoZhi...";
+      }
+    } else {
+      s40AiBindStatus = "Chua co Wi-Fi! Hay ket noi Wi-Fi truoc.";
+      s40AiOtpCode = "NO WIFI";
+    }
+    drawXiaoZhiBindingScreen();
   }
 
   static void drawXiaoZhiAssistantScreen(bool fullRedraw) {
@@ -4108,11 +4126,13 @@ namespace TestDisplay {
       Serial.println("💡 [MẸO] Bấm phím TRÁI trên kit để mở TRÌNH PHÁT NHẠC (Mode 12) nghe lại bản thu qua Loa PWM GPIO 15!");
     }
 
-    // 1. Kiểm tra nếu cường độ âm thanh quá nhỏ (chưa nói gì vào Mic)
-    if (maxVu < 4 || sampleCount < 2000) {
+    Serial.printf("🎙️ [VOICE REC] Dừng thu: %d mẫu (%.2fs) | VU Đỉnh: %d%%\n", (int)sampleCount, recSec, maxVu);
+
+    // 1. Kiểm tra nếu thời lượng quá ngắn (< 300ms = 4800 mẫu) hoặc hoàn toàn không có dữ liệu
+    if (sampleCount < 4800) {
       s40AiEmotionTag = "CONFUSED";
       eyeState = 8;
-      s40AiReplyText = "XiaoZhi chua nghe ro cau noi.\nBan hay bam [OK] va noi lai nhe!";
+      s40AiReplyText = "XiaoZhi chua nghe ro cau noi.\nBan hay giu man hinh hoac bam [OK] va noi lai nhe!";
       s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
       s40AiScrollLine = 0;
       s40AiAutoScroll = true;
@@ -4147,9 +4167,13 @@ namespace TestDisplay {
     s40AiEmotionTag = "CONFUSED";
     eyeState = 8;
     if (XiaoZhiClient::isWebSocketConnected()) {
-      s40AiReplyText = "XiaoZhi dang ban xu ly, ban thu lai nhe!";
+      s40AiReplyText = "AI dang ban xu ly, ban thu lai nhe!";
     } else {
-      s40AiReplyText = "Chua the ket noi toi XiaoZhi Hub.\nVui long kiem tra lai ket noi Wi-Fi!";
+      if (XiaoZhiClient::isPcGatewayMode()) {
+        s40AiReplyText = "Chua ket noi toi PC AI Gateway.\nHay bat start_gateway.bat tren PC nhe!";
+      } else {
+        s40AiReplyText = "Chua the ket noi toi XiaoZhi Hub.\nVui long kiem tra lai ket noi Wi-Fi!";
+      }
     }
     s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
     s40AiScrollLine = 0;
@@ -5473,25 +5497,9 @@ namespace TestDisplay {
   static void sampleWavAudioFromSdIfApplicable() {
     if (!s40MediaPlaying || s40MediaTrackCount <= 0) return;
 
-    // Nếu đang phát bất đồng bộ từ RAM hoặc SD trên Core 0, không truy cập SD từ Core 1 để tránh xung đột SPI bus!
+    // Nếu đang phát bất đồng bộ từ RAM hoặc SD trên Core 0, phổ âm thanh đã được AudioDriver tự động
+    // tính toán và cập nhật qua TestAudio::setExternalAudioSpectrum. Tuyệt đối không đọc lại SD từ Core 1!
     if (TestAudio::isVoicePlaybackAsyncRunning()) {
-      if (TestAudio::getRecordedSampleCount() > 0) {
-        uint32_t cur = TestAudio::getVoicePlaybackCurrentSample();
-        const int16_t* pcmBuf = TestAudio::getRecordedPcmBuffer();
-        size_t total = TestAudio::getRecordedSampleCount();
-        if (pcmBuf && total > 32) {
-          uint8_t wavBands[16] = {0};
-          int maxLv = 0;
-          for (int b = 0; b < 16; b++) {
-            size_t idx = (cur + b * 4) % total;
-            int s = abs((int)pcmBuf[idx]);
-            int val = (s / 280);
-            wavBands[b] = (uint8_t)constrain(val, 4, 98);
-            if (wavBands[b] > maxLv) maxLv = wavBands[b];
-          }
-          TestAudio::setExternalAudioSpectrum(wavBands, maxLv);
-        }
-      }
       return;
     }
 
@@ -5975,7 +5983,7 @@ namespace TestDisplay {
       }
     }
 
-    tft->drawRGBBitmap(vx, vy, mediaVisCanvas->getBuffer(), vw, vh);
+    DisplayDriver::fastBlockTransfer(vx, vy, mediaVisCanvas->getBuffer(), vw, vh);
   }
 
   // Vẽ riêng thanh Slidebar tiến trình & Thời gian (cập nhật mỗi giây không nháy toàn màn hình)
@@ -8083,8 +8091,20 @@ namespace TestDisplay {
         }
       }
     } else if (currentMode == 1 || currentMode == 11) {
+      if (XiaoZhiClient::isPcGatewayMode() && (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING)) {
+        s40AiState = AI_STATE_IDLE;
+        s40AiReplyText = "Xin chao! Tro ly AI da san sang.\nNhan giu man hinh hoac bam [OK] de noi.";
+        s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+        drawXiaoZhiAssistantScreen(true);
+      }
+
       if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
-        if (keyIndex == 0) { // OK: Kiểm tra lại liên kết với XiaoZhi Hub
+        if (keyIndex == 0) { // OK: Bắt đầu trò chuyện nếu đã là PC Gateway / Đã liên kết, hoặc kiểm tra liên kết XiaoZhi Hub
+          if (XiaoZhiClient::isPcGatewayMode() || XiaoZhiClient::isDeviceBound()) {
+            s40AiState = AI_STATE_IDLE;
+            startXiaoZhiListening();
+            return;
+          }
           TestAudio::playKeyBeep();
           if (WiFi.status() != WL_CONNECTED) {
             s40AiBindStatus = "Chua co Wi-Fi! Hay ket noi Wi-Fi truoc.";
@@ -8122,7 +8142,7 @@ namespace TestDisplay {
         if (s40AiState == AI_STATE_IDLE || s40AiState == AI_STATE_REPLYING) {
           startXiaoZhiListening();
         } else if (s40AiState == AI_STATE_LISTENING) {
-          if (millis() - s40AiStateChangeMs >= 600) {
+          if (millis() - s40AiStateChangeMs >= 700) {
             triggerXiaoZhiThinkingAndReply();
           }
         }
@@ -9019,6 +9039,783 @@ namespace TestDisplay {
     runSpaceStationBootAnimation(playChime);
   }
 
+  // ============================================================================
+  // XỬ LÝ SỰ KIỆN CHẠM MÀN HÌNH CẢM ỨNG XPT2046 (SPACE OS TOUCH INTERACTION)
+  // ============================================================================
+  static void handleTouchInput(TouchDriver::TouchEventType evt, const TouchDriver::TouchPoint& pt) {
+    PowerManagementService::notifyUserActivity();
+    lastUserActivityMs = millis();
+
+    static bool s_wokeUpFromTouch = false;
+    static unsigned long s_lastTouchWakeupMs = 0;
+
+    // 1. Đánh thức màn hình khi chạm vào lúc đang ngủ / AOD
+    if (isScreenSleeping) {
+      if (evt == TouchDriver::TOUCH_DOWN || evt == TouchDriver::TOUCH_CLICK ||
+          evt == TouchDriver::TOUCH_SWIPE_UP || evt == TouchDriver::TOUCH_SWIPE_DOWN ||
+          evt == TouchDriver::TOUCH_LONG_PRESS) {
+        isScreenSleeping = false;
+        s_wokeUpFromTouch = true;
+        s_lastTouchWakeupMs = millis();
+        setBacklightBrightness(screenBrightnessPct);
+        Serial.println("👆 [TOUCH] Chạm màn hình ST7789 đánh thức từ AOD / Sleep!");
+        refreshActiveScreen();
+      }
+      return;
+    }
+
+    // Nếu màn hình vừa được đánh thức bởi thao tác chạm này:
+    // Tiêu thụ (discard) TOÀN BỘ các sự kiện tiếp theo của thao tác chạm đó
+    // cho đến khi người dùng nhấc tay ra hoàn toàn (TOUCH_UP / TOUCH_CLICK / TOUCH_LONG_PRESS / !isTouched)!
+    if (s_wokeUpFromTouch) {
+      if (evt == TouchDriver::TOUCH_UP || evt == TouchDriver::TOUCH_CLICK ||
+          evt == TouchDriver::TOUCH_LONG_PRESS || !TouchDriver::isTouched()) {
+        s_wokeUpFromTouch = false;
+      }
+      return;
+    }
+
+    // Chặn toàn bộ sự kiện chạm trong vòng 350ms sau khi vừa đánh thức từ AOD/Sleep!
+    // Tránh việc nhấc ngón tay phát sinh TOUCH_CLICK chạm nhầm vào nút/icon trên giao diện
+    if (millis() - s_lastTouchWakeupMs < 350) {
+      return;
+    }
+
+    if (currentMode == 0 && evt == TouchDriver::TOUCH_LONG_PRESS) {
+      enterXiaoZhiAssistantMode(false);
+      s_aiTouchHolding = true;
+      s_aiTouchDownMs = millis();
+      TestAudio::playClickBeep();
+      startXiaoZhiListening();
+      return;
+    }
+
+    // ========================================================================
+    // A0. XỬ LÝ ĐẶC THÙ CHO TRỢ LÝ AI XIAOZHI (MODE 11 / MODE 1):
+    // HỖ TRỢ SONG SONG 2 PHƯƠNG THỨC:
+    // 1. PUSH-TO-TALK: Chạm giữ ngón tay trên màn hình để nói, nhấc tay ra là dừng thu và gửi đi ngay!
+    // 2. TAP-TO-TALK: Chạm nhanh 1 lần (hoặc bấm OK), hệ thống lắng nghe và tự ngắt thông minh khi dứt câu!
+    // ========================================================================
+    if (currentMode == 11 || currentMode == 1) {
+      if (evt == TouchDriver::TOUCH_DOWN) {
+        // Nếu chạm nút [Thoát] / [Hủy] ở góc dưới bên phải (y >= 285, x >= 180):
+        if (pt.y >= 285 && pt.x >= 180) {
+          if (s40AiState == AI_STATE_LISTENING) {
+            TestAudio::stopVoiceRecording();
+            s40AiState = AI_STATE_IDLE;
+            drawXiaoZhiAssistantScreen(true);
+            return;
+          }
+          currentMode = 4;
+          refreshActiveScreen();
+          return;
+        }
+
+        // Bất kỳ vị trí chạm nào khác trên màn hình:
+        s_aiTouchHolding = true;
+        s_aiTouchDownMs = millis();
+        if (s40AiState != AI_STATE_LISTENING && s40AiState != AI_STATE_THINKING) {
+          if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
+            s40AiState = AI_STATE_IDLE;
+          }
+          TestAudio::playClickBeep();
+          startXiaoZhiListening();
+        }
+        return;
+      } else if (evt == TouchDriver::TOUCH_UP || evt == TouchDriver::TOUCH_CLICK || evt == TouchDriver::TOUCH_LONG_PRESS) {
+        // Nút [Thoát / Hủy] góc dưới phải
+        if (pt.y >= 285 && pt.x >= 180) {
+          if (s40AiState == AI_STATE_LISTENING) {
+            TestAudio::stopVoiceRecording();
+            s40AiState = AI_STATE_IDLE;
+            drawXiaoZhiAssistantScreen(true);
+          } else {
+            currentMode = 4;
+            refreshActiveScreen();
+          }
+          return;
+        }
+
+        // Nút [Gui(OK)] ở góc dưới trái (y >= 285, x < 80) khi đang thu âm
+        if (s40AiState == AI_STATE_LISTENING && pt.y >= 285 && pt.x < 80) {
+          s_aiTouchHolding = false;
+          if (millis() - s40AiStateChangeMs >= 600) {
+            TestAudio::playClickBeep();
+            triggerXiaoZhiThinkingAndReply();
+            return;
+          }
+          return;
+        }
+
+        // Push-to-Talk vs Tap-to-Talk:
+        if (s_aiTouchHolding) {
+          s_aiTouchHolding = false;
+          unsigned long holdMs = millis() - s_aiTouchDownMs;
+          if (s40AiState == AI_STATE_LISTENING) {
+            if (holdMs >= 500) {
+              // Push-to-Talk: Đã giữ ngón tay >= 500ms -> Nhấc tay ra là dừng thu và gửi ngay!
+              Serial.printf("🎙️ [PUSH-TO-TALK] Nhấc tay sau %lums -> Dừng thu và gửi câu hỏi lên AI!\n", holdMs);
+              TestAudio::playClickBeep();
+              triggerXiaoZhiThinkingAndReply();
+              return;
+            } else {
+              // Tap-to-Talk: Chạm nhanh < 500ms -> Tiếp tục nghe, Smart VAD sẽ tự ngắt khi dứt câu!
+              Serial.println("👆 [TAP-TO-TALK] Chạm nhanh -> Tiếp tục lắng nghe, Smart VAD sẽ tự ngắt khi im lặng!");
+              return;
+            }
+          }
+        } else if (evt == TouchDriver::TOUCH_CLICK) {
+          // Phòng ngừa trường hợp TOUCH_DOWN bị trôi, chỉ bắt được TOUCH_CLICK:
+          if (s40AiState != AI_STATE_LISTENING && s40AiState != AI_STATE_THINKING) {
+            TestAudio::playClickBeep();
+            startXiaoZhiListening();
+            return;
+          }
+        }
+        return; // Tuyệt đối không để rơi xuống thanh điều hướng chung S40 ở dưới
+      }
+    }
+
+    // ========================================================================
+    // A. XỬ LÝ CỬ CHỈ VUỐT (SWIPE GESTURES: LƯỚT CUỘN & ĐIỀU HƯỚNG NHANH)
+    // ========================================================================
+    if (evt == TouchDriver::TOUCH_SWIPE_UP) {
+      if (currentMode != 15 || s40GameActiveId == 0) TestAudio::playClickBeep();
+      if (currentMode == 0) {
+        // Màn chờ: Vuốt LÊN -> Mở Menu S40 (tương tự vuốt mở App Drawer trên Android/iPhone)
+        currentMode = 4;
+        refreshActiveScreen();
+        return;
+      } else if (currentMode == 4) {
+        // Menu S40: Vuốt LÊN -> Cuộn xuống hàng tiếp theo (hàng 4: Mã QR, Kết nối, Hệ thống)
+        if (s40MenuScrollRow == 0) {
+          s40MenuScrollRow = 1;
+          if (s40MenuCursor < 4) s40MenuCursor += 4;
+          drawSymbianMenuScreen(true);
+        } else {
+          onKeypadEvent(2); // Phím DOWN
+        }
+        return;
+      } else if (currentMode == 15) {
+        // Game Center (Chế độ 15)
+        if (s40GameActiveId == 1) {
+          onKeypadEvent(1); // Rắn săn mồi Snake: Đi lên
+        } else if (s40GameActiveId == 2) {
+          handleGameCenterKey(0); // Flappy Bird: Vỗ cánh bay lên
+        } else if (s40GameActiveId == 3) {
+          onKeypadEvent(1); // Xếp gạch Tetris: Xoay khối gạch 90 độ
+        } else if (s40GameActiveId == 0) {
+          onKeypadEvent(1); // Sảnh Hub: Chọn game trước
+        }
+        return;
+      } else if (currentMode == 12) {
+        if (s40MediaSubState == 2) {
+          // Danh sách bài hát: cuộn xuống 3 bài
+          s40MediaListCursor = min(s40MediaTrackCount - 1, s40MediaListCursor + 3);
+          drawMediaPlayerAppScreen(false);
+        } else if (s40MediaSubState == 0) {
+          // Trình phát nhạc: Vuốt LÊN -> Tăng âm lượng
+          int curVol = TestAudio::getMusicVolumePct();
+          TestAudio::setMusicVolumePct(min(100, curVol + 10));
+          drawMediaPlayerAppScreen(false);
+          showSymbianToast(String("🔊 ÂM LƯỢNG: ") + String(TestAudio::getMusicVolumePct()) + "%");
+        }
+        return;
+      } else {
+        // Các màn hình danh sách khác (Cài đặt Mode 6, Hình nền Mode 5, v.v.): cuộn xuống
+        onKeypadEvent(2);
+        return;
+      }
+    } else if (evt == TouchDriver::TOUCH_SWIPE_DOWN) {
+      if (currentMode != 15 || s40GameActiveId == 0) TestAudio::playClickBeep();
+      if (currentMode == 0) {
+        // Màn chờ: Vuốt XUỐNG -> Đổi hiệu ứng đèn COB
+        CobLeds::nextMode();
+        showSymbianToast("✨ COB LED: ĐỔI HIỆU ỨNG");
+        return;
+      } else if (currentMode == 4) {
+        // Menu S40: Vuốt XUỐNG -> Cuộn lên hàng trước (hàng 1: Hình nền, Cài đặt, PC, Trợ lý)
+        if (s40MenuScrollRow > 0) {
+          s40MenuScrollRow = 0;
+          if (s40MenuCursor >= 12) s40MenuCursor -= 4;
+          drawSymbianMenuScreen(true);
+        } else {
+          onKeypadEvent(1); // Phím UP
+        }
+        return;
+      } else if (currentMode == 15) {
+        // Game Center (Chế độ 15)
+        if (s40GameActiveId == 1) {
+          onKeypadEvent(2); // Rắn săn mồi Snake: Đi xuống
+        } else if (s40GameActiveId == 3) {
+          onKeypadEvent(2); // Xếp gạch Tetris: Thả rơi nhanh xuống
+        } else if (s40GameActiveId == 0) {
+          onKeypadEvent(2); // Sảnh Hub: Chọn game sau
+        }
+        return;
+      } else if (currentMode == 12) {
+        if (s40MediaSubState == 2) {
+          // Danh sách bài hát: cuộn lên 3 bài
+          s40MediaListCursor = max(0, s40MediaListCursor - 3);
+          drawMediaPlayerAppScreen(false);
+        } else if (s40MediaSubState == 0) {
+          // Trình phát nhạc: Vuốt XUỐNG -> Giảm âm lượng
+          int curVol = TestAudio::getMusicVolumePct();
+          TestAudio::setMusicVolumePct(max(0, curVol - 10));
+          drawMediaPlayerAppScreen(false);
+          showSymbianToast(String("🔉 ÂM LƯỢNG: ") + String(TestAudio::getMusicVolumePct()) + "%");
+        }
+        return;
+      } else {
+        onKeypadEvent(1);
+        return;
+      }
+    } else if (evt == TouchDriver::TOUCH_SWIPE_LEFT) {
+      if (currentMode != 15 || s40GameActiveId == 0) TestAudio::playClickBeep();
+      if (currentMode == 0) {
+        // Màn chờ: Vuốt TRÁI -> Đổi kiểu đồng hồ kế tiếp
+        const char* clkStyles[4] = { "digital", "retro-flip", "analog", "compact" };
+        int curS = 0;
+        for (int i = 0; i < 4; i++) {
+          if (stCfg.clockStyle == clkStyles[i]) { curS = i; break; }
+        }
+        curS = (curS + 1) % 4;
+        stCfg.clockStyle = clkStyles[curS];
+        saveConfigToFile();
+        showSymbianToast(String("ĐỒNG HỒ: ") + stCfg.clockStyle);
+        refreshActiveScreen();
+        return;
+      } else if (currentMode == 15) {
+        // Game Center (Chế độ 15)
+        if (s40GameActiveId == 1) {
+          onKeypadEvent(3); // Rắn săn mồi Snake: Sang trái
+        } else if (s40GameActiveId == 3) {
+          onKeypadEvent(3); // Xếp gạch Tetris: Di chuyển sang trái
+        } else if (s40GameActiveId == 0) {
+          onKeypadEvent(1); // Sảnh Hub: Chọn game trước
+        }
+        return;
+      } else if (currentMode == 12 && s40MediaSubState == 0) {
+        // Media Player: Vuốt TRÁI -> Qua bài tiếp theo (NEXT)
+        onKeypadEvent(4);
+        return;
+      } else if (currentMode == 4) {
+        onKeypadEvent(4);
+        return;
+      } else if (currentMode == 6 || currentMode == 5) {
+        // Cài đặt / Tùy chỉnh: Vuốt TRÁI -> Giảm giá trị (độ sáng, âm lượng, chọn lùi)
+        onKeypadEvent(3);
+        return;
+      }
+    } else if (evt == TouchDriver::TOUCH_SWIPE_RIGHT) {
+      if (currentMode != 15 || s40GameActiveId == 0) TestAudio::playClickBeep();
+      if (currentMode == 0) {
+        // Màn chờ: Vuốt PHẢI -> Đổi kiểu đồng hồ lùi lại
+        const char* clkStyles[4] = { "digital", "retro-flip", "analog", "compact" };
+        int curS = 0;
+        for (int i = 0; i < 4; i++) {
+          if (stCfg.clockStyle == clkStyles[i]) { curS = i; break; }
+        }
+        curS = (curS + 3) % 4;
+        stCfg.clockStyle = clkStyles[curS];
+        saveConfigToFile();
+        showSymbianToast(String("ĐỒNG HỒ: ") + stCfg.clockStyle);
+        refreshActiveScreen();
+        return;
+      } else if (currentMode == 15) {
+        // Game Center (Chế độ 15)
+        if (s40GameActiveId == 1) {
+          onKeypadEvent(4); // Rắn săn mồi Snake: Sang phải
+        } else if (s40GameActiveId == 3) {
+          onKeypadEvent(4); // Xếp gạch Tetris: Di chuyển sang phải
+        } else if (s40GameActiveId == 0) {
+          onKeypadEvent(2); // Sảnh Hub: Chọn game sau
+        }
+        return;
+      } else if (currentMode == 12 && s40MediaSubState == 0) {
+        // Media Player: Vuốt PHẢI -> Lùi bài trước (PREV)
+        onKeypadEvent(3);
+        return;
+      } else if (currentMode == 4) {
+        onKeypadEvent(3);
+        return;
+      } else if (currentMode == 6 || currentMode == 5) {
+        // Cài đặt / Tùy chỉnh: Vuốt PHẢI -> Tăng giá trị (độ sáng, âm lượng, chọn tiến)
+        onKeypadEvent(4);
+        return;
+      }
+    }
+
+    // ========================================================================
+    // B. XỬ LÝ CHẠM ĐƠN (TOUCH CLICK & LONG PRESS: TAP VÀO NÚT & CÁC VÙNG GIAO DIỆN)
+    // ========================================================================
+    if (evt == TouchDriver::TOUCH_CLICK || evt == TouchDriver::TOUCH_LONG_PRESS) {
+      if (currentMode != 15 || s40GameActiveId == 0) {
+        TestAudio::playClickBeep();
+      }
+
+      // ----------------------------------------------------------------------
+      // 1. THANH ĐIỀU HƯỚNG ĐÁY MÀN HÌNH (CHUẨN 3 PHÍM ANDROID: TÁC VỤ - HOME - BACK)
+      // ----------------------------------------------------------------------
+      if (pt.y >= 285) {
+        if (currentMode == 11 || currentMode == 1) {
+          if (pt.x < 80) {
+            // Nút TRÁI: Nói tiếp (OK)
+            onKeypadEvent(0);
+          } else if (pt.x >= 80 && pt.x < 160) {
+            // Nút GIỮA: Điều chỉnh âm lượng thoại AI nhanh
+            int curVol = TestAudio::getXiaoZhiVolumePct();
+            int newVol = (curVol >= 100) ? 30 : (curVol + 25);
+            TestAudio::setXiaoZhiVolumePct(newVol);
+            showSymbianToast(String("🔊 ÂM LƯỢNG AI: ") + String(newVol) + "%");
+            drawXiaoZhiAssistantStatusStrip();
+          } else {
+            // Nút PHẢI: Thoát về Menu S40
+            if (s40AiState == AI_STATE_LISTENING) {
+              TestAudio::stopVoiceRecording();
+            }
+            currentMode = 4;
+            refreshActiveScreen();
+          }
+          return;
+        }
+
+        if (pt.x < 80) {
+          // --- [NÚT TRÁI: TÁC VỤ / TÙY CHỌN / CHỌN (OPTION / ACTION)] ---
+          if (currentMode == 0) {
+            currentMode = 4; // Mở Menu S40
+            refreshActiveScreen();
+          } else if (currentMode == 4) {
+            onKeypadEvent(0); // Mở icon đang chọn
+          } else if (currentMode == 12) {
+            onKeypadEvent(5); // Menu tùy chọn bài hát / hiệu ứng
+          } else {
+            onKeypadEvent(0); // Phím chức năng trái / Chọn / OK
+          }
+          return;
+        } else if (pt.x >= 80 && pt.x < 160) {
+          // --- [NÚT GIỮA: PHÍM HOME KINH ĐIỂN] ---
+          // Bất kể đang ở màn hình nào: 1 chạm là bay thẳng về Màn hình Chờ chính!
+          if (currentMode != 0) {
+            currentMode = 0;
+            showSymbianToast("🏠 MÀN HÌNH CHỜ (HOME)");
+            refreshActiveScreen();
+          } else {
+            currentMode = 4; // Nếu đang ở màn chờ -> Mở Menu S40
+            refreshActiveScreen();
+          }
+          return;
+        } else {
+          // --- [NÚT PHẢI: PHÍM QUAY LẠI / THOÁT (BACK / EXIT)] ---
+          if (currentMode > 4) {
+            // Đang ở trong ứng dụng con -> Trở về Menu S40
+            currentMode = 4;
+            refreshActiveScreen();
+          } else if (currentMode == 4) {
+            // Đang ở Menu S40 -> Trở về Màn hình Chờ
+            currentMode = 0;
+            refreshActiveScreen();
+          } else if (currentMode == 0) {
+            // Đang ở Màn hình Chờ: Phím Back không khóa AOD (tránh vô tình chạm nhầm gây tắt màn hình)
+            showSymbianToast("🏠 MÀN HÌNH CHỜ (HOME)");
+            return;
+          } else {
+            onKeypadEvent(6); // Thoát / Exit
+          }
+          return;
+        }
+      }
+
+      // ----------------------------------------------------------------------
+      // 2. MÀN HÌNH CHỜ (STANDBY - MODE 0)
+      // ----------------------------------------------------------------------
+      if (currentMode == 0) {
+        // Vùng Đồng hồ trung tâm (y: 60..185) -> Đổi kiểu đồng hồ
+        if (pt.y >= 60 && pt.y <= 185) {
+          const char* clkStyles[4] = { "digital", "retro-flip", "analog", "compact" };
+          int curS = 0;
+          for (int i = 0; i < 4; i++) {
+            if (stCfg.clockStyle == clkStyles[i]) { curS = i; break; }
+          }
+          curS = (curS + 1) % 4;
+          stCfg.clockStyle = clkStyles[curS];
+          saveConfigToFile();
+          showSymbianToast(String("ĐỒNG HỒ: ") + stCfg.clockStyle);
+          refreshActiveScreen();
+          return;
+        }
+        // Vùng viên thuốc thời tiết (y: 195..255) -> Làm mới thời tiết
+        if (pt.y >= 195 && pt.y <= 255) {
+          WeatherManager::refreshNow();
+          showSymbianToast("ĐANG LÀM MỚI THỜI TIẾT...");
+          return;
+        }
+        // Vùng viên pin / thông số trạm (y: 256..284) -> Mở thông tin trạm
+        if (pt.y >= 256 && pt.y < 285) {
+          currentMode = 8;
+          refreshActiveScreen();
+          return;
+        }
+        // Vùng đỉnh màn hình (y < 50): Chạm góc để vào cài đặt
+        if (pt.y < 50) {
+          currentMode = 6; // Cài đặt
+          refreshActiveScreen();
+          return;
+        }
+        // Chạm vùng khác -> Mở Menu S40
+        currentMode = 4;
+        refreshActiveScreen();
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 3. MÀN HÌNH MENU CHÍNH S40 (MODE 4)
+      // ----------------------------------------------------------------------
+      if (currentMode == 4) {
+        // Chạm vào thanh cuộn Scrollbar bên phải (x >= 230, y: 50..284)
+        if (pt.x >= 230) {
+          if (pt.y < 165) onKeypadEvent(1); // Nửa trên: Cuộn lên
+          else            onKeypadEvent(2); // Nửa dưới: Cuộn xuống
+          return;
+        }
+
+        // Lưới biểu tượng 4x3: Bao phủ toàn bộ vùng y: 50..284
+        if (pt.y >= 50 && pt.y < 285 && pt.x < 230) {
+          int col = pt.x / 57; // 4 cột: 0..56, 57..113, 114..170, 171..229
+          int visRow = (pt.y - 50) / 78; // 3 hàng: 50..127, 128..205, 206..284
+          if (col >= 0 && col < 4 && visRow >= 0 && visRow < 3) {
+            int clickedIdx = (s40MenuScrollRow + visRow) * 4 + col;
+            if (clickedIdx >= 0 && clickedIdx < S40_MENU_COUNT) {
+              s40MenuCursor = clickedIdx;
+              drawSymbianMenuScreen(false);
+              onKeypadEvent(0); // 1 Chạm là vào ngay ứng dụng!
+              return;
+            }
+          }
+        }
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 4. MÀN HÌNH TRÌNH PHÁT NHẠC MEDIA PLAYER (MODE 12)
+      // ----------------------------------------------------------------------
+      if (currentMode == 12) {
+        // A. Nếu đang mở Popup Tùy chọn (s40MediaSubState == 1)
+        if (s40MediaSubState == 1) {
+          for (int i = 0; i < 5; i++) {
+            int ry = 66 + i * 40;
+            if (pt.y >= ry && pt.y < ry + 36) {
+              s40MediaPopupCursor = i;
+              onKeypadEvent(0); // Thực thi tùy chọn đó ngay
+              return;
+            }
+          }
+          return;
+        }
+
+        // B. Nếu đang mở Danh sách bài hát (s40MediaSubState == 2)
+        if (s40MediaSubState == 2) {
+          if (pt.y >= 32 && pt.y < 280) {
+            int row = (pt.y - 32) / 41;
+            int startIdx = max(0, min(s40MediaListCursor - 2, max(0, s40MediaTrackCount - 6)));
+            int chosen = startIdx + row;
+            if (chosen >= 0 && chosen < s40MediaTrackCount) {
+              s40MediaListCursor = chosen;
+              s40MediaTrackIdx = chosen;
+              s40MediaPlaying = true;
+              startMediaAudioPlayback();
+              drawMediaPlayerAppScreen(false);
+              return;
+            }
+          }
+          return;
+        }
+
+        // C. Màn hình phát nhạc chính (s40MediaSubState == 0)
+        // 1. Thanh 5 nút điều khiển cảm ứng (Bottom Transport Dock: y = 220..282)
+        if (pt.y >= 220 && pt.y < 282) {
+          if (pt.x >= 12 && pt.x < 56) {
+            // Nút 1: PREV (Lùi bài)
+            onKeypadEvent(3);
+            return;
+          } else if (pt.x >= 58 && pt.x < 102) {
+            // Nút 2: PLAY / PAUSE (Bật / Tạm dừng)
+            s40MediaPlaying = !s40MediaPlaying;
+            if (s40MediaPlaying) startMediaAudioPlayback();
+            else stopMediaAudioPlayback();
+            drawMediaPlayerAppScreen(false);
+            showSymbianToast(s40MediaPlaying ? "▶ TIẾP TỤC PHÁT" : "⏸ TẠM DỪNG");
+            return;
+          } else if (pt.x >= 104 && pt.x < 148) {
+            // Nút 3: NEXT (Qua bài)
+            onKeypadEvent(4);
+            return;
+          } else if (pt.x >= 150 && pt.x < 188) {
+            // Nút 4: VOLUME (Chỉnh âm lượng nhanh)
+            int curVol = TestAudio::getMusicVolumePct();
+            int newVol = (curVol >= 100) ? 20 : (curVol + 25);
+            TestAudio::setMusicVolumePct(newVol);
+            drawMediaPlayerAppScreen(false);
+            showSymbianToast(String("🔊 ÂM LƯỢNG: ") + String(newVol) + "%");
+            return;
+          } else if (pt.x >= 190 && pt.x <= 236) {
+            // Nút 5: MENU / DANH SÁCH BÀI HÁT
+            s40MediaSubState = 2; // Mở Danh sách bài hát
+            s40MediaListCursor = s40MediaTrackIdx;
+            drawMediaPlayerAppScreen(true);
+            return;
+          }
+        }
+
+        // 2. Thanh trượt Tiến độ thời gian (Progress / Seek Bar: y = 170..215)
+        if (pt.y >= 170 && pt.y < 215) {
+          uint16_t tot = (s40MediaTrackCount > 0) ? s40MediaDurations[s40MediaTrackIdx] : 180;
+          if (tot > 0) {
+            int seekX = constrain((int)pt.x - 16, 0, 208);
+            s40MediaCurSec = (uint16_t)((seekX * tot) / 208);
+            drawMediaPlayerAppScreen(false);
+            showSymbianToast(String("TUA: ") + String(s40MediaCurSec / 60) + ":" + String((s40MediaCurSec % 60) < 10 ? "0" : "") + String(s40MediaCurSec % 60));
+          }
+          return;
+        }
+
+        // 3. Vùng Đĩa than / Visualizer (y: 30..112) -> Đổi kiểu hiển thị Visualizer
+        if (pt.y >= 30 && pt.y < 113) {
+          s40MediaVisMode = (s40MediaVisMode + 1) % 3;
+          drawMediaPlayerAppScreen(false);
+          const char* visNames[3] = { "ĐĨA QUAY VINYL", "SÓNG HÌNH SIN", "CỘT SÓNG VU METER" };
+          showSymbianToast(String("HIỆU ỨNG: ") + visNames[s40MediaVisMode]);
+          return;
+        }
+
+        // 4. Vùng thông tin bài hát (y = 113..166) -> Bấm vào để mở danh sách bài
+        if (pt.y >= 113 && pt.y < 170) {
+          s40MediaSubState = 2;
+          s40MediaListCursor = s40MediaTrackIdx;
+          drawMediaPlayerAppScreen(true);
+          return;
+        }
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 5. TRUNG TÂM TRÒ CHƠI GAME CENTER (MODE 15)
+      // ----------------------------------------------------------------------
+      if (currentMode == 15) {
+        if (s40GameActiveId == 0) {
+          // Sảnh chọn 3 Game (Hub): Chạm thẻ để vào chơi ngay!
+          if (pt.y >= 58 && pt.y < 280) {
+            int gIdx = (pt.y - 58) / 74;
+            if (gIdx >= 0 && gIdx < 3) {
+              SpaceOS_GameCenter::setMenuCursor(gIdx);
+              handleGameCenterKey(0); // Khởi động game được chạm
+              return;
+            }
+          }
+          return;
+        } else if (s40GameActiveId == 2) {
+          // Flappy Bird: Chạm bất kỳ đâu trên màn hình để vỗ cánh!
+          handleGameCenterKey(0);
+          return;
+        } else if (s40GameActiveId == 1) {
+          // Rắn săn mồi Snake: 4 hướng chạm điều khiển rắn
+          if (pt.y < 120) onKeypadEvent(1); // Lên
+          else if (pt.y > 220) onKeypadEvent(2); // Xuống
+          else if (pt.x < 100) onKeypadEvent(3); // Trái
+          else if (pt.x > 140) onKeypadEvent(4); // Phải
+          return;
+        } else if (s40GameActiveId == 3) {
+          // Xếp gạch Tetris: Chạm nửa trên xoay gạch, nửa dưới thả rơi nhanh, trái/phải di chuyển
+          if (pt.y < 120) onKeypadEvent(1); // Xoay gạch
+          else if (pt.y > 220) onKeypadEvent(2); // Thả nhanh
+          else if (pt.x < 100) onKeypadEvent(3); // Sang trái
+          else if (pt.x > 140) onKeypadEvent(4); // Sang phải
+          return;
+        }
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 6. MÀN HÌNH CÀI ĐẶT HỆ THỐNG (MODE 6)
+      // ----------------------------------------------------------------------
+      if (currentMode == 6) {
+        // Thanh cuộn bên phải (x >= 230): Nửa trên cuộn lên, nửa dưới cuộn xuống
+        if (pt.x >= 230) {
+          ensureSettingsBridge();
+          if (pt.y < 160) SpaceOS_Settings::handleKey(1, tft);
+          else            SpaceOS_Settings::handleKey(2, tft);
+          return;
+        }
+        // Vùng 7 hàng danh sách cài đặt trên màn hình (y: 30..284)
+        if (pt.y >= 30 && pt.y < 285) {
+          int firstRow = 0;
+          if (s40SettingsCursor >= 7) firstRow = s40SettingsCursor - 6;
+          int vis = (pt.y - 30) / 37;
+          if (vis >= 0 && vis < 7) {
+            int targetIdx = firstRow + vis;
+            if (targetIdx >= 0 && targetIdx < SpaceOS_Settings::SETTINGS_COUNT) {
+              ensureSettingsBridge();
+              if (s40SettingsCursor != targetIdx) {
+                // Nhảy con trỏ ngay lập tức tới mục được chạm!
+                s40SettingsCursor = targetIdx;
+                SpaceOS_Settings::draw(tft, false);
+              } else {
+                // Đang chọn mục này: Nửa trái giảm/lùi, nửa phải tăng/đổi giá trị!
+                if (pt.x < 120) SpaceOS_Settings::handleKey(3, tft);
+                else            SpaceOS_Settings::handleKey(4, tft);
+              }
+              return;
+            }
+          }
+        }
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 7. MÀN HÌNH TÙY CHỈNH HÌNH NỀN & ĐỒNG HỒ CHỜ (MODE 5)
+      // ----------------------------------------------------------------------
+      if (currentMode == 5) {
+        // Thanh cuộn bên phải
+        if (pt.x >= 230) {
+          if (pt.y < 160) onKeypadEvent(1);
+          else            onKeypadEvent(2);
+          return;
+        }
+        // 7 hàng hình nền trên màn hình (y: 30..284, 10 mục cấu hình)
+        if (pt.y >= 30 && pt.y < 285) {
+          int firstRow = 0;
+          if (s40WallpaperCursor >= 7) firstRow = s40WallpaperCursor - 6;
+          int vis = (pt.y - 30) / 37;
+          if (vis >= 0 && vis < 7) {
+            int targetIdx = firstRow + vis;
+            if (targetIdx >= 0 && targetIdx < 10) {
+              if (s40WallpaperCursor != targetIdx) {
+                s40WallpaperCursor = targetIdx;
+                drawWallpaperAppScreen(false);
+              } else {
+                if (pt.x < 120) onKeypadEvent(3); // Giảm / Lùi
+                else            onKeypadEvent(4); // Tăng / Đổi
+              }
+              return;
+            }
+          }
+        }
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 8. MÀN HÌNH ĐỒNG HỒ ĐA NĂNG & BÁO THỨC (MODE 13)
+      // ----------------------------------------------------------------------
+      if (currentMode == 13) {
+        ensureClockSuiteBridge();
+        // A. Chuyển Tab nhanh khi chạm vào 4 Tab ở đầu màn hình (y: 24..54)
+        if (pt.y >= 24 && pt.y < 54) {
+          int tab = pt.x / 60;
+          if (tab >= 0 && tab < 4) {
+            SpaceOS_ClockSuite::setActiveTab(tab);
+            drawClockSuiteAppScreen();
+            return;
+          }
+        }
+        // B. Tab 0: Báo thức
+        if (s40ClockTab == 0) {
+          if (pt.y >= 70 && pt.y < 244) {
+            int alarmIdx = (pt.y - 70) / 58;
+            if (alarmIdx >= 0 && alarmIdx < 3) {
+              SpaceOS_ClockSuite::setAlarmCursor(alarmIdx);
+              if (pt.x >= 165) {
+                // Chạm nút BẬT / TẮT bên phải -> Bật/Tắt nhanh
+                SpaceOS_ClockSuite::handleKey(3, tft);
+              } else {
+                // Chạm vào thẻ -> Vào chế độ chỉnh giờ/phút
+                SpaceOS_ClockSuite::handleKey(0, tft);
+              }
+              return;
+            }
+          } else if (pt.y >= 244 && pt.y < 285) {
+            // Mục chọn chuông báo thức
+            SpaceOS_ClockSuite::setAlarmCursor(3);
+            if (pt.x < 120) SpaceOS_ClockSuite::handleKey(3, tft);
+            else            SpaceOS_ClockSuite::handleKey(4, tft);
+            return;
+          }
+        } else if (s40ClockTab == 1) {
+          // Tab 1: Bấm giờ -> Bắt đầu / Tạm dừng
+          SpaceOS_ClockSuite::handleKey(0, tft);
+          return;
+        } else if (s40ClockTab == 2) {
+          // Tab 2: Hẹn giờ -> Bắt đầu / Tạm dừng đếm ngược
+          SpaceOS_ClockSuite::handleKey(0, tft);
+          return;
+        }
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 9. MÀN HÌNH QUẢN LÝ BỘ NHỚ & THẺ NHỚ SD (MODE 10)
+      // ----------------------------------------------------------------------
+      if (currentMode == 10) {
+        if (s40MemSubState == 1) {
+          // Danh sách tệp tin (7 dòng / trang)
+          if (pt.x >= 230) {
+            if (pt.y < 160) onKeypadEvent(1);
+            else            onKeypadEvent(2);
+            return;
+          }
+          if (pt.y >= 30 && pt.y < 285) {
+            int vis = (pt.y - 30) / 35;
+            int startIdx = 0;
+            if (s40MemFileCursor >= 7) startIdx = s40MemFileCursor - 6;
+            int targetIdx = startIdx + vis;
+            if (vis >= 0 && vis < 7) {
+              if (s40MemFileCursor != targetIdx) {
+                s40MemFileCursor = targetIdx;
+                drawMemoryManagerAppScreen();
+              } else {
+                onKeypadEvent(0); // Mở tệp / Xem
+              }
+              return;
+            }
+          }
+        } else {
+          // Sảnh tổng quan bộ nhớ
+          if (pt.y < 160) onKeypadEvent(1);
+          else            onKeypadEvent(2);
+        }
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 10. MÀN HÌNH THƯ VIỆN ẢNH (MODE 7)
+      // ----------------------------------------------------------------------
+      if (currentMode == 7) {
+        if (pt.x < 80)       onKeypadEvent(3); // Ảnh trước (Trái)
+        else if (pt.x > 160) onKeypadEvent(4); // Ảnh sau (Phải)
+        else                 onKeypadEvent(0); // Đặt làm hình nền
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 11. MÀN HÌNH THÔNG TIN THIẾT BỊ (MODE 8)
+      // ----------------------------------------------------------------------
+      if (currentMode == 8) {
+        if (pt.x < 120) onKeypadEvent(3); // Trang trước
+        else            onKeypadEvent(4); // Trang sau
+        return;
+      }
+
+      // ----------------------------------------------------------------------
+      // 12. CÁC MÀN HÌNH DANH SÁCH KHÁC (FALLBACK)
+      // ----------------------------------------------------------------------
+      // Chạm vào nửa trên: Cuộn lên | Nửa dưới: Cuộn xuống
+      if (pt.y >= 30 && pt.y < 160) {
+        onKeypadEvent(1); // Phím UP
+      } else if (pt.y >= 160 && pt.y < 285) {
+        onKeypadEvent(2); // Phím DOWN
+      }
+    }
+  }
+
   void init() {
     Serial.println("\n-------------------------------------------------------");
     Serial.println("🖥️ [DISPLAY] KHỞI TẠO MÀN HÌNH ST7789 240x320 & BỘ ĐIỀU KHIỂN SYMBIAN S40 (4x3)");
@@ -9027,6 +9824,7 @@ namespace TestDisplay {
     Serial.println("-------------------------------------------------------");
 
     DisplayDriver::initHardware(useST7789, inverted, rotation);
+    TouchDriver::init(DisplayDriver::getSpiBus(), PIN_TOUCH_SCREEN_CS);
     lastTtp223State = (digitalRead(PIN_TOUCH_TTP223) == HIGH);
     lastUserActivityMs = millis();
     setBacklightBrightness(screenBrightnessPct);
@@ -9431,6 +10229,14 @@ namespace TestDisplay {
       }
     }
 
+    // 1B. Quét màn hình cảm ứng điện trở ST7789 / XPT2046 (Touch Screen Driver)
+    TouchDriver::loop();
+    TouchDriver::TouchEventType touchEvt;
+    TouchDriver::TouchPoint touchPt;
+    if (TouchDriver::getTouchEvent(touchEvt, touchPt)) {
+      handleTouchInput(touchEvt, touchPt);
+    }
+
     // 2. Kiểm tra Đồng Hồ Đa Năng, Hẹn Giờ & Báo Thức ngầm (SpaceOS_ClockSuite)
     ensureClockSuiteBridge();
     SpaceOS_ClockSuite::loop(tft, now, isScreenSleeping, currentMode);
@@ -9634,6 +10440,15 @@ namespace TestDisplay {
     } else if (currentMode == 15) {
       updateActiveGameLoop(now);
     } else if (currentMode == 1 || currentMode == 11) {
+      if (XiaoZhiClient::isPcGatewayMode() && (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING)) {
+        s40AiState = AI_STATE_IDLE;
+        eyeState = 0;
+        s40AiEmotionTag = "IDLE";
+        s40AiReplyText = "Xin chao! Tro ly AI da san sang.\nNhan giu man hinh hoac bam [OK] de noi.";
+        s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+        drawXiaoZhiAssistantScreen(true);
+      }
+
       if (s40AiState == AI_STATE_BINDING || s40AiState == AI_STATE_BINDING_CHECKING) {
         // Tự động kiểm tra trạng thái liên kết với XiaoZhi Cloud mỗi 8 giây nếu có Wi-Fi
         if (now - s40AiLastOtpPollMs >= 8000) {
@@ -9659,26 +10474,51 @@ namespace TestDisplay {
         return;
       }
 
+      // Nhận diện nhả phím OK sau khi nhấn giữ phím cứng (Push-to-Talk bằng nút OK trên kit)
+      static bool s_keypadOkHeld = false;
+      static unsigned long s_keypadOkDownMs = 0;
+      if (KeypadDriver::getActiveButtonIndex() == 0) {
+        if (!s_keypadOkHeld) {
+          s_keypadOkHeld = true;
+          s_keypadOkDownMs = now;
+        }
+      } else {
+        if (s_keypadOkHeld) {
+          s_keypadOkHeld = false;
+          unsigned long heldMs = now - s_keypadOkDownMs;
+          if (s40AiState == AI_STATE_LISTENING && heldMs >= 500) {
+            Serial.printf("🎙️ [KEYPAD OK RELEASE] Nhả phím OK sau %lums -> Dừng thu và gửi câu hỏi lên AI!\n", heldMs);
+            TestAudio::playClickBeep();
+            triggerXiaoZhiThinkingAndReply();
+            return;
+          }
+        }
+      }
+
       // Nếu đang thu âm giọng nói từ Mic INMP441 -> Đọc liên tục DMA I2S không bị trễ
       if (s40AiState == AI_STATE_LISTENING) {
         TestAudio::pollVoiceRecording();
         int peak = TestAudio::getLastMicLevelPct();
-        if (peak >= 6) {
+        if (peak >= 5) {
           s40AiSpeechDetected = true;
           s40AiLastVoiceMs = now;
         }
 
-        // Cơ chế Smart VAD (Voice Activity Detection thông minh):
-        // 1. Đã nhận diện tiếng nói: Yêu cầu nói tối thiểu 1.5s và im lặng ít nhất 1.6s
-        //    (đảm bảo người dùng thoải mái ngắt nghỉ câu, lấy hơi giữa câu mà không bị ngắt cụt)
-        // 2. Chưa bắt được tiếng nói (chờ người dùng bắt đầu nói): Giới hạn chờ 6.5s
-        // 3. Hoặc đạt thời gian thu âm tối đa (8.0s) hoặc đầy bộ đệm PSRAM (isVoiceRecording() == false)
+        // Kiểm tra xem ngón tay có đang giữ màn hình HOẶC đang nhấn giữ phím cứng OK không
+        bool isFingerHolding   = TouchDriver::isTouched() && s_aiTouchHolding;
+        bool isKeypadOkHolding = (KeypadDriver::getActiveButtonIndex() == 0);
+        bool isHolding         = isFingerHolding || isKeypadOkHolding;
+
         unsigned long elapsedListeningMs = now - s40AiStateChangeMs;
         unsigned long silenceDurationMs  = now - s40AiLastVoiceMs;
 
-        bool speechDoneBySilence = s40AiSpeechDetected && (elapsedListeningMs >= 1500) && (silenceDurationMs >= 1600);
-        bool noSpeechTimeout     = !s40AiSpeechDetected && (elapsedListeningMs >= 6500);
-        bool maxDurationReached  = (elapsedListeningMs >= 8000) || !TestAudio::isVoiceRecording();
+        // Cơ chế Smart VAD (Voice Activity Detection thông minh):
+        // 1. Nếu KHÔNG giữ tay/phím: Đã nhận diện tiếng nói và im lặng ít nhất 1.4s (sau khi đã nói >= 1.5s)
+        bool speechDoneBySilence = !isHolding && s40AiSpeechDetected && (elapsedListeningMs >= 1500) && (silenceDurationMs >= 1400);
+        // 2. Nếu KHÔNG giữ tay/phím: Chưa bắt được tiếng nói (chờ người dùng bắt đầu nói): Giới hạn chờ 6.0s
+        bool noSpeechTimeout     = !isHolding && !s40AiSpeechDetected && (elapsedListeningMs >= 6000);
+        // 3. Đạt thời gian thu âm tối đa (10.0s) hoặc đầy bộ đệm PSRAM (chỉ kích hoạt sau khi đã thu >= 1.5s)
+        bool maxDurationReached  = (elapsedListeningMs >= 10000) || (!TestAudio::isVoiceRecording() && elapsedListeningMs >= 1500);
 
         if (speechDoneBySilence || noSpeechTimeout || maxDurationReached) {
           triggerXiaoZhiThinkingAndReply();
@@ -9813,7 +10653,11 @@ namespace TestDisplay {
           // Task kết thúc mà không có kết quả (lỗi kết nối hoặc timeout)
           s40AiEmotionTag = "CONFUSED";
           eyeState = 8;
-          s40AiReplyText = "Chua the ket noi toi XiaoZhi Hub.\nVui long kiem tra lai ket noi Wi-Fi!";
+          if (XiaoZhiClient::isPcGatewayMode()) {
+            s40AiReplyText = "Chua ket noi toi PC AI Gateway.\nHay kiem tra start_gateway.bat nhe!";
+          } else {
+            s40AiReplyText = "Chua the ket noi toi XiaoZhi Hub.\nVui long kiem tra lai ket noi Wi-Fi!";
+          }
           s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
           s40AiScrollLine = 0;
           s40AiAutoScroll = true;

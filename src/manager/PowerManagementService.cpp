@@ -42,7 +42,7 @@ namespace PowerManagementService {
 
   static void applyProfileSettings(PowerProfile prof) {
     uint32_t targetMhz = 240;
-    wifi_ps_type_t targetWifiPs = WIFI_PS_NONE;
+    wifi_ps_type_t targetWifiPs = WIFI_PS_NONE; // Luôn giữ WIFI_PS_NONE để WebControl & Wi-Fi phản hồi tức thì <2ms!
     uint32_t sensorInterval = 2500;
     unsigned long sleepTimeout = 0;
 
@@ -55,16 +55,16 @@ namespace PowerManagementService {
         break;
 
       case POWER_BALANCED:
-        targetMhz = 160;
-        targetWifiPs = WIFI_PS_NONE; // Giữ Wi-Fi luôn phản hồi tức thì (<2ms), tránh router ngắt kết nối web khi chạy lâu
-        sensorInterval = 30000; // 30 giây
+        targetMhz = 240; // Giữ 240MHz để ST7789, game và thao tác cảm ứng luôn đạt 60Hz/mượt mà
+        targetWifiPs = WIFI_PS_NONE; // Tuyệt đối không bật Modem-Sleep gây lag 3-5s WebControl & rớt mạng
+        sensorInterval = 10000;
         sleepTimeout = 300000;  // 5 phút
         break;
 
       case POWER_SAVER:
-        targetMhz = 80;
-        targetWifiPs = WIFI_PS_MIN_MODEM;
-        sensorInterval = 60000; // 60 giây
+        targetMhz = 160; // Giữ tối thiểu 160MHz (không hạ xuống 80MHz làm giật quét ngang màn hình)
+        targetWifiPs = WIFI_PS_NONE; // Vẫn giữ WIFI_PS_NONE để bàn phím ảo & Web phản hồi tức thì
+        sensorInterval = 30000;
         sleepTimeout = 120000;  // 2 phút
         
         // Tắt bớt ngoại vi hao pin khi vào chế độ tiết kiệm pin
@@ -115,12 +115,15 @@ namespace PowerManagementService {
 
     // Nếu kích hoạt Auto Switch, tự động nhận diện theo nguồn khởi động
     if (s_autoSwitchEnabled) {
-      if (SensorDriver::isCharging()) {
+      float vbat = SensorDriver::getBatteryVoltage();
+      // Nếu cắm sạc HOẶC điện áp < 2.5V (đang dùng nguồn ngoài 3.3V / USB trực tiếp, không có pin 18650)
+      if (SensorDriver::isCharging() || vbat < 2.5f) {
         s_currentProfile = POWER_PERFORMANCE;
       } else {
         int pct = SensorDriver::getBatteryPercentage();
-        s_currentProfile = (pct <= 20) ? POWER_SAVER : POWER_BALANCED;
+        s_currentProfile = (pct <= 15) ? POWER_SAVER : POWER_BALANCED;
       }
+      applyProfileSettings(s_currentProfile);
     }
 
     s_pendingProfile = s_currentProfile;
@@ -251,13 +254,18 @@ namespace PowerManagementService {
     if (s_autoSwitchEnabled) {
       PowerProfile targetProfile = POWER_BALANCED;
 
-      if (isCharging) {
-        targetProfile = POWER_PERFORMANCE; // Cắm sạc USB -> Chạy hết công suất
+      // Nhận diện nguồn ngoài / 3.3V rail:
+      // Pin Lithium 18650 hoạt động từ 3.0V đến 4.2V. Nếu vbat < 2.5V tức là trạm đang được cấp nguồn
+      // trực tiếp qua chân 3.3V hoặc USB không qua mạch đo phân áp pin -> Luôn chạy POWER_PERFORMANCE 240MHz!
+      bool isExternal3v3OrUsb = isCharging || (vbat < 2.5f);
+
+      if (isExternal3v3OrUsb) {
+        targetProfile = POWER_PERFORMANCE; // Cắm sạc USB / Nguồn ngoài 3.3V -> Chạy hết công suất 240MHz
       } else {
-        // Chạy pin: Nếu <= 20% -> Tiết kiệm pin; Nếu > 20% -> Cân bằng
-        if (batteryPct <= 20) {
+        // Chạy pin thực tế: Nếu <= 15% -> Tiết kiệm pin (160MHz); Nếu > 15% -> Cân bằng (240MHz)
+        if (batteryPct <= 15) {
           targetProfile = POWER_SAVER;
-        } else if (s_currentProfile == POWER_SAVER && batteryPct < 25) {
+        } else if (s_currentProfile == POWER_SAVER && batteryPct < 20) {
           targetProfile = POWER_SAVER; // Hysteresis 5% chống nhảy qua lại liên tục
         } else {
           targetProfile = POWER_BALANCED;

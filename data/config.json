@@ -4,5 +4,10 @@
   "mac": "e8:3d:c1:f1:88:24",
   "bound": true,
   "wit_token": "",
-  "google_stt_key": ""
+  "google_stt_key": "",
+  "ai_backend": 1,
+  "pc_gateway_ip": "192.168.1.8",
+  "pc_gateway_port": 8765,
+  "ai_model": "gemini-pro",
+  "tts_voice": "vi-VN-HoaiMyNeural"
 }

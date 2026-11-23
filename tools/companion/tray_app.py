@@ -39,10 +39,11 @@ def create_station_icon(online=True):
     return img
 
 class SystemTrayApp:
-    def __init__(self, cfg_manager, telemetry_worker, transcoder_worker, settings_dialog):
+    def __init__(self, cfg_manager, telemetry_worker, transcoder_worker, ai_gateway_worker, settings_dialog):
         self.cfg_manager = cfg_manager
         self.telemetry = telemetry_worker
         self.transcoder = transcoder_worker
+        self.ai_gateway = ai_gateway_worker
         self.settings_dialog = settings_dialog
         self.icon = None
         self._running = False
@@ -54,7 +55,7 @@ class SystemTrayApp:
 
     def _on_open_esp_web(self, icon, item):
         cfg = self.cfg_manager.load_config()
-        ip = cfg.get("esp32_ip", "192.168.1.233")
+        ip = cfg.get("esp32_ip", "192.168.1.82")
         webbrowser.open(f"http://{ip}")
 
     def _on_toggle_monitor(self, icon, item):
@@ -76,6 +77,25 @@ class SystemTrayApp:
             self.transcoder.stop()
         logger.info(f"Đã chuyển trạng thái Transcoder: {new_val}")
 
+    def _on_toggle_ai_gateway(self, icon, item):
+        cfg = self.cfg_manager.load_config()
+        new_val = not cfg.get("ai_gateway_enabled", True)
+        cfg["ai_gateway_enabled"] = new_val
+        self.cfg_manager.save_config(cfg)
+        if new_val:
+            self.ai_gateway.start()
+        else:
+            self.ai_gateway.stop()
+        logger.info(f"Đã chuyển trạng thái AI Gateway: {new_val}")
+
+    def _on_trigger_news_broadcast(self, icon, item):
+        if not self.ai_gateway.is_running():
+            self.ai_gateway.start()
+            time.sleep(1.0)
+        self.ai_gateway.trigger_news_broadcast(limit=4)
+        if self.icon:
+            self.icon.notify("Đang tổng hợp và phát thanh bản tin thời sự VnExpress lên loa trạm!", "Trạm Decor Vũ Trụ")
+
     def _on_toggle_autostart(self, icon, item):
         cfg = self.cfg_manager.load_config()
         new_val = not cfg.get("autostart", True)
@@ -85,17 +105,23 @@ class SystemTrayApp:
         logger.info(f"Đã chuyển tùy chọn Khởi động cùng Windows: {new_val}")
 
     def _on_open_settings(self, icon, item):
-        threading.Thread(target=self.settings_dialog.show, daemon=True).start()
+        self.settings_dialog.show()
 
     def _on_restart_services(self, icon, item):
         cfg = self.cfg_manager.load_config()
-        ip = cfg.get("esp32_ip", "192.168.1.233")
+        ip = cfg.get("esp32_ip", "192.168.1.82")
         port = cfg.get("transcoder_port", 5050)
+        ai_port = cfg.get("ai_gateway_port", 8765)
         self.telemetry.set_ip(ip)
         self.telemetry.set_interval(cfg.get("monitor_interval", 1.2))
         self.telemetry.set_enabled(cfg.get("monitor_enabled", True))
         
         self.transcoder.restart(port=port, esp_ip=ip)
+        if cfg.get("ai_gateway_enabled", True):
+            self.ai_gateway.restart(port=ai_port)
+        else:
+            self.ai_gateway.stop()
+
         if self.icon:
             self.icon.notify("Đã khởi động lại toàn bộ dịch vụ!", "Trạm Decor Vũ Trụ")
 
@@ -104,11 +130,14 @@ class SystemTrayApp:
         self._running = False
         self.telemetry.stop()
         self.transcoder.stop()
-        icon.stop()
+        self.ai_gateway.stop()
+        if self.icon:
+            self.icon.stop()
+        self.settings_dialog.close_completely()
 
     def _build_menu(self):
         cfg = self.cfg_manager.load_config()
-        ip = cfg.get("esp32_ip", "192.168.1.233")
+        ip = cfg.get("esp32_ip", "192.168.1.82")
         is_online = self.telemetry.is_station_online
         status_text = f"🛰️ Trạm: {ip} [{'🟢 Online' if is_online else '🔴 Offline'}]"
 
@@ -117,6 +146,7 @@ class SystemTrayApp:
             Menu.SEPARATOR,
             item("🎵 Bảng Điều Khiển Âm Nhạc & Stream (Port 5050)", self._on_open_transcoder),
             item("🖥️ Mở Trang Web Trạm ESP32", self._on_open_esp_web),
+            item("📰 Đọc Tin Thời Sự VnExpress (Loa Trạm)", self._on_trigger_news_broadcast),
             Menu.SEPARATOR,
             item(
                 "☑️ Gửi thông số PC (PC HUD)",
@@ -124,9 +154,14 @@ class SystemTrayApp:
                 checked=lambda it: self.cfg_manager.load_config().get("monitor_enabled", True)
             ),
             item(
-                "☑️ Web Transcoder Engine",
+                "☑️ Web Transcoder Engine (Port 5050)",
                 self._on_toggle_transcoder,
                 checked=lambda it: self.transcoder.is_running()
+            ),
+            item(
+                "☑️ Trợ Lý AI Gateway (Port 8765)",
+                self._on_toggle_ai_gateway,
+                checked=lambda it: self.ai_gateway.is_running()
             ),
             item(
                 "☑️ Khởi động cùng Windows",
@@ -146,7 +181,7 @@ class SystemTrayApp:
             try:
                 curr_online = self.telemetry.is_station_online
                 cfg = self.cfg_manager.load_config()
-                ip = cfg.get("esp32_ip", "192.168.1.233")
+                ip = cfg.get("esp32_ip", "192.168.1.82")
 
                 if self.icon:
                     tooltip = f"Trạm Decor Vũ Trụ - {ip} ({'🟢 Online' if curr_online else '🔴 Offline'})"
@@ -164,7 +199,8 @@ class SystemTrayApp:
                 logger.debug(f"Status update tick error: {e}")
             time.sleep(2.0)
 
-    def run(self):
+    def start(self):
+        """Khởi động System Tray Icon ở chế độ chạy nền không chặn (run_detached)."""
         self._running = True
         self.icon = pystray.Icon(
             "DecorSpaceCompanion",
@@ -182,12 +218,16 @@ class SystemTrayApp:
             def send_welcome():
                 time.sleep(1.0)
                 if self.icon:
-                    ip = cfg.get("esp32_ip", "192.168.1.233")
+                    ip = cfg.get("esp32_ip", "192.168.1.82")
                     self.icon.notify(
                         f"Dịch vụ Trạm Decor Vũ Trụ đang chạy ngầm.\nĐích đến: {ip}",
                         "Decor Space Companion"
                     )
             threading.Thread(target=send_welcome, daemon=True).start()
 
-        logger.info("System Tray App đang chạy...")
-        self.icon.run()
+        logger.info("System Tray App đang chạy (run_detached)...")
+        self.icon.run_detached()
+
+    def run(self):
+        """Khởi động System Tray Icon ở chế độ chặn (fallback)."""
+        self.start()

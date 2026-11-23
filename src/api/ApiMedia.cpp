@@ -77,36 +77,18 @@ namespace ApiMedia {
     String path = server.arg("path");
     if (!path.startsWith("/")) path = "/" + path;
 
-    if (!StorageDriver::lock(pdMS_TO_TICKS(100))) {
-      server.send(503, "text/plain", "SD card busy");
-      return;
-    }
-
-    if (!SD.exists(path)) {
-      StorageDriver::unlock();
-      server.send(404, "text/plain", "SD file does not exist");
-      return;
-    }
-
-    File f = SD.open(path, FILE_READ);
-    if (!f) {
-      StorageDriver::notifyIoError(false, "handleSdFileRoute open failed");
-      StorageDriver::unlock();
-      server.send(500, "text/plain", "Cannot open SD file");
-      return;
-    }
-
     String contentType = "application/octet-stream";
     String low = path;
     low.toLowerCase();
     if (low.endsWith(".png")) contentType = "image/png";
     else if (low.endsWith(".jpg") || low.endsWith(".jpeg")) contentType = "image/jpeg";
     else if (low.endsWith(".bmp")) contentType = "image/bmp";
+    else if (low.endsWith(".wav")) contentType = "audio/wav";
+    else if (low.endsWith(".mp3")) contentType = "audio/mpeg";
 
-    server.streamFile(f, contentType);
-    f.close();
-    StorageDriver::notifyIoSuccess();
-    StorageDriver::unlock();
+    if (!StorageDriver::streamFileSafely(server, path, contentType, true)) {
+      server.send(404, "text/plain", "SD file not found or SD card busy");
+    }
   }
 
   void handleDeleteImage(WebServer& server) {
@@ -486,25 +468,19 @@ namespace ApiMedia {
     if (sl >= 0) name = name.substring(sl + 1);
     if (name.length() > 0 && TestSDCard::isMounted() && StorageDriver::isHealthy()) {
       String path = "/Musics/" + name;
-      if (StorageDriver::lock(pdMS_TO_TICKS(100))) {
-        if (!SD.exists(path)) path = "/" + name;
-        if (SD.exists(path)) {
-          File f = SD.open(path, FILE_READ);
-          if (f) {
-            String low = name;
-            low.toLowerCase();
-            String mime = "audio/mpeg";
-            if (low.endsWith(".wav")) mime = "audio/wav";
-            else if (low.endsWith(".ogg")) mime = "audio/ogg";
-            else if (low.endsWith(".flac")) mime = "audio/flac";
-            server.streamFile(f, mime);
-            f.close();
-            StorageDriver::notifyIoSuccess();
-            StorageDriver::unlock();
-            return;
-          }
-        }
-        StorageDriver::unlock();
+      String low = name;
+      low.toLowerCase();
+      String mime = "audio/mpeg";
+      if (low.endsWith(".wav")) mime = "audio/wav";
+      else if (low.endsWith(".ogg")) mime = "audio/ogg";
+      else if (low.endsWith(".flac")) mime = "audio/flac";
+
+      if (StorageDriver::streamFileSafely(server, path, mime, false)) {
+        return;
+      }
+      path = "/" + name;
+      if (StorageDriver::streamFileSafely(server, path, mime, false)) {
+        return;
       }
     }
     server.send(404, "text/plain", "Music file not found on SD");

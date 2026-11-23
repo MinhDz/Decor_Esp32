@@ -1,6 +1,8 @@
 #pragma once
 #include <Arduino.h>
 
+class WebServer;
+
 namespace StorageDriver {
 
   struct SdPinDiag {
@@ -90,6 +92,9 @@ namespace StorageDriver {
   String readSdFilePreview(const String& path);
   bool copySdJpgToLittleFS(const String& sdPath);
   bool formatSdCard();
+
+  // Truyền tệp từ Thẻ SD ra WebServer theo khối 4KB xen kẽ lock/unlock chống nghẽn Audio & Web
+  bool streamFileSafely(WebServer& server, const String& path, const String& contentType, bool enableCache = true);
 
   // Thực hiện bài kiểm tra đọc/ghi tệp và liệt kê danh sách tệp trên thẻ Micro SD ('k')
   bool handleSerial(char cmd);

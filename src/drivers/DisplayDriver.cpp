@@ -142,9 +142,15 @@ namespace DisplayDriver {
 
     initBacklight();
 
+    // Cô lập chip cảm ứng XPT2046 bằng cách giữ chân T_CS (GPIO 45) ở mức HIGH,
+    // loại bỏ hoàn toàn hiện tượng chip cảm ứng kéo chân MISO/CLK làm méo xung,
+    // sụt áp và gây lỗi quét sọc / chớp giật (flicker) trên màn hình LCD ST7789.
+    pinMode(PIN_TOUCH_SCREEN_CS, OUTPUT);
+    digitalWrite(PIN_TOUCH_SCREEN_CS, HIGH);
+
     if (!s_spiBus) {
       s_spiBus = new SPIClass(FSPI);
-      s_spiBus->begin(PIN_SCK, -1, PIN_MOSI, PIN_CS);
+      s_spiBus->begin(PIN_SCK, PIN_TOUCH_SCREEN_MISO, PIN_MOSI, PIN_CS);
     }
     if (!s_tft7789) s_tft7789 = new SpaceOS::VnST7789(s_spiBus, PIN_CS, PIN_DC, PIN_RST);
     if (!s_tft9341) s_tft9341 = new SpaceOS::VnILI9341(s_spiBus, PIN_CS, PIN_DC, PIN_RST);
@@ -215,6 +221,9 @@ namespace DisplayDriver {
 
     // Hoàn toàn nằm ngoài vùng hiển thị
     if (x >= dispW || y >= dispH || (x + w) <= 0 || (y + h) <= 0) return;
+
+    // Giữ chân T_CS cảm ứng HIGH tuyệt đối để giải phóng hoàn toàn bus SPI cho LCD ST7789
+    digitalWrite(PIN_TOUCH_SCREEN_CS, HIGH);
 
     // Đường truyền tối ưu nhất: Khối hình nằm trọn vẹn trong màn hình (khối 1D liên tục)
     if (x >= 0 && y >= 0 && (x + w) <= dispW && (y + h) <= dispH) {

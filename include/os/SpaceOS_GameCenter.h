@@ -21,6 +21,9 @@ namespace SpaceOS_GameCenter {
   void     setActiveGameId(uint8_t id);
   uint8_t& getActiveGameIdRef();
 
+  int  getMenuCursor();
+  void setMenuCursor(int cursor);
+
   int  getSnakeBestScore();
   int  getFlappyBestScore();
   int  getTetrisBestScore();
