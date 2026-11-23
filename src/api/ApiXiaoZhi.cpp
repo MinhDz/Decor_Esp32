@@ -193,10 +193,37 @@ namespace ApiXiaoZhi {
     http.end();
   }
 
+  void handleGeminiModels(WebServer& server) {
+    String key = server.hasArg("key") ? server.arg("key") : "";
+    String ip = XiaoZhiClient::getPcGatewayIp();
+    if (ip.length() == 0 || ip == "0.0.0.0") {
+      ip = PcStatsManager::getPcIp();
+    }
+    int port = XiaoZhiClient::getPcGatewayPort();
+    if (port <= 0) port = 8765;
+
+    HTTPClient http;
+    String url = "http://" + ip + ":" + String(port) + "/api/gemini/models";
+    if (key.length() > 0) {
+      url += "?key=" + key;
+    }
+    http.begin(url);
+    http.setTimeout(12000);
+    int code = http.GET();
+    if (code > 0) {
+      String payload = http.getString();
+      server.send(code, "application/json", payload);
+    } else {
+      server.send(502, "application/json", "{\"status\":\"error\",\"message\":\"Không thể kết nối PC Gateway (" + url + ")\"}");
+    }
+    http.end();
+  }
+
   void registerRoutes(WebServer& server) {
     server.on("/api/config/ai", HTTP_GET, [&server]() { handleGetAIConfig(server); });
     server.on("/api/config/ai", HTTP_POST, [&server]() { handleSaveAIConfig(server); });
     server.on("/api/xiaozhi/ping_gateway", HTTP_GET, [&server]() { handlePingGateway(server); });
+    server.on("/api/xiaozhi/gemini_models", HTTP_GET, [&server]() { handleGeminiModels(server); });
     server.on("/api/xiaozhi/ota", HTTP_GET, [&server]() { handleXiaoZhiOTA(server); });
     server.on("/api/xiaozhi/ota", HTTP_POST, [&server]() { handleXiaoZhiOTA(server); });
     server.on("/api/xiaozhi/unbind", HTTP_GET, [&server]() { handleXiaoZhiUnbind(server); });

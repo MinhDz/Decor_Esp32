@@ -48,7 +48,7 @@ static String s_localIntentReplyText = "";
 static int s_aiBackend = 1;
 static String s_pcGatewayIp = "192.168.1.8";
 static int s_pcGatewayPort = 8765;
-static String s_aiModel = "gemini-pro";
+static String s_aiModel = "gemini-flash-lite-latest";
 static String s_ttsVoice = "vi-VN-HoaiMyNeural";
 static bool s_aiConfigLoaded = false;
 

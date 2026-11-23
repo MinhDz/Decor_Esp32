@@ -394,60 +394,133 @@ async def stream_sentences_tts_pcm(sentences: list[str], voice: str, ws: web.Web
 
 # ================= XỬ LÝ MÔ HÌNH AI =================
 
+def normalize_gemini_model(model_name: str) -> str:
+    """Chuẩn hóa tên model Gemini, map các model cũ đã ngưng hoạt động sang model hiện đại."""
+    if not model_name:
+        return "gemini-flash-lite-latest"
+    m = model_name.strip()
+    if m.startswith("models/"):
+        m = m[7:]
+    lower_m = m.lower()
+    if lower_m in ["gemini-1.5-flash", "gemini-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"]:
+        return "gemini-flash-lite-latest"
+    if lower_m in ["gemini-1.5-pro", "gemini-pro", "gemini-2.5-pro"]:
+        return "gemini-pro-latest"
+    return m
+
+def fetch_and_test_gemini_models(api_key: str) -> dict:
+    """Truy vấn danh sách model từ Google Gemini API và kiểm tra model nào đang hoạt động."""
+    if not api_key:
+        return {"status": "error", "message": "API key rỗng", "working_models": [], "all_models": []}
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    req = urllib.request.Request(url, headers={"User-Agent": "DecorSpaceGateway/2.0"})
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            data = json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as he:
+        err_body = he.read().decode("utf-8", errors="ignore")
+        return {"status": "error", "message": f"HTTP {he.code}: {err_body[:120]}", "working_models": [], "all_models": []}
+    except Exception as e:
+        logger.warning(f"Lỗi truy vấn danh sách model từ Google: {e}")
+        return {"status": "error", "message": str(e), "working_models": [], "all_models": []}
+
+    all_content_models = [
+        m["name"].replace("models/", "")
+        for m in data.get("models", [])
+        if "generateContent" in m.get("supportedGenerationMethods", [])
+    ]
+
+    candidates = [
+        "gemini-flash-lite-latest",
+        "gemini-3-flash-preview",
+        "gemini-flash-latest",
+        "gemini-pro-latest",
+        "gemini-3.5-flash",
+        "gemini-2.5-flash-lite"
+    ]
+    to_test = [m for m in candidates if m in all_content_models]
+    if not to_test:
+        to_test = all_content_models[:6]
+
+    working = []
+    payload = json.dumps({"contents": [{"parts": [{"text": "hi"}]}]}).encode("utf-8")
+
+    def check_m(m):
+        m_url = f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={api_key}"
+        m_req = urllib.request.Request(m_url, data=payload, headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(m_req, timeout=5) as resp:
+                if resp.status == 200:
+                    return m
+        except Exception:
+            return None
+
+    import concurrent.futures
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as ex:
+        results = ex.map(check_m, to_test)
+        for r in results:
+            if r:
+                working.append(r)
+
+    rec = working[0] if working else (all_content_models[0] if all_content_models else "gemini-flash-lite-latest")
+    return {
+        "status": "ok",
+        "recommended": rec,
+        "working_models": working,
+        "all_models": all_content_models
+    }
+
 async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable_search: bool) -> tuple[str, str, str]:
-    """Gọi Gemini và trả về (user_text, reply, sources)."""
-    api_key = cfg.get("gemini_api_key", "")
+    """Gọi Gemini (hỗ trợ REST audio base64 hoặc SDK) và trả về (user_text, reply, sources)."""
+    api_key = cfg.get("gemini_api_key", "").strip()
     if not api_key or "YOUR_" in api_key:
         return ("", "Xin chào! Tôi là Trợ lý AI của Trạm Decor. Hệ thống Gateway đã đồng bộ thành công với máy tính của bạn và hệ thống âm thanh trực tuyến đã sẵn sàng. Bạn hãy điền API Key vào file cấu hình để bắt đầu đàm thoại thông minh nhé!", "")
 
-    reply = ""
-    sources = ""
-    user_text = ""
+    chosen_model = normalize_gemini_model(model_id or cfg.get("gemini_model") or "gemini-flash-lite-latest")
+    candidate_models = []
+    for m in [chosen_model, "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-flash-latest"]:
+        norm = normalize_gemini_model(m)
+        if norm not in candidate_models:
+            candidate_models.append(norm)
 
-    try:
+    import base64
+    audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
+    system_inst = cfg.get("system_prompt", "Trả lời ngắn gọn, tự nhiên bằng tiếng Việt.")
+    
+    last_err = ""
+    for try_model in candidate_models:
         try:
-            from google import genai
-            from google.genai import types
-            client = genai.Client(api_key=api_key)
-            tools = [types.Tool(google_search=types.GoogleSearch())] if enable_search else None
-            gen_cfg = types.GenerateContentConfig(
-                system_instruction=cfg.get("system_prompt", "Trả lời ngắn gọn, tự nhiên bằng tiếng Việt."),
-                tools=tools
+            url = f"https://generativelanguage.googleapis.com/v1beta/models/{try_model}:generateContent?key={api_key}"
+            req_data = {
+                "contents": [{
+                    "role": "user",
+                    "parts": [
+                        {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}},
+                        {"text": f"{system_inst}\n\nHãy nghe câu hỏi trong audio và trả lời bằng tiếng Việt."}
+                    ]
+                }]
+            }
+            req = urllib.request.Request(
+                url,
+                data=json.dumps(req_data).encode("utf-8"),
+                headers={"Content-Type": "application/json"}
             )
-            audio_part = types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav")
+            def _call_rest():
+                with urllib.request.urlopen(req, timeout=20) as res:
+                    return json.loads(res.read().decode("utf-8"))
+            resp_json = await asyncio.to_thread(_call_rest)
+            candidates = resp_json.get("candidates", [])
+            if candidates:
+                parts = candidates[0].get("content", {}).get("parts", [])
+                if parts:
+                    reply = parts[0].get("text", "").strip()
+                    if reply:
+                        return ("", reply, f"Google Gemini ({try_model})")
+        except Exception as e:
+            last_err = str(e)
+            logger.warning(f"Lỗi REST audio Gemini ({try_model}): {e}")
 
-            def call_sync():
-                return client.models.generate_content(
-                    model=model_id,
-                    contents=[audio_part, "Hãy nghe câu hỏi trong audio và trả lời chi tiết, chính xác, cập nhật nhất."],
-                    config=gen_cfg
-                )
-
-            resp = await asyncio.to_thread(call_sync)
-            reply = (resp.text or "").strip()
-            try:
-                gm = resp.candidates[0].grounding_metadata
-                if gm and gm.grounding_chunks:
-                    titles = [c.web.title for c in gm.grounding_chunks if c.web and c.web.title]
-                    sources = ", ".join(titles[:2])
-            except Exception:
-                pass
-
-        except ImportError:
-            import google.generativeai as genai_legacy
-            genai_legacy.configure(api_key=api_key)
-            model = genai_legacy.GenerativeModel(
-                model_name=model_id.replace("gemini-flash-latest", "gemini-1.5-flash").replace("gemini-pro", "gemini-1.5-pro"),
-                system_instruction=cfg.get("system_prompt", "Trả lời súc tích bằng tiếng Việt.")
-            )
-            audio_blob = {"mime_type": "audio/wav", "data": wav_bytes}
-            resp = await asyncio.to_thread(
-                lambda: model.generate_content([audio_blob, "Hãy nghe câu hỏi và trả lời chính xác, mạch lạc bằng tiếng Việt."])
-            )
-            reply = (resp.text or "").strip()
-
-    except Exception as e:
-        logger.error(f"Lỗi gọi Gemini API: {e}")
+    return ("", f"Lỗi Gemini: {last_err or 'Không thể xử lý âm thanh'}", "")
         reply = f"Lỗi Gemini: {e}"
 
     return (user_text, reply, sources)
@@ -611,9 +684,31 @@ async def handle_http_config(request: web.Request) -> web.Response:
             "status": "ok",
             "has_gemini": bool(cfg.get("gemini_api_key")),
             "has_deepseek": bool(cfg.get("openai_api_key")),
+            "gemini_model": cfg.get("gemini_model", "gemini-flash-lite-latest"),
             "openai_base_url": cfg.get("openai_base_url", "https://api.deepseek.com"),
             "voice": cfg.get("tts_voice", "vi-VN-HoaiMyNeural")
         }, headers={"Access-Control-Allow-Origin": "*"})
+
+async def handle_http_gemini_models(request: web.Request) -> web.Response:
+    key = request.query.get("key", "").strip()
+    if not key and request.method == "POST":
+        try:
+            body = await request.json()
+            key = body.get("key", "").strip()
+        except Exception:
+            pass
+    if not key:
+        cfg = load_config()
+        key = cfg.get("gemini_api_key", "").strip()
+
+    if not key:
+        return web.json_response({
+            "status": "error",
+            "message": "Chưa có Gemini API Key. Vui lòng nhập API Key để kiểm tra!"
+        }, status=400, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Private-Network": "true"})
+
+    data = await asyncio.to_thread(fetch_and_test_gemini_models, key)
+    return web.json_response(data, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Private-Network": "true"})
 
 async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemini-flash") -> tuple[str, str]:
     """Gọi LLM từ text thuần (hỗ trợ DeepSeek, Gemini, fallback)."""
@@ -646,28 +741,48 @@ async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemi
 
     # 2. Mặc định gọi Gemini
     if gemini_key and "YOUR_" not in gemini_key:
-        try:
-            url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={gemini_key}"
-            req_data = {
-                "contents": [
-                    {"role": "user", "parts": [{"text": f"{system_prompt}\n\nNgười dùng: {prompt_text}"}]}
-                ]
-            }
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(req_data).encode("utf-8"),
-                headers={"Content-Type": "application/json"}
-            )
-            def _call_gem():
-                with urllib.request.urlopen(req, timeout=12) as response:
-                    res_body = response.read().decode("utf-8")
-                    d = json.loads(res_body)
-                    return d["candidates"][0]["content"]["parts"][0]["text"]
-            reply = await asyncio.to_thread(_call_gem)
-            if reply.strip():
-                return (reply.strip(), detect_emotion_from_text(reply))
-        except Exception as e:
-            logger.error(f"Lỗi gọi Gemini REST API: {e}")
+        chosen_model = normalize_gemini_model(model_id or cfg.get("gemini_model") or cfg.get("openai_model") or "gemini-flash-lite-latest")
+        candidate_models = []
+        for m in [chosen_model, "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-flash-latest", "gemini-pro-latest"]:
+            norm = normalize_gemini_model(m)
+            if norm not in candidate_models:
+                candidate_models.append(norm)
+
+        last_error = ""
+        for try_model in candidate_models:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{try_model}:generateContent?key={gemini_key}"
+                req_data = {
+                    "contents": [
+                        {"role": "user", "parts": [{"text": f"{system_prompt}\n\nNgười dùng: {prompt_text}"}]}
+                    ]
+                }
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(req_data).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                def _call_gem():
+                    with urllib.request.urlopen(req, timeout=15) as response:
+                        res_body = response.read().decode("utf-8")
+                        d = json.loads(res_body)
+                        return d["candidates"][0]["content"]["parts"][0]["text"]
+                reply = await asyncio.to_thread(_call_gem)
+                if reply.strip():
+                    if try_model != chosen_model:
+                        logger.info(f"Model {chosen_model} không phản hồi, tự động dùng {try_model} thành công!")
+                    return (reply.strip(), detect_emotion_from_text(reply))
+            except urllib.error.HTTPError as he:
+                err_body = he.read().decode("utf-8", errors="ignore")
+                last_error = f"HTTP {he.code}: {err_body[:100]}"
+                logger.warning(f"Lỗi REST Gemini API với model {try_model}: {last_error}")
+            except Exception as e:
+                last_error = str(e)
+                logger.warning(f"Lỗi gọi Gemini REST API với model {try_model}: {e}")
+
+        # Nếu có API key mà tất cả model đều lỗi: báo lỗi thực tế
+        err_reply = f"Lỗi từ Google Gemini ({last_error}). Vui lòng kiểm tra lại API key hoặc chọn model khác nhé!"
+        return (err_reply, "sad")
 
     # 3. Fallback câu trả lời thông minh
     pt_lower = prompt_text.lower()
@@ -1036,6 +1151,12 @@ def create_app():
     app.router.add_get("/api/config", handle_http_config)
     app.router.add_post("/api/config", handle_http_config)
     app.router.add_options("/api/config", handle_http_options)
+    app.router.add_get("/api/gemini/models", handle_http_gemini_models)
+    app.router.add_post("/api/gemini/models", handle_http_gemini_models)
+    app.router.add_options("/api/gemini/models", handle_http_options)
+    app.router.add_get("/api/models", handle_http_gemini_models)
+    app.router.add_post("/api/models", handle_http_gemini_models)
+    app.router.add_options("/api/models", handle_http_options)
     app.router.add_get("/tts_stream", handle_http_tts_stream)
     app.router.add_post("/tts_stream", handle_http_tts_stream)
     app.router.add_get("/news_stream", handle_http_news_stream)

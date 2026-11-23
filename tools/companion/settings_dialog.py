@@ -75,6 +75,8 @@ class SettingsDialog:
             self.ai_port_entry.insert(0, str(cfg.get("ai_gateway_port", 8765)))
             self.gemini_entry.delete(0, "end")
             self.gemini_entry.insert(0, cfg.get("gemini_api_key", ""))
+            if hasattr(self, "gemini_model_combo"):
+                self.gemini_model_combo.set(cfg.get("gemini_model") or cfg.get("openai_model") or "gemini-flash-lite-latest")
             self.deepseek_entry.delete(0, "end")
             self.deepseek_entry.insert(0, cfg.get("openai_api_key", ""))
 
@@ -318,6 +320,40 @@ class SettingsDialog:
         )
         self.gemini_entry.insert(0, cfg.get("gemini_api_key", ""))
         self.gemini_entry.pack(side="left", fill="x", expand=True)
+
+        self.btn_check_gemini = tk.Button(
+            row_gemini,
+            text="🔍 Kiểm Tra",
+            font=("Segoe UI", 8, "bold"),
+            bg="#0284c7",
+            fg="#ffffff",
+            activebackground="#0369a1",
+            activeforeground="#ffffff",
+            relief="flat",
+            padx=8,
+            pady=2,
+            cursor="hand2",
+            command=self.check_gemini_models
+        )
+        self.btn_check_gemini.pack(side="left", padx=(6, 0))
+
+        # Model Gemini Dropdown
+        row_gemini_model = tk.Frame(ai_card, bg=BG_CARD)
+        row_gemini_model.pack(fill="x", pady=2)
+        tk.Label(row_gemini_model, text="Mô hình AI:", font=("Segoe UI", 9), bg=BG_CARD, fg=TEXT_MAIN, width=15, anchor="w").pack(side="left")
+        self.gemini_model_combo = ttk.Combobox(
+            row_gemini_model,
+            values=[
+                "gemini-flash-lite-latest",
+                "gemini-3-flash-preview",
+                "gemini-flash-latest",
+                "gemini-pro-latest"
+            ],
+            state="normal",
+            font=("Segoe UI", 9)
+        )
+        self.gemini_model_combo.set(cfg.get("gemini_model") or cfg.get("openai_model") or "gemini-flash-lite-latest")
+        self.gemini_model_combo.pack(side="left", fill="x", expand=True)
 
         # DeepSeek API Key
         row_deepseek = tk.Frame(ai_card, bg=BG_CARD)
@@ -603,6 +639,10 @@ class SettingsDialog:
         cfg["ai_gateway_port"] = new_ai_port
         cfg["ai_gateway_voice"] = voice_code
         cfg["gemini_api_key"] = self.gemini_entry.get().strip()
+        if hasattr(self, "gemini_model_combo"):
+            sel_model = self.gemini_model_combo.get().strip() or "gemini-flash-lite-latest"
+            cfg["gemini_model"] = sel_model
+            cfg["openai_model"] = sel_model
         cfg["openai_api_key"] = self.deepseek_entry.get().strip()
         cfg["autostart"] = self.var_autostart.get()
 
@@ -620,3 +660,47 @@ class SettingsDialog:
 
         messagebox.showinfo("Thành công", "Đã lưu cài đặt và áp dụng thay đổi thành công!")
         self._close_dialog()
+
+    def check_gemini_models(self):
+        """Kiểm tra API Key và lấy danh sách model Gemini khả dụng."""
+        key = self.gemini_entry.get().strip()
+        if not key:
+            messagebox.showwarning("Thông báo", "Vui lòng nhập hoặc dán Gemini API Key trước!")
+            return
+
+        self.btn_check_gemini.config(text="⏳ Đang test...", state="disabled")
+
+        def _worker():
+            try:
+                from tools.companion.ai_gateway_worker import fetch_and_test_gemini_models
+            except ImportError:
+                from ai_gateway_worker import fetch_and_test_gemini_models
+
+            res = fetch_and_test_gemini_models(key)
+
+            def _update_ui():
+                self.btn_check_gemini.config(text="🔍 Kiểm Tra", state="normal")
+                if res.get("status") == "ok":
+                    working = res.get("working_models", [])
+                    all_m = res.get("all_models", [])
+                    rec = res.get("recommended", "gemini-flash-lite-latest")
+                    combo_list = list(working)
+                    for m in all_m:
+                        if m not in combo_list:
+                            combo_list.append(m)
+                    self.gemini_model_combo["values"] = combo_list
+                    self.gemini_model_combo.set(rec)
+                    messagebox.showinfo(
+                        "Kiểm Tra Thành Công",
+                        f"Đã xác thực API Key thành công!\n\n"
+                        f"• Model đang hoạt động tốt: {', '.join(working) if working else 'Đang kiểm tra'}\n"
+                        f"• Đã tự động chọn model tối ưu: {rec}\n"
+                        f"• Tổng số model được cấp phép: {len(all_m)}"
+                    )
+                else:
+                    messagebox.showerror("Lỗi API Key", f"Không thể lấy danh sách model:\n{res.get('message', 'Lỗi không xác định')}")
+
+            if self.root:
+                self.root.after(0, _update_ui)
+
+        threading.Thread(target=_worker, daemon=True).start()

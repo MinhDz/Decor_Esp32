@@ -2559,8 +2559,10 @@
         <div class="form-group">
           <label>Mô hình AI Mặc Định (Model):</label>
           <select id="ai-cfg-pc-model" style="background:#0f172a; color:#f8fafc; border:1px solid #334155; padding:8px; border-radius:6px; width:100%;">
-            <option value="gemini-flash" selected>Google Gemini 2.5 Flash (Phản hồi siêu tốc - Khuyên dùng)</option>
-            <option value="gemini-pro">Google Gemini 2.5 Pro (Tìm kiếm Web thời gian thực)</option>
+            <option value="gemini-flash-lite-latest" selected>Google Gemini Flash Lite (Khuyên dùng - Siêu tốc, ổn định)</option>
+            <option value="gemini-3-flash-preview">Google Gemini 3 Flash Preview (Thế hệ mới nhất)</option>
+            <option value="gemini-flash-latest">Google Gemini Flash Latest (Bản Flash mới nhất)</option>
+            <option value="gemini-pro-latest">Google Gemini Pro Latest (Bản Pro thông minh)</option>
             <option value="deepseek-chat">DeepSeek V3 (Phản hồi tự nhiên, chi phí thấp)</option>
             <option value="deepseek-reasoner">DeepSeek R1 (Mô hình suy luận sâu)</option>
           </select>
@@ -2582,7 +2584,11 @@
           <div style="display:grid; grid-template-columns: 1fr 1fr; gap:10px;">
             <div>
               <label style="color:#e2e8f0; font-size:0.8rem; font-weight:600;">✨ Google Gemini API Key:</label>
-              <input type="password" id="ai-cfg-gemini-key" placeholder="AIzaSy... (Dán Gemini Key của bạn)" style="margin-bottom:4px;">
+              <div style="display:flex; gap:6px; margin-bottom:4px;">
+                <input type="password" id="ai-cfg-gemini-key" placeholder="AIzaSy... hoặc AQ.Ab8... (Dán Gemini Key của bạn)" style="flex:1; margin-bottom:0;">
+                <button type="button" class="btn-primary" style="padding:4px 10px; font-size:0.75rem; white-space:nowrap; background:#0284c7;" onclick="checkGeminiModels()">🔍 Kiểm tra Model</button>
+              </div>
+              <div id="ai-cfg-gemini-status" style="font-size:0.72rem; color:#10b981; min-height:16px;"></div>
               <div style="font-size:0.7rem; color:#94a3b8;">
                 <a href="https://aistudio.google.com/app/apikey" target="_blank" style="color:#38bdf8; text-decoration:underline;">Nhận khóa Gemini miễn phí tại Google AI Studio ↗</a>
               </div>
@@ -4711,6 +4717,102 @@
     const secXz = document.getElementById('cfg-section-xiaozhi');
     if (secPc) secPc.style.display = isPc ? 'grid' : 'none';
     if (secXz) secXz.style.display = isPc ? 'none' : 'grid';
+  }
+
+  async function checkGeminiModels() {
+    const keyInput = document.getElementById('ai-cfg-gemini-key');
+    const statusEl = document.getElementById('ai-cfg-gemini-status');
+    const modelSelect = document.getElementById('ai-cfg-pc-model');
+    const key = keyInput ? keyInput.value.trim() : '';
+    if (!key) {
+      showToast("Vui lòng dán Gemini API Key trước khi kiểm tra!", true);
+      if (statusEl) statusEl.innerHTML = '<span style="color:#f87171;">⚠️ Chưa nhập API Key</span>';
+      return;
+    }
+
+    if (statusEl) statusEl.innerHTML = '<span style="color:#38bdf8;">⏳ Đang kiểm tra model khả dụng từ Google...</span>';
+    showToast("Đang kiểm tra danh sách model khả dụng từ Google...");
+
+    let ip = document.getElementById('ai-cfg-pc-ip').value.trim() || '192.168.1.8';
+    let port = document.getElementById('ai-cfg-pc-port').value.trim() || '8765';
+    if (typeof aiConfig !== 'undefined') {
+      if (aiConfig.pc_gateway_ip) ip = aiConfig.pc_gateway_ip;
+      if (aiConfig.pc_gateway_port) port = aiConfig.pc_gateway_port;
+    }
+
+    let data = null;
+    // 1. Thử gọi trực tiếp PC Companion Gateway
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 8000);
+      const res = await fetch(`http://${ip}:${port}/api/gemini/models?key=${encodeURIComponent(key)}`, {
+        method: 'GET',
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        data = await res.json();
+      }
+    } catch (err) {
+      console.warn("Direct fetch for models failed, falling back to ESP32 proxy:", err);
+    }
+
+    // 2. Fallback qua proxy ESP32
+    if (!data || data.status !== 'ok') {
+      try {
+        const pRes = await fetch(`/api/xiaozhi/gemini_models?key=${encodeURIComponent(key)}`);
+        if (pRes.ok) {
+          data = await pRes.json();
+        }
+      } catch (err2) {
+        console.warn("Proxy models check failed:", err2);
+      }
+    }
+
+    if (data && data.status === 'ok') {
+      const working = data.working_models || [];
+      const allM = data.all_models || [];
+      const rec = data.recommended || (working.length > 0 ? working[0] : 'gemini-flash-lite-latest');
+
+      if (modelSelect) {
+        modelSelect.innerHTML = '';
+        working.forEach(m => {
+          const opt = document.createElement('option');
+          opt.value = m;
+          opt.textContent = `✅ ${m} (Khả dụng)`;
+          if (m === rec) opt.selected = true;
+          modelSelect.appendChild(opt);
+        });
+
+        const optDsChat = document.createElement('option');
+        optDsChat.value = 'deepseek-chat';
+        optDsChat.textContent = 'DeepSeek V3 (Phản hồi tự nhiên, chi phí thấp)';
+        modelSelect.appendChild(optDsChat);
+
+        const optDsR1 = document.createElement('option');
+        optDsR1.value = 'deepseek-reasoner';
+        optDsR1.textContent = 'DeepSeek R1 (Mô hình suy luận sâu)';
+        modelSelect.appendChild(optDsR1);
+
+        allM.forEach(m => {
+          if (!working.includes(m)) {
+            const opt = document.createElement('option');
+            opt.value = m;
+            opt.textContent = m;
+            modelSelect.appendChild(opt);
+          }
+        });
+      }
+
+      if (statusEl) {
+        statusEl.innerHTML = `<span style="color:#10b981;">✅ Đã tìm thấy ${working.length} model hoạt động tốt! Khuyên dùng: <strong>${rec}</strong></span>`;
+      }
+      showToast(`Đã xác thực API Key! Tự động chọn: ${rec}`);
+    } else {
+      const errMsg = (data && data.message) ? data.message : "Không thể kiểm tra model từ Google Gemini API";
+      if (statusEl) statusEl.innerHTML = `<span style="color:#f87171;">❌ ${errMsg}</span>`;
+      showToast(errMsg, true);
+    }
   }
 
   async function testPcGatewayPing() {

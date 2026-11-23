@@ -3108,7 +3108,7 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             message: msg,
-            model: (typeof aiConfig !== 'undefined' && aiConfig.ai_model) ? aiConfig.ai_model : 'gemini-pro',
+            model: (typeof aiConfig !== 'undefined' && aiConfig.ai_model) ? aiConfig.ai_model : 'gemini-flash-lite-latest',
             voice: (typeof aiConfig !== 'undefined' && aiConfig.tts_voice) ? aiConfig.tts_voice : 'vi-VN-HoaiMyNeural',
             stream_audio: true
           }),
