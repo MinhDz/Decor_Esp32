@@ -119,46 +119,49 @@ def pcm_to_wav_bytes(pcm_bytes: bytes, sample_rate: int = 16000) -> bytes:
         wf.writeframes(pcm_bytes)
     return buf.getvalue()
 
+def clean_text_for_tts(text: str) -> str:
+    """Làm sạch văn bản trước khi đưa vào TTS: loại bỏ markdown, emoji, chuẩn hóa số thứ tự."""
+    if not text:
+        return ""
+    # Bỏ markdown asterisks, hashes, backticks, tildes
+    t = re.sub(r'[*_#`~]', '', text)
+    # Chuyển đổi số thứ tự đầu dòng: 1. 2. thành Mục 1: , Mục 2: để không bị ngắt câu rời rạc
+    t = re.sub(r'^\s*(\d+)\.\s+', r'Mục \1: ', t, flags=re.MULTILINE)
+    # Bỏ emoji và các icon ký tự đặc biệt
+    t = re.sub(r'[✨⭐🚀🤖⚡📢📦🏁🔌💡❤️🥰😘😋😡😭😱😴🤔😉😂🤣]+', '', t)
+    return t.strip()
+
 def split_into_smart_sentences(text: str, max_chars: int = 140) -> list[str]:
-    """Tách văn bản thành các câu ngắn tối ưu (80-140 ký tự) cho Edge-TTS streaming."""
-    clean = re.sub(r'[*#`_~\[\]\(\)>]', '', text).strip()
-    if not clean:
+    """Phân tách thông minh các câu theo ngữ pháp tự nhiên, không cắt vụn số hoặc từ viết tắt."""
+    text = clean_text_for_tts(text)
+    if not text:
         return []
-
-    # 1. Tách theo dấu ngắt câu chính
-    raw_parts = re.split(r'([.?!;\n]+(?:\s+|$))', clean)
+    # Tách theo dấu kết thúc câu (.?!;\n) với điều kiện ký tự đứng trước không phải là chữ số (tránh cắt 1.5, 3.14)
+    raw_sentences = re.split(r'(?<=[^\d][.?!;\n])\s+', text)
     sentences = []
-    curr = ""
-    for part in raw_parts:
-        if not part:
+    for s in raw_sentences:
+        s = s.strip()
+        if not s:
             continue
-        curr += part
-        if re.search(r'[.?!;\n]+', part):
-            if curr.strip():
-                sentences.append(curr.strip())
-            curr = ""
-    if curr.strip():
-        sentences.append(curr.strip())
-
-    # 2. Bẻ nhỏ các câu còn dài hơn max_chars theo dấu phẩy hoặc khoảng trắng
-    final_sentences = []
-    for s in sentences:
         if len(s) <= max_chars:
-            final_sentences.append(s)
+            sentences.append(s)
         else:
-            sub_parts = re.split(r'([,:—–]+(?:\s+|$))', s)
-            sub_curr = ""
-            for sp in sub_parts:
-                if len(sub_curr) + len(sp) <= max_chars:
-                    sub_curr += sp
+            # Nếu câu quá dài, tách tiếp theo dấu phẩy, hai chấm, gạch ngang
+            sub = re.split(r'(?<=[,:—–])\s+', s)
+            curr = ""
+            for p in sub:
+                p = p.strip()
+                if not p:
+                    continue
+                if len(curr) + len(p) + 1 <= max_chars:
+                    curr = (curr + " " + p).strip() if curr else p
                 else:
-                    if sub_curr.strip():
-                        final_sentences.append(sub_curr.strip())
-                    sub_curr = sp
-            if sub_curr.strip():
-                final_sentences.append(sub_curr.strip())
-
-    return [s for s in final_sentences if s]
+                    if curr:
+                        sentences.append(curr)
+                    curr = p
+            if curr:
+                sentences.append(curr)
+    return [s for s in sentences if s]
 
 def detect_emotion_from_text(text: str) -> str:
     """Xác định cảm xúc khuôn mặt cho màn hình LCD ST7789 từ nội dung trả lời."""
@@ -197,7 +200,10 @@ def fetch_google_tts_mp3(text: str) -> bytes:
         return res.read()
 
 def synthesize_sentence_worker(text: str, voice: str) -> bytes:
-    """Tổng hợp âm thanh Hybrid: Ưu tiên Edge Neural TTS, tự động Fallback sang Google Translate TTS nếu chậm/lỗi."""
+    """Tổng hợp âm thanh: Đảm bảo đồng nhất 1 giọng duy nhất (không nhảy giọng giữa các câu)."""
+    if not text.strip():
+        return b""
+
     mp3_bytes = b""
     engine = "Edge-TTS"
 
@@ -210,29 +216,38 @@ def synthesize_sentence_worker(text: str, voice: str) -> bytes:
             logger.warning(f"Google TTS lỗi: {e}")
 
     # 2. Mặc định: Ưu tiên Microsoft Edge Neural TTS (Hoài My / Nam Minh)
+    # Timeout 12 giây + 2 lần thử để chống rớt kết nối mạng mà không bị nhảy giọng
     if not mp3_bytes:
-        async def _inner():
-            import edge_tts
-            comm = edge_tts.Communicate(text, voice)
-            mp3 = bytearray()
-            async for chunk in comm.stream():
-                if chunk["type"] == "audio":
-                    mp3.extend(chunk["data"])
-            return bytes(mp3)
+        for attempt in range(2):
+            async def _inner():
+                import edge_tts
+                comm = edge_tts.Communicate(text, voice)
+                mp3 = bytearray()
+                async for chunk in comm.stream():
+                    if chunk["type"] == "audio":
+                        mp3.extend(chunk["data"])
+                return bytes(mp3)
 
-        try:
-            async def _run_with_timeout():
-                return await asyncio.wait_for(_inner(), timeout=4.0)
-            mp3_bytes = asyncio.run(_run_with_timeout())
-            engine = f"Edge-TTS ({voice})"
-        except Exception:
-            mp3_bytes = b""
+            try:
+                async def _run_with_timeout():
+                    return await asyncio.wait_for(_inner(), timeout=12.0)
+                mp3_bytes = asyncio.run(_run_with_timeout())
+                if mp3_bytes:
+                    engine = f"Edge-TTS ({voice})"
+                    break
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning(f"Edge-TTS thử lại lần 2 cho câu '{text[:30]}...': {e}")
+                    time.sleep(0.3)
+                else:
+                    logger.error(f"Edge-TTS thất bại sau 2 lần thử: {e}")
 
-    # 3. Fallback siêu tốc sang Google TTS nếu Edge-TTS quá 4.0s hoặc lỗi mạng
+    # 3. Fallback chỉ khi Edge-TTS hoàn toàn không phản hồi sau 2 lần thử
     if not mp3_bytes:
         try:
             mp3_bytes = fetch_google_tts_mp3(text)
-            engine = "Google-TTS (Fallback Siêu Tốc)"
+            engine = "Google-TTS (Fallback khi Edge-TTS mất kết nối)"
+            logger.warning(f"⚠️ Edge-TTS không phản hồi sau 2 lần thử, dùng tạm Google TTS cho: '{text[:30]}...'")
         except Exception as e:
             logger.error(f"Cả Edge-TTS và Google-TTS đều lỗi: {e}")
             return b""

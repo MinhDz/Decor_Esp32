@@ -27,9 +27,9 @@ ACCENT_YELLOW = "#f9e2af"
 BORDER_COLOR = "#45475a"
 
 VOICE_OPTIONS = [
-    ("vi-VN-HoaiMyNeural (Nữ - Truyền cảm)", "vi-VN-HoaiMyNeural"),
-    ("vi-VN-NamMinhNeural (Nam - Ấm áp)", "vi-VN-NamMinhNeural"),
-    ("vi-google (Google Translate TTS)", "vi-google")
+    ("vi-VN-HoaiMyNeural (Nữ Miền Nam - Khuyên dùng)", "vi-VN-HoaiMyNeural"),
+    ("vi-VN-NamMinhNeural (Nam Miền Bắc - Ấm áp)", "vi-VN-NamMinhNeural"),
+    ("vi-google (Nữ Miền Bắc - Chị Google)", "vi-google")
 ]
 
 class SettingsDialog:
