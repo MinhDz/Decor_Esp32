@@ -56,5 +56,7 @@ public:
   static void serializeMetrics(JsonDocument& doc);
   static bool isLive();
   static const PcMetrics& getMetrics();
+  static void recordPcIp(const IPAddress& ip);
+  static String getPcIp();
 };
 

@@ -24,6 +24,7 @@
 #include "MemoryScavenger.h"
 #include <SPI.h>
 #include <WiFi.h>
+#include <HTTPClient.h>
 #include <LittleFS.h>
 #include <ArduinoJson.h>
 #include <time.h>
@@ -7190,6 +7191,92 @@ namespace TestDisplay {
   }
 
   // ============================================================================
+  // YÊU CẦU APP DecorSpaceCompanion.exe TRÊN PC NẠP PLAYLIST ONLINE MỚI NHẤT
+  // ============================================================================
+  static void requestLatestOnlinePlaylistFromPc() {
+    if (WiFi.status() != WL_CONNECTED) {
+      showSymbianToast("LỖI: CHƯA KẾT NỐI WI-FI!");
+      drawMediaPlayerAppScreen(false);
+      return;
+    }
+
+    // 1. Xác định địa chỉ IP máy tính PC đang chạy DecorSpaceCompanion.exe
+    String pcIp = PcStatsManager::getPcIp();
+    if (pcIp.length() == 0 || pcIp == "0.0.0.0") {
+      pcIp = XiaoZhiClient::getPcGatewayIp();
+    }
+
+    if (pcIp.length() == 0 || pcIp == "0.0.0.0") {
+      SystemLogger::log(LOG_LVL_WARN, "MEDIA", "Chưa biết IP PC Companion!");
+      showSymbianToast("CHƯA KẾT NỐI PC! HÃY KHỞI ĐỘNG LẠI APP");
+      drawMediaPlayerAppScreen(false);
+      return;
+    }
+
+    showSymbianToast("ĐANG KẾT NỐI PC NẠP PLAYLIST...");
+    drawMediaPlayerAppScreen(false);
+
+    HTTPClient http;
+    String targetUrl = "http://" + pcIp + ":5050/api/playlist/load_latest";
+    http.begin(targetUrl);
+    http.addHeader("Content-Type", "application/json");
+    http.setTimeout(2500); // 2.5s timeout tránh block giao diện S40
+
+    JsonDocument reqDoc;
+    reqDoc["esp_ip"] = WiFi.localIP().toString();
+    String reqBody;
+    serializeJson(reqDoc, reqBody);
+
+    int httpCode = http.POST(reqBody);
+    if (httpCode == 200) {
+      String resp = http.getString();
+      http.end();
+
+      JsonDocument resDoc;
+      DeserializationError jsonErr = deserializeJson(resDoc, resp);
+      if (!jsonErr) {
+        String status = resDoc["status"] | "";
+        int count = resDoc["count"] | 0;
+        if (status == "empty" || count == 0) {
+          showSymbianToast("PLAYLIST TRÊN PC RỖNG!");
+          drawMediaPlayerAppScreen(false);
+          return;
+        }
+
+        String pName = resDoc["playlist_name"] | "YouTube Playlist";
+        String titles[24];
+        uint16_t durations[24];
+        String ids[24];
+        int trackCount = 0;
+        JsonArray tracks = resDoc["tracks"].as<JsonArray>();
+        for (JsonObject t : tracks) {
+          if (trackCount >= 24) break;
+          titles[trackCount] = t["title"] | "Bản nhạc";
+          durations[trackCount] = t["duration"] | 180;
+          ids[trackCount] = t["id"] | "";
+          trackCount++;
+        }
+
+        setOnlinePlaylist(titles, durations, ids, trackCount, pName);
+        s40MediaListCursor = 0;
+        s40MediaSubState = 2; // Mở danh sách bài hát
+        drawMediaPlayerAppScreen(true);
+        char toastBuf[48];
+        snprintf(toastBuf, sizeof(toastBuf), "ĐÃ TẢI %d BÀI TỪ PC!", trackCount);
+        showSymbianToast(toastBuf);
+      } else {
+        showSymbianToast("LỖI ĐỌC DỮ LIỆU TỪ PC!");
+        drawMediaPlayerAppScreen(false);
+      }
+    } else {
+      http.end();
+      SystemLogger::log(LOG_LVL_WARN, "MEDIA", "Không thể kết nối PC (%s:5050): code %d", pcIp.c_str(), httpCode);
+      showSymbianToast("MẤT KẾT NỐI PC! VUI LÒNG KHỞI ĐỘNG LẠI APP");
+      drawMediaPlayerAppScreen(false);
+    }
+  }
+
+  // ============================================================================
   // HÀM NHẬN SỰ KIỆN TỪ BÀN PHÍM 7 NÚT ADC (GPIO 3)
   // keyIndex: 0=OK, 1=UP, 2=DOWN, 3=LEFT, 4=RIGHT, 5=MENU, 6=EXIT
   // ============================================================================
@@ -8263,31 +8350,8 @@ namespace TestDisplay {
             showSymbianToast("ĐÃ TẢI NHẠC TỪ THẺ SD");
             drawMediaPlayerAppScreen(true);
           } else if (s40MediaPopupCursor == 2) {
-            // 3. Sử dụng Playlist Online (Nếu rỗng thông báo mở Transcoder PC)
-            if (s40OnlineSavedTrackCount == 0 && (!s40MediaIsOnline || s40MediaTrackCount == 0)) {
-              showSymbianToast("PLAYLIST RỖNG! MỞ TRANSCODER PC ĐỂ NẠP");
-              drawMediaPlayerAppScreen(false);
-            } else {
-              if (!s40MediaIsOnline) {
-                stopMediaAudioPlayback();
-                TestAudio::resetStreamPcm();
-                s40MediaIsOnline = true;
-                s40MediaTrackCount = s40OnlineSavedTrackCount;
-                s40MediaPlaylistTitle = s40OnlineSavedPlaylistName;
-                for (int i = 0; i < s40OnlineSavedTrackCount; i++) {
-                  s40MediaTracks[i] = s40OnlineSavedTracks[i];
-                  s40MediaDurations[i] = s40OnlineSavedDurations[i];
-                  s40MediaTrackIds[i] = s40OnlineSavedIds[i];
-                  s40MediaFromSd[i] = false;
-                }
-                s40MediaTrackIdx = 0;
-                s40MediaCurSec = 0;
-              }
-              s40MediaListCursor = s40MediaTrackIdx;
-              s40MediaSubState = 2;
-              showSymbianToast("CHUYỂN SANG PLAYLIST ONLINE");
-              drawMediaPlayerAppScreen(true);
-            }
+            // 3. Sử dụng Playlist Online từ PC Companion (DecorSpaceCompanion.exe)
+            requestLatestOnlinePlaylistFromPc();
           } else if (s40MediaPopupCursor == 3) {
             // 4. Đổi chế độ hiển thị sóng âm (Nhạc vẫn tiếp tục chạy mượt mà!)
             s40MediaVisMode = (s40MediaVisMode + 1) % 3;

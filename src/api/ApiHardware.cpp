@@ -394,6 +394,7 @@ namespace ApiHardware {
       server.send(400, "application/json", "{\"error\":\"Missing body\"}");
       return;
     }
+    PcStatsManager::recordPcIp(server.client().remoteIP());
     bool ok = PcStatsManager::updateMetrics(server.arg("plain"));
     if (ok) {
       server.send(200, "application/json", "{\"status\":\"ok\",\"is_live\":true}");

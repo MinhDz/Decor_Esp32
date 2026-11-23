@@ -2435,6 +2435,81 @@ def api_playlist_load_saved():
         logger.error(f"Lỗi nạp playlist từ file {filename}: {e}")
         return jsonify({"status": "error", "error": str(e)}), 500
 
+@app.route("/api/playlist/load_latest", methods=["POST", "GET", "OPTIONS"])
+def api_playlist_load_latest():
+    if request.method == "OPTIONS":
+        return "", 204
+
+    esp_ip = ""
+    if request.is_json and request.get_json():
+        esp_ip = (request.get_json().get("esp_ip") or "").strip()
+    if not esp_ip:
+        esp_ip = (request.args.get("esp_ip") or "").strip()
+    if not esp_ip:
+        esp_ip = request.remote_addr or session.esp_ip
+
+    logger.info(f"📡 Trạm Decor ESP32 ({esp_ip}) yêu cầu nạp Playlist Online mới nhất từ PC Companion...")
+
+    # 1. Tìm trong danh sách playlist đã lưu trong thư mục playlists/ (sắp xếp giảm dần theo thời gian)
+    saved_items = playlist_mgr.list_saved_playlists()
+    data = None
+    loaded_name = ""
+
+    if saved_items:
+        latest = saved_items[0]
+        filename = latest.get("filename", "")
+        target_fn = os.path.basename(filename)
+        fpath = os.path.join(playlist_mgr.playlists_dir, target_fn)
+        if os.path.exists(fpath):
+            try:
+                with open(fpath, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                loaded_name = data.get("playlist_name") or latest.get("playlist_name", "YouTube Playlist")
+                logger.info(f"📂 Đã nạp playlist mới nhất từ nhật ký PC: '{filename}' ('{loaded_name}', {len(data.get('tracks', []))} bài)")
+            except Exception as e:
+                logger.error(f"Lỗi đọc file nhật ký {fpath}: {e}")
+
+    # 2. Nếu chưa có file lưu, kiểm tra bộ nhớ tạm / cache hiện tại
+    if (not data or not data.get("tracks")) and playlist_mgr.tracks:
+        data = {
+            "playlist_name": playlist_mgr.playlist_name or "YouTube Playlist",
+            "tracks": playlist_mgr.tracks
+        }
+        loaded_name = playlist_mgr.playlist_name or "YouTube Playlist"
+        logger.info(f"📂 Sử dụng playlist từ bộ nhớ tạm ({len(playlist_mgr.tracks)} bài)")
+
+    # 3. Nếu cả 2 đều rỗng -> báo trống cho trạm
+    if not data or not data.get("tracks"):
+        logger.warning("⚠️ Nhật ký playlist trên PC hoàn toàn trống!")
+        return jsonify({
+            "status": "empty",
+            "count": 0,
+            "message": "Nhật ký playlist trên PC trống, chưa có danh sách nào được lưu"
+        })
+
+    # Cập nhật trạng thái playlist_mgr trên PC trong background để đồng bộ phát khi trạm chọn bài
+    def _async_apply():
+        try:
+            time.sleep(0.1) # Nhường cho ESP32 nhận xong response HTTP 200 trước, tránh deadlock
+            playlist_mgr._apply_playlist_data(data, esp_ip)
+        except Exception as err:
+            logger.error(f"Lỗi đồng bộ ngầm playlist: {err}")
+
+    threading.Thread(target=_async_apply, daemon=True).start()
+
+    # Trả về ngay danh sách bài hát cho ESP32 nạp và hiển thị tức thì
+    tracks_list = [
+        {"title": t.get("title", ""), "duration": t.get("duration", 180), "id": t.get("id", "")}
+        for t in data.get("tracks", [])[:24]
+    ]
+    return jsonify({
+        "status": "ok",
+        "playlist_name": loaded_name,
+        "count": len(tracks_list),
+        "tracks": tracks_list
+    })
+
+
 @app.route("/api/playlist/delete_saved", methods=["POST", "OPTIONS"])
 def api_playlist_delete_saved():
     if request.method == "OPTIONS":

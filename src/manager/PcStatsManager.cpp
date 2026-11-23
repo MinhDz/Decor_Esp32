@@ -1,6 +1,7 @@
 #include "PcStatsManager.h"
 
 static PcMetrics currentMetrics;
+static IPAddress s_pcIpAddress = IPAddress(0, 0, 0, 0);
 
 void PcStatsManager::init() {
   currentMetrics.lastUpdateMillis = 0;
@@ -123,5 +124,18 @@ bool PcStatsManager::isLive() {
 
 const PcMetrics& PcStatsManager::getMetrics() {
   return currentMetrics;
+}
+
+void PcStatsManager::recordPcIp(const IPAddress& ip) {
+  if (ip != IPAddress(0, 0, 0, 0)) {
+    s_pcIpAddress = ip;
+  }
+}
+
+String PcStatsManager::getPcIp() {
+  if (s_pcIpAddress != IPAddress(0, 0, 0, 0)) {
+    return s_pcIpAddress.toString();
+  }
+  return "";
 }
 
