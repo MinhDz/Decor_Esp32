@@ -603,7 +603,10 @@ class AiGatewayServer:
             "edge_tts": True,
             "default_voice": cfg.get("ai_gateway_voice", "vi-VN-HoaiMyNeural"),
             "models": ["gemini-pro", "gemini-flash", "deepseek-r1"]
-        }, headers={"Access-Control-Allow-Origin": "*"})
+        }, headers={
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Private-Network": "true"
+        })
 
     async def handle_http_speak(self, request: web.Request) -> web.Response:
         cfg = self.get_cfg()
@@ -693,8 +696,9 @@ class AiGatewayServer:
     async def handle_http_options(self, request: web.Request) -> web.Response:
         return web.Response(status=204, headers={
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization"
+            "Access-Control-Allow-Methods": "POST, GET, OPTIONS, HEAD",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, *",
+            "Access-Control-Allow-Private-Network": "true"
         })
 
     async def handle_http_chat(self, request: web.Request) -> web.Response:
@@ -842,17 +846,41 @@ class AiGatewayServer:
 
         return ws
 
+@web.middleware
+async def cors_and_pna_middleware(request: web.Request, handler):
+    if request.method == "OPTIONS":
+        response = web.Response(status=204)
+    else:
+        try:
+            response = await handler(request)
+        except web.HTTPException as ex:
+            response = ex
+        except Exception as e:
+            logger.error(f"Lỗi xử lý request {request.path}: {e}")
+            response = web.json_response({"status": "error", "message": str(e)}, status=500)
+
+    response.headers["Access-Control-Allow-Origin"] = "*"
+    response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS, HEAD, PUT, DELETE"
+    response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, *"
+    response.headers["Access-Control-Allow-Private-Network"] = "true"
+    return response
+
 def create_aiohttp_app(server_handler):
-    app = web.Application()
+    app = web.Application(middlewares=[cors_and_pna_middleware])
     app.router.add_get("/health", server_handler.handle_http_health)
+    app.router.add_options("/health", server_handler.handle_http_options)
     app.router.add_get("/api/speak", server_handler.handle_http_speak)
     app.router.add_post("/api/speak", server_handler.handle_http_speak)
     app.router.add_options("/api/speak", server_handler.handle_http_options)
     app.router.add_get("/api/news/speak", server_handler.handle_http_news_speak)
     app.router.add_post("/api/news/speak", server_handler.handle_http_news_speak)
+    app.router.add_options("/api/news/speak", server_handler.handle_http_options)
     app.router.add_get("/api/chat", server_handler.handle_http_chat)
     app.router.add_post("/api/chat", server_handler.handle_http_chat)
     app.router.add_options("/api/chat", server_handler.handle_http_options)
+    app.router.add_get("/chat", server_handler.handle_http_chat)
+    app.router.add_post("/chat", server_handler.handle_http_chat)
+    app.router.add_options("/chat", server_handler.handle_http_options)
     app.router.add_get("/api/config", server_handler.handle_http_config)
     app.router.add_post("/api/config", server_handler.handle_http_config)
     app.router.add_options("/api/config", server_handler.handle_http_options)

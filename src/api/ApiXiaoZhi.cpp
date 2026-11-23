@@ -4,6 +4,7 @@
 #include "tests/TestDisplay.h"
 #include "tests/TestAudio.h"
 #include "services/PeripheralControlService.h"
+#include "PcStatsManager.h"
 #include <ArduinoJson.h>
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -171,9 +172,31 @@ namespace ApiXiaoZhi {
     server.send(res.success ? 200 : 500, "application/json; charset=utf-8", out);
   }
 
+  void handlePingGateway(WebServer& server) {
+    String ip = server.hasArg("ip") ? server.arg("ip") : XiaoZhiClient::getPcGatewayIp();
+    if (ip.length() == 0 || ip == "0.0.0.0") {
+      ip = PcStatsManager::getPcIp();
+    }
+    int port = server.hasArg("port") ? server.arg("port").toInt() : XiaoZhiClient::getPcGatewayPort();
+    if (port <= 0) port = 8765;
+
+    HTTPClient http;
+    http.begin("http://" + ip + ":" + String(port) + "/health");
+    http.setTimeout(2500);
+    int code = http.GET();
+    if (code > 0) {
+      String payload = http.getString();
+      server.send(code, "application/json", payload);
+    } else {
+      server.send(502, "application/json", "{\"status\":\"error\",\"code\":" + String(code) + "}");
+    }
+    http.end();
+  }
+
   void registerRoutes(WebServer& server) {
     server.on("/api/config/ai", HTTP_GET, [&server]() { handleGetAIConfig(server); });
     server.on("/api/config/ai", HTTP_POST, [&server]() { handleSaveAIConfig(server); });
+    server.on("/api/xiaozhi/ping_gateway", HTTP_GET, [&server]() { handlePingGateway(server); });
     server.on("/api/xiaozhi/ota", HTTP_GET, [&server]() { handleXiaoZhiOTA(server); });
     server.on("/api/xiaozhi/ota", HTTP_POST, [&server]() { handleXiaoZhiOTA(server); });
     server.on("/api/xiaozhi/unbind", HTTP_GET, [&server]() { handleXiaoZhiUnbind(server); });

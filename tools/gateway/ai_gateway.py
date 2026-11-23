@@ -558,8 +558,9 @@ async def handle_http_options(request: web.Request) -> web.Response:
         status=204,
         headers={
             "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS, HEAD",
+            "Access-Control-Allow-Headers": "Content-Type, Authorization, X-Requested-With, *",
+            "Access-Control-Allow-Private-Network": "true",
             "Access-Control-Max-Age": "86400",
         }
     )
@@ -573,6 +574,11 @@ async def handle_http_health(request: web.Request) -> web.Response:
         "version": "2.0-pipelined-pcm",
         "edge_tts": True,
         "default_voice": cfg.get("tts_voice", "vi-VN-HoaiMyNeural"),
+        "models": ["gemini-pro", "gemini-flash", "deepseek-r1"]
+    }, headers={
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Private-Network": "true"
+    })
         "models": ["gemini-pro", "gemini-flash", "deepseek-r1"]
     }, headers={"Access-Control-Allow-Origin": "*"})
 

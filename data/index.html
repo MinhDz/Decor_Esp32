@@ -4717,20 +4717,37 @@
     const ip = document.getElementById('ai-cfg-pc-ip').value.trim() || '192.168.1.8';
     const port = document.getElementById('ai-cfg-pc-port').value.trim() || '8765';
     showToast(`Đang ping Gateway tại http://${ip}:${port}/health...`, false);
+    
+    // 1. Thử ping trực tiếp từ trình duyệt
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const timeoutId = setTimeout(() => controller.abort(), 2500);
       const res = await fetch(`http://${ip}:${port}/health`, { signal: controller.signal });
       clearTimeout(timeoutId);
       if (res.ok) {
         const d = await res.json();
         showToast(`✅ PC Gateway Online! Phiên bản: ${d.version || '2.0'}, Voice: ${d.default_voice || 'Hoài My'}`);
-      } else {
-        showToast(`⚠️ Server phản hồi mã HTTP ${res.status}`, true);
+        return;
       }
     } catch (e) {
-      showToast(`❌ Không thể kết nối tới PC Gateway tại ${ip}:${port}! Hãy kiểm tra xem start_gateway.bat đã chạy chưa.`, true);
+      console.warn("Direct fetch to gateway failed, falling back to ESP32 proxy...", e);
     }
+
+    // 2. Dự phòng: Ping thông qua ESP32 Proxy (khắc phục chặn CORS / Private Network của trình duyệt)
+    try {
+      const pRes = await fetch(`/api/xiaozhi/ping_gateway?ip=${encodeURIComponent(ip)}&port=${encodeURIComponent(port)}`);
+      if (pRes.ok) {
+        const d = await pRes.json();
+        if (d.status === 'ok' || d.gateway === 'active') {
+          showToast(`✅ PC Gateway Online (kết nối thành công qua Trạm)! Phiên bản: ${d.version || '2.0'}`);
+          return;
+        }
+      }
+    } catch (err) {
+      console.warn("Proxy ping failed:", err);
+    }
+
+    showToast(`❌ Không thể kết nối tới PC Gateway tại ${ip}:${port}! Hãy kiểm tra xem Decor Space Companion đã chạy chưa.`, true);
   }
 
   async function triggerPcGatewayNews() {
