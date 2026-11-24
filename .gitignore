@@ -50,6 +50,7 @@ ai_lab/
 # Python packaging & Companion App
 tools/companion/build/
 tools/companion/dist/
+tools/gateway/recordings/
 *.spec
 *.log
 .gemini/

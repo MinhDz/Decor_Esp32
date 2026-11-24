@@ -66,6 +66,7 @@ namespace AudioDriver {
   uint32_t getRecordSampleRate(); // Luôn là 16,000 Hz chuẩn Google STT & AI
   float getRecordedDurationSec();
   int getRecordedMaxVuPct();
+  int32_t getRecordedPeak();
   void setMicSensitivityMode(int mode); // 0: Thấp (1.8x), 1: Tiêu chuẩn (3.5x), 2: Cao (5.5x)
 
   // --- PHÁT ÂM THANH QUA I2S DAC MAX98357A (DIN=15, BCLK=16, LRC=17 TRÊN I2S_NUM_1) ---
@@ -81,6 +82,11 @@ namespace AudioDriver {
   void playStartupPwmChime(uint8_t pin = 15);
   void playRecordedVoicePwm(uint8_t pin = 15);
   bool saveRecordedVoiceToSd(const char* filepath = "/recording/rec_latest.wav");
+  String saveRecordedVoiceWithTimestamp(const char* dir = "/recording");
+  String getLatestRecordedVoicePath();
+  bool pushRecordedAudioToWebSocketAsync(const String& host = "", int port = 8766);
+  void setLastClientIp(const String& ip);
+  String getLastClientIp();
 
   // Phát nhạc bất đồng bộ (Non-blocking Task trên Core 0) cho Trình phát nhạc (Mode 12)
   void startVoicePlaybackAsync(uint8_t pin = 15);

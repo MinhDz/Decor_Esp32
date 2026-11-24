@@ -1135,6 +1135,8 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
     model_key = "gemini-pro"
     enable_search = True
     sample_rate = 16000
+    is_mic_test = False
+    rec_filename = ""
 
     try:
         async for msg in ws:
@@ -1143,16 +1145,35 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
             elif msg.type == aiohttp.WSMsgType.TEXT:
                 data = json.loads(msg.data)
                 msg_type = data.get("type")
-                if msg_type == "start":
+                if msg_type in ("start", "mic_record"):
                     pcm_buf.clear()
                     await cancel_existing_ws_stream(ws)
+                    is_mic_test = (msg_type == "mic_record")
+                    rec_filename = data.get("filename", "")
                     model_key = data.get("model", "gemini-pro")
                     enable_search = bool(data.get("search", True))
                     sample_rate = int(data.get("sample_rate", 16000))
-                    logger.info(f"🎙️ Phiên mới: model={model_key}, search={enable_search}, sr={sample_rate}")
+                    logger.info(f"🎙️ Phiên mới: type={msg_type}, model={model_key}, search={enable_search}, sr={sample_rate}")
                 elif msg_type == "end":
                     logger.info(f"📦 Đã nhận xong {len(pcm_buf)} bytes PCM từ Mic ESP32. Bắt đầu xử lý...")
                     wav_bytes = pcm_to_wav_bytes(bytes(pcm_buf), sample_rate)
+
+                    if is_mic_test:
+                        rec_dir = BASE_DIR / "recordings"
+                        rec_dir.mkdir(parents=True, exist_ok=True)
+                        save_name = Path(rec_filename).name if rec_filename else f"rec_{time.strftime('%Hh%Mm%Ss_%d_%m')}.wav"
+                        target_file = rec_dir / save_name
+                        target_file.write_bytes(wav_bytes)
+                        (rec_dir / "rec_latest.wav").write_bytes(wav_bytes)
+                        logger.info(f"🎉 [MIC TEST] Đã lưu tệp vào PC: {target_file}")
+                        try:
+                            import winsound
+                            winsound.PlaySound(str(target_file), winsound.SND_FILENAME | winsound.SND_ASYNC)
+                            logger.info(f"🔊 [PC SPEAKER] Đang tự động phát {save_name} ra loa máy tính...")
+                        except Exception:
+                            pass
+                        await ws.send_str(json.dumps({"type": "done", "status": "ok", "filename": save_name}))
+                        continue
 
                     if model_key == "deepseek-r1":
                         await process_with_openai_compat(cfg, wav_bytes, enable_search, ws)

@@ -4,9 +4,13 @@
 #include "drivers/StorageDriver.h"
 #include "WebStreamManager.h"
 #include "Config.h"
+#include "TimeManager.h"
+#include "XiaoZhiClient.h"
 #include <driver/i2s.h>
 #include <math.h>
 #include <SD.h>
+#include <WiFi.h>
+#include <esp_websocket_client.h>
 #include <esp_timer.h>
 #include <esp_task_wdt.h>
 #include <Preferences.h>
@@ -227,7 +231,7 @@ namespace AudioDriver {
   }
 
   void resumeMic() {
-    if (micDriverInstalled && micSuspended) {
+    if (micDriverInstalled) {
       i2s_start(I2S_PORT_MIC);
       micSuspended = false;
     }
@@ -566,20 +570,18 @@ namespace AudioDriver {
   }
 
   // ============================================================================
-  // BỘ THU ÂM GIỌNG NÓI THỰC TẾ TỪ MIC INMP441 (8,000 Hz, 16-bit Signed Mono PCM)
-  // ============================================================================
   // BỘ THU ÂM GIỌNG NÓI CHUYÊN NGHIỆP TỪ MIC INMP441 (16,000 Hz, 16-bit Mono PCM)
   // Tích hợp: DC Blocker IIR Filter + Soft Noise Gate + Auto Gain Control + Soft Limiter
-  // Dung lượng mở rộng: 128,000 mẫu = 256,000 Bytes (8.0 giây @ 16kHz chuẩn vàng cho Speech-to-Text & AI)
+  // Dung lượng mở rộng: 1,920,000 mẫu = 3,840,000 Bytes (120 giây / 2 phút @ 16kHz chuẩn vàng Speech/AI)
   // ============================================================================
-  static const size_t MAX_REC_SAMPLES_16K = 128000; // 8.0s @ 16000Hz = 256KB
+  static const size_t MAX_REC_SAMPLES_16K = 1920000; // 120s @ 16000Hz = 3.84MB PSRAM
   static int16_t* pcmRecBuffer = nullptr;
   static size_t pcmRecAllocatedSamples = 0;
   static size_t pcmRecSampleCount = 0;
   static bool voiceRecordingActive = false;
   static int recMaxVuPct = 0;
   static int lockedChannel = -1; // 0 = Left (L/R=GND), 1 = Right (L/R=3V3)
-  static int micSensMode = 1;    // 0: Thấp (1.8x), 1: Tiêu chuẩn (3.5x), 2: Cao (5.5x)
+  static int micSensMode = 1;    // 0: Thấp (3.5x), 1: Tiêu chuẩn (6.0x), 2: Cao (10.0x)
   static float dcPrevX = 0.0f;
   static float dcPrevY = 0.0f;
   static float preEmphPrev = 0.0f;
@@ -588,20 +590,27 @@ namespace AudioDriver {
   void setMicSensitivityMode(int mode) {
     micSensMode = constrain(mode, 0, 2);
     Serial.printf("🎙️ [MIC SENS] Đã đổi độ nhạy thu âm sang mức: %s\n",
-                  micSensMode == 0 ? "Thấp (1.8x)" : (micSensMode == 1 ? "Tiêu chuẩn (3.5x)" : "Cao (5.5x)"));
+                  micSensMode == 0 ? "Thấp (3.5x)" : (micSensMode == 1 ? "Tiêu chuẩn (6.0x)" : "Cao (10.0x)"));
   }
 
   uint32_t getRecordSampleRate() {
     return 16000;
   }
 
+  static int32_t s_recOverallPeak = 0;
+
   bool startVoiceRecording() {
     if (!installMicRx()) return false;
     resumeMic();
     if (!pcmRecBuffer) {
       if (psramFound()) {
-        pcmRecBuffer = (int16_t*)ps_malloc(MAX_REC_SAMPLES_16K * sizeof(int16_t));
-        if (pcmRecBuffer) pcmRecAllocatedSamples = MAX_REC_SAMPLES_16K;
+        size_t maxPsram = ESP.getMaxAllocPsram();
+        size_t targetSamples = MAX_REC_SAMPLES_16K;
+        if (maxPsram > 1000000) {
+          size_t safeSamples = min(targetSamples, (maxPsram - 524288) / sizeof(int16_t));
+          pcmRecBuffer = (int16_t*)ps_malloc(safeSamples * sizeof(int16_t));
+          if (pcmRecBuffer) pcmRecAllocatedSamples = safeSamples;
+        }
       }
       if (!pcmRecBuffer) {
         size_t maxAlloc = ESP.getMaxAllocHeap();
@@ -624,7 +633,8 @@ namespace AudioDriver {
 
     pcmRecSampleCount = 0;
     recMaxVuPct = 0;
-    lockedChannel = 0; // INMP441 có L/R nối đất (GND) -> Kênh thu chuẩn 100% là Kênh Trái (LEFT)
+    s_recOverallPeak = 0;
+    lockedChannel = 0;
     dcPrevX = 0.0f;
     dcPrevY = 0.0f;
     preEmphPrev = 0.0f;
@@ -640,11 +650,34 @@ namespace AudioDriver {
   void stopVoiceRecording() {
     if (voiceRecordingActive) {
       voiceRecordingActive = false;
-      Serial.printf("⏹️ [INMP441 REC] Đã dừng thu âm: %u mẫu (%.2f giây @ 16kHz, %u Bytes, Max VU=%d%%)\n",
+      Serial.printf("⏹️ [INMP441 REC] Đã dừng thu âm: %u mẫu (%.2f giây @ 16kHz, %u Bytes, Max VU=%d%%, Peak=%ld)\n",
                     (unsigned)pcmRecSampleCount,
                     (float)pcmRecSampleCount / 16000.0f,
                     (unsigned)(pcmRecSampleCount * sizeof(int16_t)),
-                    recMaxVuPct);
+                    recMaxVuPct,
+                    (long)s_recOverallPeak);
+
+      // Chuẩn hóa âm lượng (Auto-Normalization) để tiếng thu to, rõ ràng, không bị lí nhí
+      if (pcmRecSampleCount > 320 && pcmRecBuffer) {
+        int32_t maxAmp = 0;
+        for (size_t k = 0; k < pcmRecSampleCount; k++) {
+          int32_t a = abs(pcmRecBuffer[k]);
+          if (a > maxAmp) maxAmp = a;
+        }
+        if (maxAmp > 20 && maxAmp < 24000) {
+          float normGain = 26000.0f / (float)maxAmp;
+          if (normGain > 24.0f) normGain = 24.0f;
+          for (size_t k = 0; k < pcmRecSampleCount; k++) {
+            int32_t val = (int32_t)(pcmRecBuffer[k] * normGain);
+            pcmRecBuffer[k] = (int16_t)constrain(val, -31500, 31500);
+          }
+          s_recOverallPeak = (int32_t)(maxAmp * normGain);
+          Serial.printf("✨ [AUDIO NORMALIZE] Tự động nâng âm lượng: Peak %ld -> %ld (Gain: %.2fx)\n",
+                        (long)maxAmp, (long)s_recOverallPeak, normGain);
+        } else {
+          s_recOverallPeak = maxAmp;
+        }
+      }
     }
   }
 
@@ -653,6 +686,7 @@ namespace AudioDriver {
   size_t getRecordedSampleCount() { return pcmRecSampleCount; }
   float getRecordedDurationSec() { return (float)pcmRecSampleCount / 16000.0f; }
   int getRecordedMaxVuPct() { return recMaxVuPct; }
+  int32_t getRecordedPeak() { return s_recOverallPeak; }
 
   void pollVoiceRecording() {
     if (!voiceRecordingActive || !pcmRecBuffer) return;
@@ -660,78 +694,130 @@ namespace AudioDriver {
       if (!installMicRx()) return;
     }
 
-    // Đọc liên tục các khung dữ liệu I2S 16kHz Stereo từ DMA
-    int32_t stereoRaw[128 * 2];
-    size_t bytesRead = 0;
-    esp_err_t err = i2s_read(I2S_PORT_MIC, stereoRaw, sizeof(stereoRaw), &bytesRead, pdMS_TO_TICKS(15));
-    if (err != ESP_OK || bytesRead < 16) return;
+    // Hệ số khuếch đại (AGC Gain) theo cài đặt người dùng
+    float gain = 6.0f;
+    if (micSensMode == 0)      gain = 3.5f; // Thấp: phòng ồn hoặc nói sát mic
+    else if (micSensMode == 2) gain = 10.0f; // Cao: nói xa cách mic 40-70cm
 
-    int frames = bytesRead / (2 * sizeof(int32_t));
-    if (frames <= 0) return;
+    // Rút cạn toàn bộ dữ liệu đang chờ trong hàng đợi DMA (tối đa 16 lượt)
+    int32_t stereoRaw[256 * 2];
+    int loops = 0;
+    float lastBlockSumSq = 0.0f;
+    int lastFrames = 0;
+    int32_t lastBlockPeak = 0;
+    int activeCh = 0;
 
-    // 1. Tự động kiểm tra và khóa kênh thu thực từ INMP441 (Kênh 0 Left hay Kênh 1 Right)
-    //    Tránh hoàn toàn tình trạng mất tiếng do mạch đảo pha WS hoặc chân L/R bị nổi/kéo 3.3V
-    int64_t mag0 = 0, mag1 = 0;
-    int checkFrames = min(frames, 32);
-    for (int k = 0; k < checkFrames; k++) {
-      mag0 += abs(stereoRaw[k * 2] >> 8);
-      mag1 += abs(stereoRaw[k * 2 + 1] >> 8);
-    }
-    int chIdx = (mag1 > mag0 * 2 && mag1 > 2000) ? 1 : 0;
+    while (voiceRecordingActive && loops < 16 && pcmRecSampleCount < pcmRecAllocatedSamples) {
+      size_t bytesRead = 0;
+      // Dùng timeout ngắn 2ms để không nghẽn nhưng vẫn cho phép DMA đẩy đủ dữ liệu
+      esp_err_t err = i2s_read(I2S_PORT_MIC, stereoRaw, sizeof(stereoRaw), &bytesRead, pdMS_TO_TICKS(2));
+      if (err != ESP_OK || bytesRead < 16) break;
+      loops++;
 
-    // 2. Hệ số khuếch đại (AGC Gain) theo cài đặt người dùng
-    float gain = 3.5f;
-    if (micSensMode == 0)      gain = 1.8f; // Thấp: phòng ồn hoặc nói sát mic
-    else if (micSensMode == 2) gain = 5.5f; // Cao: nói xa cách mic 40-70cm
+      int frames = bytesRead / (2 * sizeof(int32_t));
+      if (frames <= 0) continue;
 
-    float blockSumSq = 0.0f;
+      // 1. Phân tích năng lượng thực tế AC trên cả 2 kênh để TỰ ĐỘNG CHỌN KÊNH CHÍNH XÁC
+      // (Bảo đảm tương thích 100% mọi phiên bản phần cứng dù L/R nối GND, nối 3.3V hay bị đảo kênh)
+      int64_t sum0 = 0, sum1 = 0;
+      for (int k = 0; k < frames; k++) {
+        sum0 += (stereoRaw[k * 2] >> 8);
+        sum1 += (stereoRaw[k * 2 + 1] >> 8);
+      }
+      int32_t avg0 = (int32_t)(sum0 / frames);
+      int32_t avg1 = (int32_t)(sum1 / frames);
 
-    // 3. Xử lý DSP từng mẫu âm thanh ở tốc độ gốc 16,000 Hz
-    for (int i = 0; i < frames && pcmRecSampleCount < pcmRecAllocatedSamples; i++) {
-      int32_t raw24 = (stereoRaw[i * 2 + chIdx] >> 8);
-
-      // Khởi tạo mẫu đầu tiên mượt mà, triệt tiêu 100% cú sốc DC nhảy bước ở t=0ms
-      if (!firstSampleFiltered) {
-        dcPrevX = (float)raw24;
-        dcPrevY = 0.0f;
-        preEmphPrev = 0.0f;
-        firstSampleFiltered = true;
-        continue;
+      int64_t energy0 = 0, energy1 = 0;
+      int32_t pk0 = 0, pk1 = 0;
+      for (int k = 0; k < frames; k++) {
+        int32_t d0 = abs((stereoRaw[k * 2] >> 8) - avg0);
+        int32_t d1 = abs((stereoRaw[k * 2 + 1] >> 8) - avg1);
+        if (d0 > pk0) pk0 = d0;
+        if (d1 > pk1) pk1 = d1;
+        energy0 += (int64_t)d0 * d0;
+        energy1 += (int64_t)d1 * d1;
       }
 
-      // A. Bộ lọc High-Pass IIR chuẩn thoại 80Hz (alpha = 0.9695f @ 16kHz)
-      // Cắt bỏ 100% DC trôi, rung chấn cơ học và tiếng ù 50Hz, bảo toàn 100% âm sắc tự nhiên
-      float y = 0.9695f * (dcPrevY + (float)raw24 - dcPrevX);
-      dcPrevX = (float)raw24;
-      dcPrevY = y;
+      int chIdx = 0;
+      if (energy1 > energy0 * 2 && pk1 > 1000) {
+        chIdx = 1;
+      } else if (energy0 > energy1 * 2 && pk0 > 1000) {
+        chIdx = 0;
+      } else {
+        chIdx = (pk1 > pk0) ? 1 : 0;
+      }
+      activeCh = chIdx;
 
-      // B. Bộ lọc Pre-emphasis giọng nói: z[n] = y[n] - 0.40 * y[n-1]
-      // Nâng dải tần số phụ âm 1.5kHz - 4.5kHz (+3.5dB), giúp AI nhận diện cực chuẩn âm đầu ("A", "B", "T", "CH")
-      float pe = y - 0.40f * preEmphPrev;
-      preEmphPrev = y;
+      float blockSumSq = 0.0f;
+      int32_t blockPeak = 0;
 
-      // C. Chuẩn hóa sang 16-bit signed và nhân hệ số khuếch đại giọng nói
-      float s16 = (pe / 256.0f) * gain;
+      // 2. Xử lý DSP từng mẫu âm thanh ở tốc độ gốc 16,000 Hz trên kênh có âm thanh
+      for (int i = 0; i < frames && pcmRecSampleCount < pcmRecAllocatedSamples; i++) {
+        int32_t raw24 = (stereoRaw[i * 2 + chIdx] >> 8);
 
-      // D. Bộ kẹp đỉnh mềm (Soft Limiter): Tránh méo tiếng (No Clipping) khi nói to
-      if (s16 > 31000.0f)       s16 = 31000.0f;
-      else if (s16 < -31000.0f) s16 = -31000.0f;
+        // Khởi tạo mẫu đầu tiên mượt mà, triệt tiêu 100% cú sốc DC nhảy bước ở t=0ms
+        if (!firstSampleFiltered) {
+          dcPrevX = (float)raw24;
+          dcPrevY = 0.0f;
+          preEmphPrev = 0.0f;
+          firstSampleFiltered = true;
+          continue;
+        }
 
-      blockSumSq += s16 * s16;
-      pcmRecBuffer[pcmRecSampleCount++] = (int16_t)s16;
+        // A. Bộ lọc High-Pass IIR chuẩn thoại 80Hz (alpha = 0.9695f @ 16kHz)
+        float y = 0.9695f * (dcPrevY + (float)raw24 - dcPrevX);
+        dcPrevX = (float)raw24;
+        dcPrevY = y;
+
+        // B. Bộ lọc Pre-emphasis giọng nói: z[n] = y[n] - 0.40 * y[n-1]
+        float pe = y - 0.40f * preEmphPrev;
+        preEmphPrev = y;
+
+        int32_t absAc = (int32_t)fabsf(y);
+        if (absAc > blockPeak) blockPeak = absAc;
+
+        // C. Chuẩn hóa sang 16-bit signed và nhân hệ số khuếch đại giọng nói
+        float s16 = (pe / 64.0f) * gain;
+
+        // D. Bộ kẹp đỉnh mềm (Soft Limiter): Tránh méo tiếng khi nói to
+        if (s16 > 31000.0f)       s16 = 31000.0f;
+        else if (s16 < -31000.0f) s16 = -31000.0f;
+
+        int16_t sample16 = (int16_t)s16;
+        int32_t absS = abs((int32_t)sample16);
+        if (absS > s_recOverallPeak) s_recOverallPeak = absS;
+
+        blockSumSq += s16 * s16;
+        pcmRecBuffer[pcmRecSampleCount++] = sample16;
+      }
+
+      lastBlockSumSq = blockSumSq;
+      lastFrames = frames;
+      lastBlockPeak = blockPeak;
     }
 
-    // 4. Cập nhật thước đo VU Meter thực tế cho giao diện ST7789
-    float rms = sqrtf(blockSumSq / frames);
-    int pct = constrain((int)((rms * 100.0f) / 6000.0f), 0, 100);
-    lastMicPct = pct;
-    if (pct > recMaxVuPct) recMaxVuPct = pct;
+    // Cập nhật giao diện VU Meter & Sóng âm Oscilloscope trên ST7789 từ block mới nhất vừa hút được
+    if (lastFrames > 0) {
+      float rms = sqrtf(lastBlockSumSq / (float)lastFrames);
+      int pct = constrain((int)((rms * 100.0f) / 6000.0f), 0, 100);
+      lastMicPct = pct;
+      if (pct > recMaxVuPct) recMaxVuPct = pct;
+
+      for (int i = 0; i < 48; i++) {
+        int idx = (i * lastFrames) / 48;
+        int32_t val = (idx < lastFrames) ? ((stereoRaw[idx * 2 + activeCh] >> 8) - (int32_t)dcPrevX) : 0;
+        int scaled = val / 25000;
+        waveformBuf[i] = (int8_t)constrain(scaled, -28, 28);
+      }
+
+      lastMicPeak = lastBlockPeak;
+      activeChannelStr = (activeCh == 0) ? "LEFT CH (L/R=GND) AUTO" : "RIGHT CH (L/R=3V3) AUTO";
+    }
 
     if (pcmRecSampleCount >= pcmRecAllocatedSamples) {
       stopVoiceRecording();
     }
   }
-
   void loop() {
     // 1. Quản lý tiết kiệm điện Mic INMP441
     if (voiceRecordingActive) {
@@ -1005,6 +1091,176 @@ namespace AudioDriver {
     return true;
   }
 
+  static String s_latestRecordedVoicePath = "/recording/rec_latest.wav";
+  static String s_lastClientIp = "";
+
+  void setLastClientIp(const String& ip) {
+    if (ip.length() > 0 && ip != "0.0.0.0" && ip != "127.0.0.1") {
+      s_lastClientIp = ip;
+    }
+  }
+
+  String getLastClientIp() {
+    return s_lastClientIp;
+  }
+
+  String getLatestRecordedVoicePath() {
+    return s_latestRecordedVoicePath;
+  }
+
+  String saveRecordedVoiceWithTimestamp(const char* dir) {
+    if (pcmRecSampleCount == 0 || !pcmRecBuffer) {
+      Serial.println("⚠️ [SD WAV] Khong co du lieu thu am de luu!");
+      return "";
+    }
+
+    char filename[96];
+    int hr = 0, mn = 0, sc = 0, wd = 0, dy = 0, mo = 0, yr = 0;
+    if (TimeManager::getDateTime(hr, mn, sc, wd, dy, mo, yr)) {
+      // Định dạng rec_<giờ_ngày>.wav theo đúng yêu cầu: ví dụ rec_18h25m10s_24_11.wav
+      snprintf(filename, sizeof(filename), "%s/rec_%02dh%02dm%02ds_%02d_%02d.wav", dir, hr, mn, sc, dy, mo);
+    } else {
+      snprintf(filename, sizeof(filename), "%s/rec_boot_%lums.wav", dir, millis());
+    }
+
+    // 1. Lưu file có tên timestamp
+    bool ok = saveRecordedVoiceToSd(filename);
+
+    // 2. Lưu/sao chép thêm file rec_latest.wav để PC / Web truy cập cố định
+    String latestPath = String(dir) + "/rec_latest.wav";
+    saveRecordedVoiceToSd(latestPath.c_str());
+
+    if (ok) {
+      s_latestRecordedVoicePath = String(filename);
+      Serial.printf("💾 [TIMESTAMP RECORD] Đã lưu bản thu âm: %s\n", filename);
+      return String(filename);
+    }
+    return latestPath;
+  }
+
+  struct WsPushArgs {
+    String host;
+    int port;
+    String filename;
+  };
+
+  static void wsAudioPushTask(void* pv) {
+    WsPushArgs* args = (WsPushArgs*)pv;
+    if (!args) { vTaskDelete(NULL); return; }
+
+    String targetHost = args->host;
+    int targetPort = args->port;
+    String recFilename = args->filename;
+    delete args;
+
+    if (WiFi.status() != WL_CONNECTED) {
+      Serial.println("⚠️ [WS PUSH] Chưa kết nối Wi-Fi, không thể gửi âm thanh qua WebSocket.");
+      vTaskDelete(NULL);
+      return;
+    }
+
+    if (pcmRecSampleCount == 0 || !pcmRecBuffer) {
+      Serial.println("⚠️ [WS PUSH] Không có dữ liệu âm thanh để gửi.");
+      vTaskDelete(NULL);
+      return;
+    }
+
+    // Tự động giải quyết Host nếu chưa chỉ định rõ
+    if (targetHost.length() == 0) {
+      targetHost = XiaoZhiClient::getPcGatewayIp();
+    }
+    if (targetHost.length() == 0) {
+      targetHost = s_lastClientIp;
+    }
+    if (targetHost.length() == 0) {
+      targetHost = WiFi.gatewayIP().toString();
+    }
+
+    String uri = "ws://" + targetHost + ":" + String(targetPort) + "/ws";
+    Serial.printf("📡 [WS PUSH] Đang bắn bản thu âm (%u mẫu, %.2fs) lên WebSocket: %s ...\n",
+                  (unsigned)pcmRecSampleCount, (float)pcmRecSampleCount / 16000.0f, uri.c_str());
+
+    esp_websocket_client_config_t ws_cfg = {};
+    ws_cfg.uri = uri.c_str();
+    ws_cfg.buffer_size = 4096;
+    ws_cfg.pingpong_timeout_sec = 10;
+
+    esp_websocket_client_handle_t client = esp_websocket_client_init(&ws_cfg);
+    if (!client) {
+      Serial.println("❌ [WS PUSH] Không thể khởi tạo esp_websocket_client!");
+      vTaskDelete(NULL);
+      return;
+    }
+
+    esp_err_t err = esp_websocket_client_start(client);
+    if (err != ESP_OK) {
+      Serial.printf("❌ [WS PUSH] Lỗi esp_websocket_client_start: %d\n", err);
+      esp_websocket_client_destroy(client);
+      vTaskDelete(NULL);
+      return;
+    }
+
+    // Đợi kết nối thành công tối đa 2.5s
+    uint32_t t0 = millis();
+    while (!esp_websocket_client_is_connected(client) && (millis() - t0 < 2500)) {
+      vTaskDelay(pdMS_TO_TICKS(50));
+    }
+
+    if (!esp_websocket_client_is_connected(client)) {
+      Serial.printf("⚠️ [WS PUSH] Không thể kết nối tới %s (Timeout 2.5s). Máy tính đã bật server chưa?\n", uri.c_str());
+      esp_websocket_client_stop(client);
+      esp_websocket_client_destroy(client);
+      vTaskDelete(NULL);
+      return;
+    }
+
+    // 1. Gửi tin nhắn Text JSON mô tả bản thu âm
+    char metaJson[256];
+    snprintf(metaJson, sizeof(metaJson),
+             "{\"type\":\"mic_record\",\"filename\":\"%s\",\"sample_rate\":16000,\"samples\":%u,\"duration_sec\":%.2f}",
+             recFilename.c_str(), (unsigned)pcmRecSampleCount, (float)pcmRecSampleCount / 16000.0f);
+    esp_websocket_client_send_text(client, metaJson, strlen(metaJson), pdMS_TO_TICKS(1500));
+
+    // 2. Gửi từng khung nhị phân PCM (khung 2048 bytes = 1024 mẫu = 64ms)
+    const uint8_t* pcmBytes = (const uint8_t*)pcmRecBuffer;
+    size_t totalBytes = pcmRecSampleCount * sizeof(int16_t);
+    size_t offset = 0;
+    const size_t CHUNK = 2048;
+
+    while (offset < totalBytes && esp_websocket_client_is_connected(client)) {
+      size_t sendLen = min(CHUNK, totalBytes - offset);
+      int sent = esp_websocket_client_send_bin(client, (const char*)(pcmBytes + offset), sendLen, pdMS_TO_TICKS(1000));
+      if (sent < 0) {
+        Serial.printf("❌ [WS PUSH] Lỗi gửi nhị phân tại offset %u!\n", (unsigned)offset);
+        break;
+      }
+      offset += sendLen;
+      vTaskDelay(pdMS_TO_TICKS(5));
+    }
+
+    // 3. Gửi tin nhắn kết thúc
+    const char* endMsg = "{\"type\":\"end\"}";
+    esp_websocket_client_send_text(client, endMsg, strlen(endMsg), pdMS_TO_TICKS(1000));
+
+    Serial.printf("✅ [WS PUSH] ĐÃ BẮN THÀNH CÔNG %u Bytes âm thanh lên Máy Tính qua %s!\n",
+                  (unsigned)offset, uri.c_str());
+
+    vTaskDelay(pdMS_TO_TICKS(200));
+    esp_websocket_client_stop(client);
+    esp_websocket_client_destroy(client);
+    vTaskDelete(NULL);
+  }
+
+  bool pushRecordedAudioToWebSocketAsync(const String& host, int port) {
+    if (pcmRecSampleCount == 0 || !pcmRecBuffer) return false;
+    WsPushArgs* args = new WsPushArgs();
+    args->host = host;
+    args->port = port;
+    args->filename = s_latestRecordedVoicePath;
+    BaseType_t res = xTaskCreatePinnedToCore(wsAudioPushTask, "WsAudioPush", 6144, args, 1, NULL, 0);
+    return (res == pdPASS);
+  }
+
     // --- TÁC VỤ PHÁT NHẠC ĐƠN TUYẾN TRỰC TIẾP I2S DMA (FREERTOS TASK TRÊN CORE 0) ---
   static TaskHandle_t audioTaskHandle = NULL;
   static volatile uint32_t audioPlayCurSample = 0;
@@ -1061,7 +1317,7 @@ namespace AudioDriver {
       return;
     }
 
-    uint32_t currentSampleRate = isWav ? wavSampleRate : 44100;
+    uint32_t currentSampleRate = isWav ? wavSampleRate : (isMp3 ? 44100 : 16000);
     installSpeakerTx(currentSampleRate);
     resumeSpeaker();
     i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
@@ -1184,7 +1440,8 @@ namespace AudioDriver {
       int16_t stereoChunk[CHUNK * 2];
       size_t i = 0;
       while (i < pcmRecSampleCount && audioPlayRunning) {
-        float volScale = (musicVolumePct > 0) ? ((float)musicVolumePct / 100.0f) : 0.0f;
+        int curVol = (speakerVolumePct > 0) ? speakerVolumePct : musicVolumePct;
+        float volScale = (float)constrain(curVol, 10, 100) / 100.0f;
         size_t n = min(CHUNK, pcmRecSampleCount - i);
         for (size_t j = 0; j < n; j++) {
           int32_t s = (int32_t)(pcmRecBuffer[i + j] * pGain * volScale);
@@ -1207,6 +1464,13 @@ namespace AudioDriver {
           if (specBands[b] > maxLv) maxLv = specBands[b];
         }
         TestAudio::setExternalAudioSpectrum(specBands, maxLv);
+
+        // Cập nhật sóng âm ST7789 chuyển động theo tiếng phát lại qua loa
+        for (int w = 0; w < 48; w++) {
+          int wIdx = (w * n) / 48;
+          int32_t wVal = (int32_t)stereoChunk[wIdx * 2];
+          waveformBuf[w] = (int8_t)constrain(wVal / 1100, -28, 28);
+        }
 
         vTaskDelay(pdMS_TO_TICKS(1));
       }
@@ -1792,6 +2056,17 @@ namespace AudioDriver {
   bool handleSerial(char cmd) {
     if (cmd == 'm' || cmd == 'M') {
       toggleMicMonitor();
+      return true;
+    }
+    if (cmd == 'r' || cmd == 'R') {
+      if (isVoiceRecording()) {
+        stopVoiceRecording();
+        Serial.println("⏹️ [SERIAL] Dừng thu âm -> Tự động phát lại ra Loa MAX98357A...");
+        startVoicePlaybackAsync();
+      } else {
+        Serial.println("🎙️ [SERIAL] Bắt đầu thu âm thử từ Mic INMP441...");
+        startVoiceRecording();
+      }
       return true;
     }
     if (cmd == 'p' || cmd == 'P') {

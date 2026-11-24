@@ -1947,6 +1947,124 @@ namespace TestDisplay {
 
   static int s40DiagSubPage = 0; // 0: Ngoại vi & Sóng âm, 1: Thông số Thẻ nhớ SD
 
+  // ============================================================================
+  // CƠ CHẾ THỬ THU ÂM VÀ PHÁT LẠI TRỰC TIẾP (LOOPBACK AUDIO TEST TRÊN CHẾ ĐỘ 3)
+  // ============================================================================
+  enum DiagAudioTestState {
+    DIAG_AUDIO_IDLE = 0,
+    DIAG_AUDIO_RECORDING,
+    DIAG_AUDIO_PLAYING
+  };
+  static DiagAudioTestState s_diagAudioState = DIAG_AUDIO_IDLE;
+  static unsigned long s_diagAudioStateStartMs = 0;
+  static uint32_t s_diagLastRecDurationMs = 0;
+  static int32_t s_diagLastPeak = 0;
+  static int s_diagLastMaxVu = 0;
+  static bool s_diagLastRecValid = false;
+  static bool s_diagHoldingKeypad = false;
+  static bool s_diagHoldingTouch = false;
+  static bool s_diagToggleRecording = false; // Bật khi người dùng bấm nhả nhanh (<450ms) để thu rảnh tay
+  static int  s_diagReleaseDebounceFrames = 0;
+  static String s_diagLastSavedFilename = "";
+
+  static void stopAndSaveDiagAudioRecording() {
+    if (s_diagAudioState != DIAG_AUDIO_RECORDING) return;
+    TestAudio::stopVoiceRecording();
+    size_t sc = TestAudio::getRecordedSampleCount();
+    s_diagLastRecDurationMs = (uint32_t)(TestAudio::getRecordedDurationSec() * 1000);
+    s_diagLastMaxVu = TestAudio::getRecordedMaxVuPct();
+    s_diagLastPeak = TestAudio::getRecordedPeak();
+    if (s_diagLastPeak == 0) s_diagLastPeak = TestAudio::getLastMicPeak();
+    s_diagLastRecValid = (sc > 320 && (s_diagLastMaxVu > 0 || s_diagLastPeak > 20));
+    s_diagHoldingKeypad = false;
+    s_diagHoldingTouch = false;
+    s_diagToggleRecording = false;
+    s_diagReleaseDebounceFrames = 0;
+
+    if (sc > 0) {
+      // 1. Lưu file định dạng rec_<giờ_ngày>.wav vào thẻ nhớ SD
+      String savedPath = TestAudio::saveRecordedVoiceWithTimestamp("/recording");
+      s_diagLastSavedFilename = savedPath;
+
+      // 2. Bắn bản thu âm lên WebSocket cho Máy Tính nghe thử (cổng 8766 riêng biệt)
+      TestAudio::pushRecordedAudioToWebSocketAsync("", 8766);
+      if (XiaoZhiClient::getPcGatewayPort() == 8765) {
+        TestAudio::pushRecordedAudioToWebSocketAsync(XiaoZhiClient::getPcGatewayIp(), 8765);
+      }
+
+      // 3. Tự động phát lại qua Loa MAX98357A
+      s_diagAudioState = DIAG_AUDIO_PLAYING;
+      s_diagAudioStateStartMs = millis();
+      TestAudio::startVoicePlaybackAsync();
+      Serial.printf("🎙️ [DIAG TEST] Đã lưu %s (%u mẫu, %.2fs, Peak=%ld) | Bắn lên WebSocket & Đang phát lại ra Loa MAX98357A...\n",
+                    savedPath.c_str(), (unsigned)sc, (float)sc / 16000.0f, (long)s_diagLastPeak);
+    } else {
+      s_diagAudioState = DIAG_AUDIO_IDLE;
+      Serial.println("⚠️ [DIAG TEST] Không có mẫu thu âm nào!");
+    }
+    refreshActiveScreen();
+  }
+
+  static void startDiagAudioRecording(bool byKeypad, bool byTouch) {
+    if (s_diagAudioState == DIAG_AUDIO_PLAYING) {
+      TestAudio::stopVoicePlaybackAsync();
+    }
+    bool ok = TestAudio::startVoiceRecording();
+    if (ok) {
+      s_diagAudioState = DIAG_AUDIO_RECORDING;
+      s_diagAudioStateStartMs = millis();
+      s_diagHoldingKeypad = byKeypad;
+      s_diagHoldingTouch = byTouch;
+      s_diagToggleRecording = false;
+      s_diagReleaseDebounceFrames = 0;
+      TestAudio::playClickBeep();
+      Serial.println("🎙️ [DIAG TEST] Bắt đầu thu âm (Giữ OK/Chạm để thu, hoặc bấm nhả để thu rảnh tay)...");
+    } else {
+      Serial.println("❌ [DIAG TEST] Không thể khởi động thu âm!");
+    }
+    refreshActiveScreen();
+  }
+
+  static void handleDiagAudioTestToggle() {
+    if (s_diagAudioState == DIAG_AUDIO_RECORDING) {
+      stopAndSaveDiagAudioRecording();
+    } else if (s_diagAudioState == DIAG_AUDIO_PLAYING) {
+      TestAudio::stopVoicePlaybackAsync();
+      s_diagAudioState = DIAG_AUDIO_IDLE;
+      Serial.println("⏹️ [DIAG TEST] Đã dừng phát lại.");
+      refreshActiveScreen();
+    } else {
+      startDiagAudioRecording(true, false);
+    }
+  }
+
+  static void handleDiagAudioReplay() {
+    if (TestAudio::getRecordedSampleCount() > 0) {
+      TestAudio::stopVoicePlaybackAsync();
+      s_diagAudioState = DIAG_AUDIO_PLAYING;
+      s_diagAudioStateStartMs = millis();
+      TestAudio::startVoicePlaybackAsync();
+      Serial.printf("🔊 [DIAG TEST] Phát lại bản thu gần nhất: %u mẫu (%.2fs) qua Loa MAX98357A...\n",
+                    (unsigned)TestAudio::getRecordedSampleCount(), TestAudio::getRecordedDurationSec());
+      refreshActiveScreen();
+    } else {
+      TestAudio::playKeyBeep();
+      Serial.println("⚠️ [DIAG TEST] Chưa có bản thu âm nào để phát lại! Hãy bấm OK để thu trước.");
+    }
+  }
+
+  static void handleDiagAudioTestSpeaker() {
+    if (s_diagAudioState != DIAG_AUDIO_IDLE) {
+      if (s_diagAudioState == DIAG_AUDIO_RECORDING) TestAudio::stopVoiceRecording();
+      if (s_diagAudioState == DIAG_AUDIO_PLAYING) TestAudio::stopVoicePlaybackAsync();
+      s_diagAudioState = DIAG_AUDIO_IDLE;
+      refreshActiveScreen();
+      return;
+    }
+    Serial.printf("📢 [DIAG TEST] Thử nghiệm Loa MAX98357A: Phát tiếng bíp 1000Hz 350ms (Vol=%d%%)...\n", TestAudio::getSpeakerVolumePct());
+    TestAudio::playTone(1000, 350, TestAudio::getSpeakerVolumePct());
+  }
+
   // Vẽ Chế độ 3: Biểu Đồ Sóng Âm & Cảm Biến Môi Trường (Chính thức)
   static void drawHardwareDiagScreen(bool fullRedraw = true) {
     if (!tft) return;
@@ -1967,23 +2085,25 @@ namespace TestDisplay {
       tft->setTextColor(C_WHITE);
       tft->setTextSize(1);
       tft->setCursor(10, 8);
-      tft->print("BIỂU ĐỒ SÓNG ÂM & CẢM BIẾN");
+      tft->print("BIỂU ĐỒ SÓNG ÂM & TEST MIC/LOA");
       tft->setTextColor(C_NEON_CYAN);
       tft->setCursor(w - 74, 8);
       tft->print("[◄ 1/2 ►]");
       tft->setTextColor(C_YELLOW);
       tft->setCursor(10, 18);
-      tft->print("Nhiệt ẩm + Mic + Phím (Bấm ◄/► xem SD)");
+      tft->print("Thu âm & Phát lại (Bấm ◄/► xem SD)");
 
       // Khung Card 1: Nhiệt độ & Độ ẩm (y=31..85)
       tft->fillRoundRect(6, 31, w - 12, 54, 5, C_CARD_BG);
 
-      // Khung Card 2: Biểu đồ Sóng âm thanh (y=89..235)
+      // Khung Card 2: Biểu đồ Sóng âm thanh & Test (y=89..235)
       tft->fillRoundRect(6, 89, w - 12, 146, 5, C_CARD_BG);
-      tft->drawRoundRect(6, 89, w - 12, 146, 5, C_NEON_CYAN);
+      uint16_t c2Border = (s_diagAudioState == DIAG_AUDIO_RECORDING) ? C_RED :
+                          (s_diagAudioState == DIAG_AUDIO_PLAYING)   ? C_NEON_GREEN : C_NEON_CYAN;
+      tft->drawRoundRect(6, 89, w - 12, 146, 5, c2Border);
       tft->setTextColor(C_NEON_CYAN, C_CARD_BG);
       tft->setCursor(12, 94);
-      tft->print("PHỔ SÓNG ÂM THANH TRỰC TIẾP");
+      tft->print("PHỔ SÓNG ÂM & TEST THU/PHÁT     ");
 
       // Khung Card 3: Bàn phím & Cảm biến chạm (y=239..314)
       tft->fillRoundRect(6, 239, w - 12, 75, 5, C_CARD_BG);
@@ -2020,13 +2140,58 @@ namespace TestDisplay {
       tft->print("Hệ thống sẽ tự nhận khi cắm cảm biến");
     }
 
-    // --- 2. CẬP NHẬT CARD 2: BIỂU ĐỒ SÓNG ÂM TRỰC TIẾP ---
+    // --- 2. CẬP NHẬT CARD 2: BIỂU ĐỒ SÓNG ÂM TRỰC TIẾP & TEST THU/PHÁT ---
+    uint16_t c2Border = (s_diagAudioState == DIAG_AUDIO_RECORDING) ? C_RED :
+                        (s_diagAudioState == DIAG_AUDIO_PLAYING)   ? C_NEON_GREEN : C_NEON_CYAN;
+    tft->drawRoundRect(6, 89, w - 12, 146, 5, c2Border);
+
     tft->setTextSize(1);
+    tft->setCursor(12, 94);
+    if (s_diagAudioState == DIAG_AUDIO_RECORDING) {
+      float recSec = (float)(millis() - s_diagAudioStateStartMs) / 1000.0f;
+      tft->setTextColor(C_RED, C_CARD_BG);
+      if (s_diagToggleRecording) {
+        tft->printf("● DANG THU: %3.1fs (BAM OK DUNG)   ", recSec);
+      } else {
+        tft->printf("● DANG THU: %3.1fs (GIU DE THU)    ", recSec);
+      }
+    } else if (s_diagAudioState == DIAG_AUDIO_PLAYING) {
+      tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+      tft->print("🔊 DANG PHAT LAI RA LOA...       ");
+    } else {
+      tft->setTextColor(C_NEON_CYAN, C_CARD_BG);
+      tft->print("PHO SONG AM & TEST THU/PHAT     ");
+    }
+
     int micPct      = TestAudio::getLastMicLevelPct();
     int32_t micPeak = TestAudio::getLastMicPeak();
-    tft->setTextColor(micPeak > 0 ? C_NEON_GREEN : C_NEON_AMBER, C_CARD_BG);
     tft->setCursor(12, 106);
-    tft->printf("Trạng thái thu: %s", micPeak > 0 ? "Đang thu âm thanh" : "Chờ tín hiệu...");
+    if (s_diagAudioState == DIAG_AUDIO_RECORDING) {
+      tft->setTextColor(C_YELLOW, C_CARD_BG);
+      tft->printf("Kenh: %-14.14s | Dinh:%-6ld", TestAudio::getActiveMicChannelName(), (long)micPeak);
+    } else if (s_diagAudioState == DIAG_AUDIO_PLAYING) {
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->printf("Loa: MAX98357A (IO15) | Vol:%d%% ", TestAudio::getSpeakerVolumePct());
+    } else {
+      if (s_diagLastSavedFilename.length() > 0) {
+        String baseName = s_diagLastSavedFilename;
+        int lastSlash = baseName.lastIndexOf('/');
+        if (lastSlash >= 0) baseName = baseName.substring(lastSlash + 1);
+        tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+        tft->printf("Luu: %-15.15s | Dinh:%-5ld", baseName.c_str(), (long)s_diagLastPeak);
+      } else if (s_diagLastRecDurationMs > 0) {
+        if (s_diagLastRecValid) {
+          tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+          tft->printf("KQ: Thu %.1fs (Dinh %ld) | Mic TOT!   ", (float)s_diagLastRecDurationMs / 1000.0f, (long)s_diagLastPeak);
+        } else {
+          tft->setTextColor(C_RED, C_CARD_BG);
+          tft->printf("KQ: Dinh=%ld | MIC KHONG TIN HIEU! ", (long)s_diagLastPeak);
+        }
+      } else {
+        tft->setTextColor(micPeak > 0 ? C_NEON_GREEN : C_NEON_AMBER, C_CARD_BG);
+        tft->printf("Trang thai: %-12.12s | %-14.14s", micPeak > 0 ? "Dang thu" : "Cho tin hieu", TestAudio::getActiveMicChannelName());
+      }
+    }
 
     // Khung vẽ sóng âm (x=12, y=118, sw=216, sh=78)
     const int sx = 12, sy = 118, sw = 216, sh = 78;
@@ -2050,13 +2215,15 @@ namespace TestDisplay {
       if (cy < sy + 2) cy = sy + 2;
       if (cy > sy + sh - 3) cy = sy + sh - 3;
 
-      uint16_t waveCol = (abs(wave[i]) > 18) ? C_NEON_PINK :
+      uint16_t waveCol = (s_diagAudioState == DIAG_AUDIO_RECORDING) ? ((abs(wave[i]) > 8) ? C_RED : C_YELLOW) :
+                         (s_diagAudioState == DIAG_AUDIO_PLAYING)   ? ((abs(wave[i]) > 8) ? C_NEON_GREEN : C_WHITE) :
+                         (abs(wave[i]) > 18) ? C_NEON_PINK :
                          (abs(wave[i]) > 6)  ? C_NEON_GREEN : C_NEON_CYAN;
 
       if (abs(offset) > 1) {
         int topY = (cy < midY) ? cy : midY;
         int barH = abs(cy - midY);
-        tft->drawFastVLine(cx, topY, barH, C_BLUE);
+        tft->drawFastVLine(cx, topY, barH, (s_diagAudioState == DIAG_AUDIO_RECORDING) ? C_RED : C_BLUE);
       }
       if (i > 0) {
         tft->drawLine(prevX, prevY, cx, cy, waveCol);
@@ -2066,20 +2233,50 @@ namespace TestDisplay {
       prevY = cy;
     }
 
-    // Thanh cường độ âm thanh (y=200..228)
-    tft->setTextColor(C_WHITE, C_CARD_BG);
+    // Thanh cường độ âm thanh / Tiến trình phát (y=200..228)
     tft->setCursor(12, 200);
-    tft->printf("Cường độ âm thanh: %3d%%", micPct);
-
     int vuX = 12, vuY = 213, vuW = 216, vuH = 14;
     tft->drawRect(vuX, vuY, vuW, vuH, C_CARD_BORDER);
-    int fillW = ((vuW - 4) * micPct) / 100;
-    uint16_t vuCol = (micPct > 70) ? C_NEON_PINK : (micPct > 30) ? C_NEON_AMBER : C_NEON_GREEN;
-    if (fillW > 0) {
-      tft->fillRect(vuX + 2, vuY + 2, fillW, vuH - 4, vuCol);
-    }
-    if (fillW < vuW - 4) {
-      tft->fillRect(vuX + 2 + fillW, vuY + 2, (vuW - 4) - fillW, vuH - 4, C_BLACK);
+
+    if (s_diagAudioState == DIAG_AUDIO_PLAYING) {
+      tft->setTextColor(C_NEON_GREEN, C_CARD_BG);
+      size_t tot = TestAudio::getRecordedSampleCount();
+      size_t cur = TestAudio::getVoicePlaybackCurrentSample();
+      float pSec = (float)cur / 16000.0f;
+      float totSec = (float)tot / 16000.0f;
+      tft->printf("Phát lại: %3.1fs / %3.1fs [Bấm ▼ hủy]  ", pSec, totSec);
+
+      int pFill = (tot > 0) ? (int)(((vuW - 4) * min(cur, tot)) / tot) : 0;
+      if (pFill > 0) {
+        tft->fillRect(vuX + 2, vuY + 2, pFill, vuH - 4, C_NEON_GREEN);
+      }
+      if (pFill < vuW - 4) {
+        tft->fillRect(vuX + 2 + pFill, vuY + 2, (vuW - 4) - pFill, vuH - 4, C_BLACK);
+      }
+    } else if (s_diagAudioState == DIAG_AUDIO_RECORDING) {
+      tft->setTextColor(C_RED, C_CARD_BG);
+      tft->printf("Muc thu Mic: %3d%% [Nha tay de dung]", micPct);
+
+      int fillW = ((vuW - 4) * micPct) / 100;
+      uint16_t vuCol = (micPct > 70) ? C_NEON_PINK : (micPct > 30) ? C_NEON_AMBER : C_RED;
+      if (fillW > 0) {
+        tft->fillRect(vuX + 2, vuY + 2, fillW, vuH - 4, vuCol);
+      }
+      if (fillW < vuW - 4) {
+        tft->fillRect(vuX + 2 + fillW, vuY + 2, (vuW - 4) - fillW, vuH - 4, C_BLACK);
+      }
+    } else {
+      tft->setTextColor(C_WHITE, C_CARD_BG);
+      tft->printf("Giu OK/Cham de thu [Mic: %3d%%]", micPct);
+
+      int fillW = ((vuW - 4) * micPct) / 100;
+      uint16_t vuCol = (micPct > 70) ? C_NEON_PINK : (micPct > 30) ? C_NEON_AMBER : C_NEON_GREEN;
+      if (fillW > 0) {
+        tft->fillRect(vuX + 2, vuY + 2, fillW, vuH - 4, vuCol);
+      }
+      if (fillW < vuW - 4) {
+        tft->fillRect(vuX + 2 + fillW, vuY + 2, (vuW - 4) - fillW, vuH - 4, C_BLACK);
+      }
     }
 
     // --- 3. CẬP NHẬT CARD 3: PHÍM BẤM ĐIỀU KHIỂN ---
@@ -2105,9 +2302,9 @@ namespace TestDisplay {
       tft->print(btnShort[b]);
     }
 
-    tft->setTextColor(C_NEON_AMBER, C_CARD_BG);
+    tft->setTextColor(C_YELLOW, C_CARD_BG);
     tft->setCursor(12, 297);
-    tft->printf("L298N (GPIO 1): %-20.20s", TestWindmill::getModeName());
+    tft->print("[OK]:Thu/Phát  [▲]:Nghe lại  [▼]:Test loa");
   }
 
   // ============================================================================
@@ -6980,6 +7177,11 @@ namespace TestDisplay {
       }
       s40AiState = AI_STATE_IDLE;
       eyeState = 0;
+    } else if (oldMode == 3) {
+      // Rời Chẩn đoán Ngoại Vi / Sóng âm: dừng thu âm thử và phát lại
+      if (s_diagAudioState == DIAG_AUDIO_RECORDING) TestAudio::stopVoiceRecording();
+      if (s_diagAudioState == DIAG_AUDIO_PLAYING) TestAudio::stopVoicePlaybackAsync();
+      s_diagAudioState = DIAG_AUDIO_IDLE;
     } else if (oldMode == 15) {
       // Rời Trung tâm Trò chơi: reset trạng thái game loop
       s40GameActiveId = 0;
@@ -7438,18 +7640,40 @@ namespace TestDisplay {
       }
     } else if (currentMode == 3) {
       if (keyIndex == 3 || keyIndex == 4) { // LEFT / RIGHT: Chuyển đổi giữa Test Ngoại Vi & Test Thẻ Nhớ SD
+        if (s_diagAudioState == DIAG_AUDIO_RECORDING) stopAndSaveDiagAudioRecording();
+        if (s_diagAudioState == DIAG_AUDIO_PLAYING) TestAudio::stopVoicePlaybackAsync();
+        s_diagAudioState = DIAG_AUDIO_IDLE;
         s40DiagSubPage = (s40DiagSubPage == 0) ? 1 : 0;
         TestAudio::playKeyBeep();
         refreshActiveScreen();
-      } else if (keyIndex == 0) { // OK
+      } else if (keyIndex == 0) { // OK: Bắt đầu thu âm nếu IDLE, hoặc dừng phát lại nếu PLAYING
         if (s40DiagSubPage == 1) {
           showSymbianToast("DANG QUET LAI THE SD...");
           TestSDCard::runFullElectricalAndSpiProbe();
           refreshActiveScreen();
         } else {
-          TestAudio::playOkChime();
+          if (s_diagAudioState == DIAG_AUDIO_PLAYING) {
+            TestAudio::stopVoicePlaybackAsync();
+            s_diagAudioState = DIAG_AUDIO_IDLE;
+            refreshActiveScreen();
+          } else if (s_diagAudioState == DIAG_AUDIO_RECORDING) {
+            stopAndSaveDiagAudioRecording();
+          } else if (s_diagAudioState == DIAG_AUDIO_IDLE) {
+            startDiagAudioRecording(true, false);
+          }
+        }
+      } else if (keyIndex == 1) { // UP: Phát lại bản thu gần nhất
+        if (s40DiagSubPage == 0) {
+          handleDiagAudioReplay();
+        }
+      } else if (keyIndex == 2) { // DOWN: Test Loa 1000Hz hoặc dừng
+        if (s40DiagSubPage == 0) {
+          handleDiagAudioTestSpeaker();
         }
       } else if (keyIndex == 6) { // EXIT: Về Menu S40
+        if (s_diagAudioState == DIAG_AUDIO_RECORDING) stopAndSaveDiagAudioRecording();
+        if (s_diagAudioState == DIAG_AUDIO_PLAYING) TestAudio::stopVoicePlaybackAsync();
+        s_diagAudioState = DIAG_AUDIO_IDLE;
         currentMode = 4;
         refreshActiveScreen();
       }
@@ -9155,6 +9379,37 @@ namespace TestDisplay {
     }
 
     // ========================================================================
+    // A0_DIAG. XỬ LÝ CHẠM GIỮ THU ÂM CHO CHẾ ĐỘ SÓNG ÂM & CHẨN ĐOÁN (MODE 3):
+    // PUSH-TO-TALK / HOLD-TO-RECORD: Chạm giữ để thu âm, nhấc tay ra là ngắt & lưu & phát lại!
+    // ========================================================================
+    if (currentMode == 3 && s40DiagSubPage == 0) {
+      if (evt == TouchDriver::TOUCH_DOWN) {
+        if (pt.y >= 89 && pt.y <= 235) { // Card 2: Biểu đồ Sóng âm
+          if (s_diagAudioState == DIAG_AUDIO_PLAYING) {
+            TestAudio::stopVoicePlaybackAsync();
+            s_diagAudioState = DIAG_AUDIO_IDLE;
+            refreshActiveScreen();
+          } else if (s_diagAudioState == DIAG_AUDIO_RECORDING) {
+            stopAndSaveDiagAudioRecording();
+          } else if (s_diagAudioState == DIAG_AUDIO_IDLE) {
+            startDiagAudioRecording(false, true);
+          }
+          return;
+        } else if (pt.y >= 239 && pt.y <= 290) { // Card 3: Nút bàn phím / replay
+          handleDiagAudioReplay();
+          return;
+        }
+      } else if (evt == TouchDriver::TOUCH_UP || evt == TouchDriver::TOUCH_CLICK) {
+        if (s_diagAudioState == DIAG_AUDIO_RECORDING && s_diagHoldingTouch && !s_diagToggleRecording) {
+          if (millis() - s_diagAudioStateStartMs >= 600) {
+            stopAndSaveDiagAudioRecording();
+            return;
+          }
+        }
+      }
+    }
+
+    // ========================================================================
     // A0. XỬ LÝ ĐẶC THÙ CHO TRỢ LÝ AI XIAOZHI (MODE 11 / MODE 1):
     // HỖ TRỢ SONG SONG 2 PHƯƠNG THỨC:
     // 1. PUSH-TO-TALK: Chạm giữ ngón tay trên màn hình để nói, nhấc tay ra là dừng thu và gửi đi ngay!
@@ -9186,7 +9441,12 @@ namespace TestDisplay {
           startXiaoZhiListening();
         }
         return;
-      } else if (evt == TouchDriver::TOUCH_UP || evt == TouchDriver::TOUCH_CLICK || evt == TouchDriver::TOUCH_LONG_PRESS) {
+      } else if (evt == TouchDriver::TOUCH_LONG_PRESS) {
+        // Người dùng đang tiếp tục nhấn giữ ngón tay trên màn hình để nói (Push-to-Talk)
+        // Tuyệt đối không ngắt thu âm ở đây! Chỉ ngắt khi người dùng nhấc tay (TOUCH_UP)
+        s_aiTouchHolding = true;
+        return;
+      } else if (evt == TouchDriver::TOUCH_UP || evt == TouchDriver::TOUCH_CLICK) {
         // Nút [Thoát / Hủy] góc dưới phải
         if (pt.y >= 285 && pt.x >= 180) {
           if (s40AiState == AI_STATE_LISTENING) {
@@ -9486,6 +9746,19 @@ namespace TestDisplay {
           } else {
             onKeypadEvent(6); // Thoát / Exit
           }
+          return;
+        }
+      }
+
+      // ----------------------------------------------------------------------
+      // MÀN HÌNH SÓNG ÂM & CHẨN ĐOÁN (MODE 3)
+      // ----------------------------------------------------------------------
+      if (currentMode == 3 && s40DiagSubPage == 0) {
+        if (pt.y >= 89 && pt.y <= 235) { // Chạm vào Card 2 (Biểu đồ Sóng âm) -> Bật/Tắt Thu âm & Phát lại
+          handleDiagAudioTestToggle();
+          return;
+        } else if (pt.y >= 239 && pt.y <= 290) { // Chạm vào Card 3 -> Phát lại bản thu gần nhất
+          handleDiagAudioReplay();
           return;
         }
       }
@@ -10491,6 +10764,43 @@ namespace TestDisplay {
           drawSdCardTestScreen(false);
         }
       } else {
+        // Kiểm tra trạng thái thu âm: Hỗ trợ cả Nhấn Giữ (Push-to-Talk) và Bấm Nhả (Hands-Free Toggle)
+        if (s_diagAudioState == DIAG_AUDIO_RECORDING) {
+          TestAudio::pollVoiceRecording();
+          unsigned long elapsed = now - s_diagAudioStateStartMs;
+
+          bool keypadHeld = KeypadDriver::isOkButtonPhysicallyHeld();
+          bool touchHeld  = TouchDriver::isTouched();
+          bool currentlyHeld = (s_diagHoldingKeypad && keypadHeld) || (s_diagHoldingTouch && touchHeld);
+          if (!s_diagHoldingKeypad && !s_diagHoldingTouch) {
+            currentlyHeld = (keypadHeld || touchHeld);
+          }
+
+          if (currentlyHeld) {
+            s_diagReleaseDebounceFrames = 0;
+          } else {
+            s_diagReleaseDebounceFrames++;
+          }
+
+          // Quyết định chế độ: Nếu người dùng thả tay sớm (<500ms) -> Chuyển sang thu Toggle rảnh tay (không tự ngắt)
+          if (!s_diagToggleRecording && (elapsed >= 350 && elapsed <= 700) && (s_diagReleaseDebounceFrames >= 4)) {
+            s_diagToggleRecording = true;
+            Serial.println("🎙️ [DIAG TEST] Đã bật chế độ Thu Rảnh Tay (Toggle): Bấm [OK] hoặc Chạm màn hình để dừng!");
+          }
+
+          // Ngắt thu âm khi:
+          // 1. Đang ở chế độ Nhấn Giữ (Push-to-Talk, giữ > 600ms) và người dùng đã thả tay liên tục ít nhất 6 frames (~400ms)
+          if (!s_diagToggleRecording && (elapsed >= 600) && (s_diagReleaseDebounceFrames >= 6)) {
+            stopAndSaveDiagAudioRecording();
+          } else if (!TestAudio::isVoiceRecording()) {
+            stopAndSaveDiagAudioRecording();
+          }
+        } else if (s_diagAudioState == DIAG_AUDIO_PLAYING) {
+          if (!TestAudio::isVoicePlaybackAsyncRunning()) {
+            s_diagAudioState = DIAG_AUDIO_IDLE;
+            drawHardwareDiagScreen(true);
+          }
+        }
         drawHardwareDiagScreen(false);
       }
     } else if (currentMode == 12 && s40MediaSubState == 0 && (now - lastAnimTick >= 65)) {
@@ -10541,7 +10851,7 @@ namespace TestDisplay {
       // Nhận diện nhả phím OK sau khi nhấn giữ phím cứng (Push-to-Talk bằng nút OK trên kit)
       static bool s_keypadOkHeld = false;
       static unsigned long s_keypadOkDownMs = 0;
-      if (KeypadDriver::getActiveButtonIndex() == 0) {
+      if (KeypadDriver::isOkButtonPhysicallyHeld()) {
         if (!s_keypadOkHeld) {
           s_keypadOkHeld = true;
           s_keypadOkDownMs = now;

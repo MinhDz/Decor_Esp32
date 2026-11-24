@@ -132,6 +132,19 @@ Việc tách riêng biệt cụm chân I2S cho Loa và Mic giúp ESP32-S3 chạy
 
 ### D. Bo Nguồn MH-CD42 & Bàn Phím Key_pad (`hardware/Key_pad`)
 - **`GPIO 3` (KEY_ADC)**: Đọc thang điện trở 7 phím bấm (Up, Down, Left, Right, OK, Menu, Exit) với 1 dây tín hiệu duy nhất kết hợp trở kéo lên $10\,\text{k}\Omega$ lên 3.3V và tụ lọc nhiễu $100\,\text{nF}$ (kênh ADC1_CH2). Phím bấm sử dụng footprint nút nhấn xúc giác 2 chân (`CustomLib:SW_TactPush_6x6x5mm_2Pin_P4.5mm`).
+  
+  **Bảng thông số thang điện trở và ngưỡng nhận diện chuẩn:**
+
+  | Nút bấm | Ký hiệu | Trở nhánh xuống GND | Điện áp chuẩn (3.3V) | Điện áp đo thực tế | Ngưỡng nhận diện ADC (KeypadDriver) |
+  | :--- | :---: | :---: | :---: | :---: | :---: |
+  | **SW2 (OK)** | OK | $0\,\Omega$ (GND) | $0.00\,\text{V}$ | $0.00\,\text{V}$ | $0 - 125\,\text{mV}$ ($< 0.13\,\text{V}$) |
+  | **SW3 (UP)** | UP | $1.0\,\text{k}\Omega$ | $0.30\,\text{V}$ | $\approx 0.28\,\text{V}$ | $135 - 450\,\text{mV}$ ($0.14 - 0.45\,\text{V}$) |
+  | **SW4 (DOWN)** | DN | $2.2\,\text{k}\Omega$ | $0.59\,\text{V}$ | $\approx 0.58\,\text{V}$ | $460 - 820\,\text{mV}$ ($0.46 - 0.82\,\text{V}$) |
+  | **SW5 (LEFT)** | LF | $4.7\,\text{k}\Omega$ | $1.05\,\text{V}$ | $\approx 1.03\,\text{V}$ | $830 - 1340\,\text{mV}$ ($0.83 - 1.34\,\text{V}$) |
+  | **SW6 (RIGHT)** | RT | $10\,\text{k}\Omega$ | $1.65\,\text{V}$ | $\approx 1.63\,\text{V}$ | $1350 - 1900\,\text{mV}$ ($1.35 - 1.90\,\text{V}$) |
+  | **SW7 (MENU)** | MN | $20\,\text{k}\Omega$ | $2.20\,\text{V}$ | $\approx 2.18\,\text{V}$ | $1910 - 2320\,\text{mV}$ ($1.91 - 2.32\,\text{V}$) |
+  | **SW8 (EXIT)** | EX | $47\,\text{k}\Omega$ | $2.72\,\text{V}$ | $\approx 2.65\,\text{V}$ | $2330 - 2850\,\text{mV}$ ($2.33 - 2.85\,\text{V}$) |
+  | **Thả tay (Nhả phím)** | NONE | Hở mạch ($\infty$) | $3.30\,\text{V}$ | $\approx 3.27\,\text{V}$ | $\ge 2880\,\text{mV}$ ($> 2.88\,\text{V}$) |
 - **`GPIO 46` (CHG_STAT / Vin MH-CD42)**: Đọc trạng thái High/Low từ chân ngõ vào Vin của module sạc xả tự ngắt MH-CD42 (qua cầu phân áp an toàn $10\,\text{k}\Omega / 15\,\text{k}\Omega$ để hạ $5\,\text{V} \to 3.0\,\text{V}$). Logic:
   - **HIGH ($\approx 3.0\,\text{V}$)**: Đang cắm nguồn sạc USB (Vin có 5V $\to$ Trạng thái: Đang Sạc).
   - **LOW ($0\,\text{V}$)**: Đã rút sạc (Vin = 0V $\to$ Trạng thái: Không sạc / Đang chạy pin Lithium).
