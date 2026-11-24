@@ -11010,6 +11010,8 @@ namespace TestDisplay {
 
           if (recognizedUserText.length() > 0) {
             s40AiUserSpeechText = XiaoZhiClient::stripVietnameseToAscii(recognizedUserText);
+          } else if (s40AiUserSpeechText == "Dang lang nghe cau hoi...") {
+            s40AiUserSpeechText = "(Da gui giong noi)";
           }
           String replyAscii = XiaoZhiClient::stripVietnameseToAscii(aiReplyText);
           s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;

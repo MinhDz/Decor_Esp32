@@ -525,8 +525,71 @@ def fetch_and_test_gemini_models(api_key: str) -> dict:
         "all_models": all_content_models
     }
 
+def extract_json_user_and_reply(raw_text: str) -> tuple[str, str]:
+    """Trích xuất user_text và reply từ JSON (hoặc markdown codeblock) do Gemini trả về."""
+    clean = raw_text.strip()
+    if clean.startswith("```json"):
+        clean = clean[7:]
+    elif clean.startswith("```"):
+        clean = clean[3:]
+    if clean.endswith("```"):
+        clean = clean[:-3]
+    clean = clean.strip()
+    try:
+        data = json.loads(clean)
+        if isinstance(data, dict):
+            user_text = str(data.get("user_text", "")).strip()
+            reply = str(data.get("reply", "")).strip()
+            if reply:
+                return (user_text, reply)
+    except Exception:
+        pass
+
+    import re
+    m_user = re.search(r'["\']user_text["\']\s*:\s*["\'](.*?)["\']', clean, re.DOTALL)
+    m_reply = re.search(r'["\']reply["\']\s*:\s*["\'](.*?)["\']', clean, re.DOTALL)
+    if m_reply:
+        u = m_user.group(1).strip() if m_user else ""
+        return (u, m_reply.group(1).strip())
+
+    return ("", clean)
+
+async def transcribe_audio_gemini(cfg: dict, wav_bytes: bytes) -> str:
+    """Sử dụng Gemini REST API để nhận diện giọng nói (STT)."""
+    api_key = cfg.get("gemini_api_key", "").strip()
+    if not api_key or "YOUR_" in api_key:
+        return ""
+    import base64
+    audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={api_key}"
+    payload = {
+        "contents": [{
+            "role": "user",
+            "parts": [
+                {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}},
+                {"text": "Hãy nghe tệp âm thanh và nhận diện chính xác từng từ tiếng Việt người dùng vừa nói. Chỉ xuất ra duy nhất câu văn bản người dùng nói, không thêm bất kỳ lời bình hay ký tự nào khác."}
+            ]
+        }]
+    }
+    req = urllib.request.Request(
+        url,
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}
+    )
+    def _call():
+        with urllib.request.urlopen(req, timeout=15) as res:
+            return json.loads(res.read().decode("utf-8"))
+    try:
+        resp = await asyncio.to_thread(_call)
+        parts = resp.get("candidates", [])[0].get("content", {}).get("parts", [])
+        if parts:
+            return parts[0].get("text", "").strip()
+    except Exception as e:
+        logger.warning(f"Lỗi Gemini REST STT: {e}")
+    return ""
+
 async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable_search: bool) -> tuple[str, str, str]:
-    """Gọi Gemini (hỗ trợ REST audio base64 hoặc SDK) và trả về (user_text, reply, sources)."""
+    """Gọi Gemini (REST audio base64) đồng thời nhận diện STT và LLM reply, trả về (user_text, reply, sources)."""
     api_key = cfg.get("gemini_api_key", "").strip()
     if not api_key or "YOUR_" in api_key:
         return ("", "Xin chào! Tôi là Trợ lý AI của Trạm Decor. Hệ thống Gateway đã đồng bộ thành công với máy tính của bạn và hệ thống âm thanh trực tuyến đã sẵn sàng. Bạn hãy điền API Key vào file cấu hình để bắt đầu đàm thoại thông minh nhé!", "")
@@ -540,8 +603,18 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
 
     import base64
     audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
-    system_inst = cfg.get("system_prompt", "Trả lời ngắn gọn, tự nhiên bằng tiếng Việt.")
-    
+    system_inst = cfg.get("system_prompt", "Bạn là Trợ lý AI Trạm Decor Vũ Trụ. Hãy nghe âm thanh câu hỏi và trả lời tự nhiên, thân thiện, súc tích bằng tiếng Việt.")
+
+    prompt = (
+        f"{system_inst}\n\n"
+        "Nhiệm vụ:\n"
+        "1. Nghe tệp âm thanh đính kèm và nhận diện chính xác từng từ tiếng Việt người dùng vừa nói (STT). "
+        "Nếu trong audio không có tiếng người nói rõ ràng hoặc im lặng, đặt user_text là \"\".\n"
+        "2. Trả lời câu hỏi đó một cách tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt.\n\n"
+        "BẮT BUỘC trả về định dạng JSON thuần túy (response_mime_type: application/json):\n"
+        "{\"user_text\": \"<câu người dùng nói>\", \"reply\": \"<câu trả lời của AI>\"}"
+    )
+
     last_err = ""
     for try_model in candidate_models:
         try:
@@ -551,9 +624,12 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
                     "role": "user",
                     "parts": [
                         {"inline_data": {"mime_type": "audio/wav", "data": audio_b64}},
-                        {"text": f"{system_inst}\n\nHãy nghe câu hỏi trong audio và trả lời bằng tiếng Việt."}
+                        {"text": prompt}
                     ]
-                }]
+                }],
+                "generationConfig": {
+                    "response_mime_type": "application/json"
+                }
             }
             req = urllib.request.Request(
                 url,
@@ -561,31 +637,39 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
                 headers={"Content-Type": "application/json"}
             )
             def _call_rest():
-                with urllib.request.urlopen(req, timeout=20) as res:
+                with urllib.request.urlopen(req, timeout=25) as res:
                     return json.loads(res.read().decode("utf-8"))
             resp_json = await asyncio.to_thread(_call_rest)
             candidates = resp_json.get("candidates", [])
             if candidates:
                 parts = candidates[0].get("content", {}).get("parts", [])
                 if parts:
-                    reply = parts[0].get("text", "").strip()
-                    if reply:
-                        return ("", reply, f"Google Gemini ({try_model})")
+                    raw_text = parts[0].get("text", "").strip()
+                    if raw_text:
+                        user_text, reply = extract_json_user_and_reply(raw_text)
+                        if reply:
+                            return (user_text, reply, f"Google Gemini ({try_model})")
         except Exception as e:
             last_err = str(e)
             logger.warning(f"Lỗi REST audio Gemini ({try_model}): {e}")
 
     return ("", f"Lỗi Gemini: {last_err or 'Không thể xử lý âm thanh'}", "")
-        reply = f"Lỗi Gemini: {e}"
-
-    return (user_text, reply, sources)
 
 async def process_with_gemini(cfg: dict, model_id: str, wav_bytes: bytes, enable_search: bool, ws: web.WebSocketResponse):
     """Xử lý âm thanh hỏi đáp bằng Google Gemini với khả năng Web Grounding thời gian thực."""
     voice = cfg.get("tts_voice", "vi-VN-HoaiMyNeural")
     await ws.send_str(json.dumps({"type": "thinking", "text": f"{model_id} đang nghe và suy luận..."}))
 
-    _, reply, sources = await ask_gemini_internal(cfg, model_id, wav_bytes, enable_search)
+    user_text, reply, sources = await ask_gemini_internal(cfg, model_id, wav_bytes, enable_search)
+    
+    # Gửi gói STT tới ESP32 ngay khi nhận diện được câu hỏi của người dùng
+    if user_text:
+        logger.info(f"🗣️ [STT GEMINI]: \"{user_text}\"")
+        await ws.send_str(json.dumps({"type": "stt", "text": user_text}, ensure_ascii=False))
+    else:
+        logger.info(f"🗣️ [STT GEMINI]: Không có nội dung lời nói rõ ràng")
+        await ws.send_str(json.dumps({"type": "stt", "text": "(Giọng nói)"}, ensure_ascii=False))
+
     logger.info(f"🤖 [{model_id}] Phản hồi: {reply}")
     emotion = detect_emotion_from_text(reply)
     await ws.send_str(json.dumps({"type": "answer", "text": reply, "sources": sources, "emotion": emotion}, ensure_ascii=False))
@@ -606,36 +690,9 @@ async def process_with_openai_compat(cfg: dict, wav_bytes: bytes, enable_search:
         return
 
     # STT chuyển giọng nói thành văn bản qua Gemini nếu có
-    user_text = ""
-    gemini_key = cfg.get("gemini_api_key", "")
-    if gemini_key and "YOUR_" not in gemini_key:
-        try:
-            try:
-                from google import genai
-                from google.genai import types
-                gclient = genai.Client(api_key=gemini_key)
-                audio_part = types.Part.from_bytes(data=wav_bytes, mime_type="audio/wav")
-                stt_resp = await asyncio.to_thread(
-                    lambda: gclient.models.generate_content(
-                        model="gemini-flash-lite-latest",
-                        contents=[audio_part, "Chỉ xuất ra câu tiếng Việt người dùng vừa nói, không thêm bất kỳ lời bình nào."]
-                    )
-                )
-                user_text = (stt_resp.text or "").strip()
-            except ImportError:
-                import google.generativeai as genai_legacy
-                genai_legacy.configure(api_key=gemini_key)
-                m = genai_legacy.GenerativeModel("gemini-1.5-flash")
-                audio_blob = {"mime_type": "audio/wav", "data": wav_bytes}
-                stt_resp = await asyncio.to_thread(
-                    lambda: m.generate_content([audio_blob, "Chỉ ghi lại nguyên văn câu tiếng Việt người dùng vừa nói."])
-                )
-                user_text = (stt_resp.text or "").strip()
-        except Exception as e:
-            logger.warning(f"Lỗi STT qua Gemini: {e}")
-
+    user_text = await transcribe_audio_gemini(cfg, wav_bytes)
     if not user_text:
-        user_text = "Hôm nay thời tiết và tin tức thời sự thế nào?"
+        user_text = "(Giọng nói)"
 
     logger.info(f"🗣️ [STT] Người dùng: {user_text}")
     await ws.send_str(json.dumps({"type": "stt", "text": user_text}, ensure_ascii=False))
@@ -1157,6 +1214,12 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                 elif msg_type == "end":
                     logger.info(f"📦 Đã nhận xong {len(pcm_buf)} bytes PCM từ Mic ESP32. Bắt đầu xử lý...")
                     wav_bytes = pcm_to_wav_bytes(bytes(pcm_buf), sample_rate)
+                    rec_dir = BASE_DIR / "recordings"
+                    rec_dir.mkdir(parents=True, exist_ok=True)
+                    try:
+                        (rec_dir / "rec_ai_latest.wav").write_bytes(wav_bytes)
+                    except Exception:
+                        pass
 
                     if is_mic_test:
                         rec_dir = BASE_DIR / "recordings"
