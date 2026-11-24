@@ -339,15 +339,29 @@ def search_web_realtime(query: str, max_results: int = 4) -> str:
 
     return "\n".join(snippets)
 
+ACTIVE_WS_STREAMS: dict = {}
+
+async def cancel_existing_ws_stream(ws: web.WebSocketResponse):
+    """Hủy luồng âm thanh đang phát trên WebSocket (nếu có) để tránh phát đè 2 giọng nói cùng lúc."""
+    task = ACTIVE_WS_STREAMS.get(ws)
+    if task and not task.done():
+        logger.info("⏹️ Đang hủy luồng âm thanh cũ trước khi phát câu mới...")
+        task.cancel()
+        try:
+            await asyncio.wait_for(asyncio.shield(task), timeout=0.6)
+        except Exception:
+            pass
+
 async def stream_sentences_tts_pcm(sentences: list[str], voice: str, ws: web.WebSocketResponse):
     """
     KIẾN TRÚC PIPELINED STREAMING (Producer - Consumer Queue):
-    - Producer sinh âm thanh từng câu ngắn (chỉ mất 1-2s/câu).
-    - Consumer lấy PCM và stream ngay lập tức từng frame nhỏ xuống ESP32.
-    - ESP32 nhận frame nào đẩy ngay ra loa MAX98357A frame đó.
-    - Đảm bảo trạm cất tiếng sau ~1.5s và nói liên tục không ngừng cho dù văn bản dài hàng chục trang!
+    - Producer sinh âm thanh từng câu ngắn gối đầu trong nền.
+    - Consumer điều tốc theo đồng hồ thực (Wall-Clock Precision Pacing):
+      + 0.8 giây đầu gửi nhanh (Burst) để nạp trước Jitter Buffer cho ESP32.
+      + Sau đó nhịp gửi khớp 100% với tốc độ phát thực tế (16,000 mẫu/giây = 32,000 bytes/giây).
+      + Tự động bù trôi (Self-correcting drift) và chống tràn bộ đệm PSRAM triệt để ('gom âm thanh', tua nhanh 3x).
     """
-    queue = asyncio.Queue(maxsize=4)
+    queue = asyncio.Queue(maxsize=3)
     stop_event = asyncio.Event()
 
     async def producer():
@@ -357,21 +371,28 @@ async def stream_sentences_tts_pcm(sentences: list[str], voice: str, ws: web.Web
                     break
                 t_start = time.time()
                 pcm = await synthesize_single_sentence_pcm(sentence, voice)
+                if stop_event.is_set():
+                    break
                 if pcm and len(pcm) > 0:
                     dur_sec = len(pcm) / 32000.0
                     logger.info(f"🎙️ [PRODUCER] Câu {idx+1}/{len(sentences)} ({dur_sec:.1f}s) xong sau {int((time.time()-t_start)*1000)}ms: '{sentence[:30]}...'")
                     await queue.put((idx, pcm))
                 else:
                     logger.warning(f"⚠️ [PRODUCER] Bỏ qua câu {idx+1} do không có audio.")
+        except asyncio.CancelledError:
+            stop_event.set()
+            raise
         except Exception as e:
             logger.error(f"Lỗi Producer: {e}")
         finally:
-            await queue.put((None, None)) # Báo hiệu kết thúc
+            await queue.put((None, None))
 
     async def consumer():
-        chunk_size = 2048 # 1024 mẫu 16-bit = 64ms âm thanh mỗi gói
+        chunk_size = 2048 # 1024 mẫu 16-bit Mono = 64ms âm thanh mỗi gói
         first_frame = True
-        burst_count = 0
+        start_time = 0.0
+        total_samples_sent = 0
+
         try:
             while True:
                 idx, pcm_data = await queue.get()
@@ -380,32 +401,51 @@ async def stream_sentences_tts_pcm(sentences: list[str], voice: str, ws: web.Web
                     break
 
                 for i in range(0, len(pcm_data), chunk_size):
-                    if ws.closed:
+                    if ws.closed or stop_event.is_set():
                         stop_event.set()
                         break
                     chunk = pcm_data[i:i+chunk_size]
                     await ws.send_bytes(chunk)
+                    now = time.monotonic()
                     if first_frame:
                         first_frame = False
+                        start_time = now
+                        total_samples_sent = 0
                         logger.info("⚡ [CONSUMER] Đã gửi Frame PCM đầu tiên tới ESP32!")
 
-                    # Pacing nhịp nhàng đồng bộ theo thời gian thực:
-                    # 25 chunk đầu tiên (~1.6s) nạp nhanh (burst) để ESP32 phát tiếng ngay lập tức.
-                    # Các chunk sau giữ nhịp 52ms (chunk chứa 64ms âm thanh 16kHz) -> PSRAM không bao giờ tràn!
-                    if burst_count < 25:
-                        burst_count += 1
-                        await asyncio.sleep(0.005)
-                    else:
-                        await asyncio.sleep(0.052)
+                    samples_in_chunk = len(chunk) // 2
+                    total_samples_sent += samples_in_chunk
+                    audio_time_sent = total_samples_sent / 16000.0
+
+                    # Tự phục hồi mốc thời gian nếu ESP32 đã phát cạn do mạng trễ giữa các câu
+                    if (now - start_time) > audio_time_sent:
+                        start_time = now
+                        total_samples_sent = samples_in_chunk
+                        audio_time_sent = samples_in_chunk / 16000.0
+
+                    # Duy trì đúng 0.8s pre-buffer trên ESP32, tuyệt đối không gửi vượt tốc gây tràn bộ đệm
+                    target_time = start_time + max(0.0, audio_time_sent - 0.8)
+                    now_check = time.monotonic()
+                    if target_time > now_check:
+                        await asyncio.sleep(target_time - now_check)
 
                 queue.task_done()
+        except asyncio.CancelledError:
+            stop_event.set()
+            raise
         except Exception as e:
             logger.error(f"Lỗi Consumer: {e}")
             stop_event.set()
 
     prod_task = asyncio.create_task(producer())
     cons_task = asyncio.create_task(consumer())
-    await asyncio.gather(prod_task, cons_task)
+    try:
+        await asyncio.gather(prod_task, cons_task)
+    except asyncio.CancelledError:
+        stop_event.set()
+        prod_task.cancel()
+        cons_task.cancel()
+        raise
 
 # ================= XỬ LÝ MÔ HÌNH AI =================
 
@@ -848,17 +888,27 @@ async def handle_http_chat(request: web.Request) -> web.Response:
                 sentences = split_into_smart_sentences(reply_text, max_chars=130)
                 for ws in list(ACTIVE_WS_CLIENTS):
                     if not ws.closed:
-                        try:
-                            await ws.send_str(json.dumps({
-                                "type": "answer",
-                                "text": reply_text,
-                                "sources": f"Web Chat ({model})",
-                                "emotion": emotion
-                            }, ensure_ascii=False))
-                            await stream_sentences_tts_pcm(sentences, voice, ws)
-                            await ws.send_str(json.dumps({"type": "done"}))
-                        except Exception as we:
-                            logger.warning(f"Lỗi stream chat xuống ws: {we}")
+                        await cancel_existing_ws_stream(ws)
+                        async def _send_one(target_ws):
+                            try:
+                                await target_ws.send_str(json.dumps({
+                                    "type": "answer",
+                                    "text": reply_text,
+                                    "sources": f"Web Chat ({model})",
+                                    "emotion": emotion
+                                }, ensure_ascii=False))
+                                await stream_sentences_tts_pcm(sentences, voice, target_ws)
+                                await target_ws.send_str(json.dumps({"type": "done"}))
+                            except asyncio.CancelledError:
+                                logger.info("🛑 Đã dừng luồng stream do có tin nhắn mới.")
+                            except Exception as we:
+                                logger.warning(f"Lỗi stream chat xuống ws: {we}")
+                            finally:
+                                if ACTIVE_WS_STREAMS.get(target_ws) is asyncio.current_task():
+                                    ACTIVE_WS_STREAMS.pop(target_ws, None)
+
+                        task = asyncio.create_task(_send_one(ws))
+                        ACTIVE_WS_STREAMS[ws] = task
 
         if stream_to_station and ACTIVE_WS_CLIENTS:
             asyncio.create_task(_stream_chat_reply())
@@ -1095,6 +1145,7 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                 msg_type = data.get("type")
                 if msg_type == "start":
                     pcm_buf.clear()
+                    await cancel_existing_ws_stream(ws)
                     model_key = data.get("model", "gemini-pro")
                     enable_search = bool(data.get("search", True))
                     sample_rate = int(data.get("sample_rate", 16000))

@@ -1244,6 +1244,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 esp_websocket_client_send_text(s_wsClient, stateResp.c_str(), stateResp.length(), pdMS_TO_TICKS(1000));
               }
             } else if (strcmp(type, "answer") == 0) {
+              TestAudio::stopStreamPcmAsync(); // Xóa sạch bộ đệm âm thanh cũ để tránh phát đè hoặc tồn đọng
               const char* txt = doc["text"] | "";
               if (strlen(txt) > 0) {
                 s_lastAiFullReply = String(txt);
@@ -1639,6 +1640,7 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
 
   // 1. Gửi bản tin bắt đầu thu âm
   if (isPcGatewayMode()) {
+    TestAudio::stopStreamPcmAsync(); // Dừng phát âm thanh cũ khi người dùng bắt đầu nói câu mới
     String startMsg = "{\"type\":\"start\",\"model\":\"" + s_aiModel + "\",\"search\":true,\"sample_rate\":" + String(sampleRate) + "}";
     int retStart = esp_websocket_client_send_text(s_wsClient, startMsg.c_str(), startMsg.length(), pdMS_TO_TICKS(1500));
     if (retStart < 0) {

@@ -1412,7 +1412,8 @@ namespace AudioDriver {
 
   // --- BỘ ĐỆM BẤT ĐỒNG BỘ STREAM (XIAOZHI TTS / WEB STREAM) TRÊN CORE 0 ---
   static int16_t* s_asyncStreamRingBuf = nullptr;
-  static const size_t ASYNC_STREAM_RING_CAPACITY = 64000; // 128KB PSRAM (~4 giây Mono 16kHz)
+  static const size_t ASYNC_STREAM_RING_CAPACITY = 192000; // 384KB PSRAM (~12 giây Mono 16kHz)
+  static size_t s_asyncStreamCap = ASYNC_STREAM_RING_CAPACITY;
   static size_t s_asyncStreamHead = 0;
   static size_t s_asyncStreamTail = 0;
   static size_t s_asyncStreamCount = 0;
@@ -1453,7 +1454,7 @@ namespace AudioDriver {
       taskENTER_CRITICAL(&s_asyncStreamMux);
       for (size_t i = 0; i < toRead; i++) {
         monoChunk[i] = s_asyncStreamRingBuf[s_asyncStreamHead];
-        s_asyncStreamHead = (s_asyncStreamHead + 1) % ASYNC_STREAM_RING_CAPACITY;
+        s_asyncStreamHead = (s_asyncStreamHead + 1) % s_asyncStreamCap;
       }
       s_asyncStreamCount -= toRead;
       taskEXIT_CRITICAL(&s_asyncStreamMux);
@@ -1523,10 +1524,12 @@ namespace AudioDriver {
 
     if (!s_asyncStreamRingBuf) {
       if (psramFound()) {
-        s_asyncStreamRingBuf = (int16_t*)ps_malloc(ASYNC_STREAM_RING_CAPACITY * sizeof(int16_t));
+        s_asyncStreamCap = ASYNC_STREAM_RING_CAPACITY;
+        s_asyncStreamRingBuf = (int16_t*)ps_malloc(s_asyncStreamCap * sizeof(int16_t));
       }
       if (!s_asyncStreamRingBuf) {
-        s_asyncStreamRingBuf = (int16_t*)malloc(8000 * sizeof(int16_t));
+        s_asyncStreamCap = 16000;
+        s_asyncStreamRingBuf = (int16_t*)malloc(s_asyncStreamCap * sizeof(int16_t));
       }
       s_asyncStreamHead = 0;
       s_asyncStreamTail = 0;
@@ -1534,7 +1537,7 @@ namespace AudioDriver {
     }
     if (!s_asyncStreamRingBuf) return;
 
-    size_t cap = psramFound() ? ASYNC_STREAM_RING_CAPACITY : 8000;
+    size_t cap = s_asyncStreamCap;
 
     if (!s_asyncStreamPumpHandle) {
       s_asyncStreamPumpRunning = true;
@@ -1556,9 +1559,9 @@ namespace AudioDriver {
         s_asyncStreamTail = (s_asyncStreamTail + 1) % cap;
         s_asyncStreamCount++;
       } else {
-        s_asyncStreamHead = (s_asyncStreamHead + 1) % cap;
-        s_asyncStreamRingBuf[s_asyncStreamTail] = samples[i];
-        s_asyncStreamTail = (s_asyncStreamTail + 1) % cap;
+        // Nếu bộ đệm 12 giây đầy, bỏ qua mẫu mới thay vì đẩy s_asyncStreamHead!
+        // Đẩy s_asyncStreamHead từng mẫu sẽ cắt nát dạng sóng, gây hiện tượng 'gom âm thanh / tua nhanh 3x' và méo tiếng!
+        break;
       }
     }
     taskEXIT_CRITICAL(&s_asyncStreamMux);
