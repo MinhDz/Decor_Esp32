@@ -178,8 +178,8 @@ namespace AudioDriver {
       .channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT,
       .communication_format = I2S_COMM_FORMAT_STAND_I2S,
       .intr_alloc_flags = ESP_INTR_FLAG_LEVEL1,
-      .dma_buf_count = 8,
-      .dma_buf_len = 512,
+      .dma_buf_count = 16, // Tăng lên 16 buffers (dung lượng 256ms) chống tràn DMA khi CPU bận
+      .dma_buf_len = 512,  // 512 samples = 256 stereo frames = 16ms âm thanh
       .use_apll = false,
       .tx_desc_auto_clear = false,
       .fixed_mclk = 0
@@ -598,6 +598,139 @@ namespace AudioDriver {
   }
 
   static int32_t s_recOverallPeak = 0;
+  static TaskHandle_t s_micRecordTaskHandle = nullptr;
+  static volatile bool s_micRecordTaskRunning = false;
+  static int32_t s_micTaskRaw[256 * 2];
+
+  // FreeRTOS Task độc lập chạy trên Core 0 (Priority 3):
+  // Rút cạn I2S DMA liên tục 16ms/lần, không bao giờ bị nghẽn bởi ST7789 vẽ màn hình trên Core 1!
+  static void micRecordTask(void* param) {
+    float gain = 3.2f;
+    if (micSensMode == 0)      gain = 1.8f;
+    else if (micSensMode == 2) gain = 4.8f;
+
+    while (s_micRecordTaskRunning && voiceRecordingActive) {
+      if (pcmRecSampleCount >= pcmRecAllocatedSamples) {
+        break;
+      }
+
+      size_t bytesRead = 0;
+      esp_err_t err = i2s_read(I2S_PORT_MIC, s_micTaskRaw, sizeof(s_micTaskRaw), &bytesRead, pdMS_TO_TICKS(50));
+      if (err != ESP_OK || bytesRead < 16) {
+        continue;
+      }
+
+      int frames = bytesRead / (2 * sizeof(int32_t));
+      if (frames <= 0) continue;
+
+      // 1. Khóa cứng kênh Micro ngay từ frame đầu tiên
+      if (lockedChannel < 0) {
+        int64_t sum0 = 0, sum1 = 0;
+        for (int k = 0; k < frames; k++) {
+          sum0 += (s_micTaskRaw[k * 2] >> 8);
+          sum1 += (s_micTaskRaw[k * 2 + 1] >> 8);
+        }
+        int32_t avg0 = (int32_t)(sum0 / frames);
+        int32_t avg1 = (int32_t)(sum1 / frames);
+
+        int64_t energy0 = 0, energy1 = 0;
+        int32_t pk0 = 0, pk1 = 0;
+        for (int k = 0; k < frames; k++) {
+          int32_t d0 = abs((s_micTaskRaw[k * 2] >> 8) - avg0);
+          int32_t d1 = abs((s_micTaskRaw[k * 2 + 1] >> 8) - avg1);
+          if (d0 > pk0) pk0 = d0;
+          if (d1 > pk1) pk1 = d1;
+          energy0 += (int64_t)d0 * d0;
+          energy1 += (int64_t)d1 * d1;
+        }
+
+        if (energy1 > energy0 * 2 && pk1 > 1000) {
+          lockedChannel = 1;
+        } else if (energy0 > energy1 * 2 && pk0 > 1000) {
+          lockedChannel = 0;
+        } else {
+          lockedChannel = (pk1 >= pk0) ? 1 : 0;
+        }
+        Serial.printf("🎙️ [MIC TASK LOCK] Đã khóa cố định kênh thu: Kênh %d (%s) | pk0=%ld, pk1=%ld\n",
+                      lockedChannel, (lockedChannel == 0) ? "LEFT (L/R=GND)" : "RIGHT (L/R=3V3)", (long)pk0, (long)pk1);
+      }
+      const int chIdx = (lockedChannel >= 0) ? lockedChannel : 0;
+
+      float blockSumSq = 0.0f;
+      int32_t blockPeak = 0;
+
+      // 2. Xử lý DSP từng mẫu âm thanh ở tốc độ gốc 16,000 Hz trên kênh đã khóa
+      for (int i = 0; i < frames && pcmRecSampleCount < pcmRecAllocatedSamples; i++) {
+        int32_t raw24 = (s_micTaskRaw[i * 2 + chIdx] >> 8);
+
+        if (!firstSampleFiltered) {
+          dcPrevX = (float)raw24;
+          dcPrevY = 0.0f;
+          preEmphPrev = 0.0f;
+          firstSampleFiltered = true;
+          continue;
+        }
+
+        // A. Bộ lọc High-Pass IIR chuẩn thoại 80Hz (alpha = 0.9695f @ 16kHz)
+        float y = 0.9695f * (dcPrevY + (float)raw24 - dcPrevX);
+        dcPrevX = (float)raw24;
+        dcPrevY = y;
+
+        // B. Bộ lọc Pre-emphasis giọng nói: z[n] = y[n] - 0.25 * y[n-1]
+        float pe = y - 0.25f * preEmphPrev;
+        preEmphPrev = y;
+
+        int32_t absAc = (int32_t)fabsf(y);
+        if (absAc > blockPeak) blockPeak = absAc;
+
+        // C. Chuẩn hóa 24-bit sang 16-bit chuẩn (chia 256.0f) và nhân Gain
+        float s16 = (pe / 256.0f) * gain;
+
+        // D. Cổng khử nhiễu động (Dynamic Soft Noise Gate):
+        if (fabsf(s16) < 100.0f) {
+          s16 *= 0.25f;
+        }
+
+        // E. Bộ kẹp đỉnh mềm (Soft Limiter):
+        if (s16 > 30000.0f) {
+          float excess = s16 - 30000.0f;
+          s16 = 30000.0f + 1000.0f * (excess / (excess + 1000.0f));
+        } else if (s16 < -30000.0f) {
+          float excess = -s16 - 30000.0f;
+          s16 = -(30000.0f + 1000.0f * (excess / (excess + 1000.0f)));
+        }
+
+        int16_t sample16 = (int16_t)s16;
+        int32_t absS = abs((int32_t)sample16);
+        if (absS > s_recOverallPeak) s_recOverallPeak = absS;
+
+        blockSumSq += s16 * s16;
+        pcmRecBuffer[pcmRecSampleCount++] = sample16;
+      }
+
+      // Cập nhật thông số VU Meter & Sóng âm Oscilloscope cho màn hình ST7789 đọc tức thì
+      if (frames > 0 && lockedChannel >= 0) {
+        float rms = sqrtf(blockSumSq / (float)frames);
+        int pct = constrain((int)((rms * 100.0f) / 4000.0f), 0, 100);
+        lastMicPct = pct;
+        if (pct > recMaxVuPct) recMaxVuPct = pct;
+
+        for (int i = 0; i < 48; i++) {
+          int idx = (i * frames) / 48;
+          int32_t val = (idx < frames) ? ((s_micTaskRaw[idx * 2 + lockedChannel] >> 8) - (int32_t)dcPrevX) : 0;
+          int scaled = val / 25000;
+          waveformBuf[i] = (int8_t)constrain(scaled, -28, 28);
+        }
+
+        lastMicPeak = blockPeak;
+        activeChannelStr = (lockedChannel == 0) ? "LEFT CH (L/R=GND) LOCKED" : "RIGHT CH (L/R=3V3) LOCKED";
+      }
+    }
+
+    s_micRecordTaskRunning = false;
+    s_micRecordTaskHandle = nullptr;
+    vTaskDelete(NULL);
+  }
 
   bool startVoiceRecording() {
     if (!installMicRx()) return false;
@@ -634,22 +767,53 @@ namespace AudioDriver {
     pcmRecSampleCount = 0;
     recMaxVuPct = 0;
     s_recOverallPeak = 0;
-    lockedChannel = 0;
+    lockedChannel = -1; // -1: Tự động khóa kênh có biên độ cao ở frame đầu tiên
     dcPrevX = 0.0f;
     dcPrevY = 0.0f;
     preEmphPrev = 0.0f;
     firstSampleFiltered = false;
     voiceRecordingActive = true;
-    Serial.printf("🎙️ [INMP441 REC] Bắt đầu thu âm PCM 16-bit 16000Hz (Bộ đệm: %u mẫu ~ %.1fs, PSRAM: %s)...\n",
+
+    // Khởi chạy task FreeRTOS chuyên biệt trên Core 0 (Priority 3)
+    // Đảm bảo không bỏ rơi bất kỳ mili-giây âm thanh nào, hoàn toàn độc lập với Core 1
+    if (!s_micRecordTaskHandle) {
+      s_micRecordTaskRunning = true;
+      BaseType_t res = xTaskCreatePinnedToCore(
+        micRecordTask,
+        "micRecordTask",
+        4096,
+        nullptr,
+        3,
+        &s_micRecordTaskHandle,
+        0
+      );
+      if (res != pdPASS) {
+        Serial.println("⚠️ [INMP441 REC] Không thể tạo FreeRTOS Task, fallback sang pollVoiceRecording");
+        s_micRecordTaskHandle = nullptr;
+        s_micRecordTaskRunning = false;
+      }
+    }
+
+    Serial.printf("🎙️ [INMP441 REC] Bắt đầu thu âm PCM 16-bit 16000Hz (Bộ đệm: %u mẫu ~ %.1fs, PSRAM: %s, Mode: %s)...\n",
                   (unsigned)pcmRecAllocatedSamples,
                   (float)pcmRecAllocatedSamples / 16000.0f,
-                  psramFound() ? "BẬT (8MB)" : "TẮT");
+                  psramFound() ? "BẬT (8MB)" : "TẮT",
+                  s_micRecordTaskHandle ? "Core 0 FreeRTOS Task" : "Core 1 Poll Loop");
     return true;
   }
 
   void stopVoiceRecording() {
     if (voiceRecordingActive) {
       voiceRecordingActive = false;
+      s_micRecordTaskRunning = false;
+
+      // Đợi task thu âm hoàn tất an toàn
+      int waitMs = 0;
+      while (s_micRecordTaskHandle != nullptr && waitMs < 150) {
+        vTaskDelay(pdMS_TO_TICKS(10));
+        waitMs += 10;
+      }
+
       Serial.printf("⏹️ [INMP441 REC] Đã dừng thu âm: %u mẫu (%.2f giây @ 16kHz, %u Bytes, Max VU=%d%%, Peak=%ld)\n",
                     (unsigned)pcmRecSampleCount,
                     (float)pcmRecSampleCount / 16000.0f,
@@ -689,6 +853,9 @@ namespace AudioDriver {
   int32_t getRecordedPeak() { return s_recOverallPeak; }
 
   void pollVoiceRecording() {
+    // Nếu FreeRTOS Task trên Core 0 đang chạy, việc đọc I2S DMA được xử lý hoàn toàn tự động
+    if (s_micRecordTaskHandle != nullptr) return;
+
     if (!voiceRecordingActive || !pcmRecBuffer) return;
     if (!micDriverInstalled) {
       if (!installMicRx()) return;
@@ -748,7 +915,7 @@ namespace AudioDriver {
         Serial.printf("🎙️ [MIC LOCK] Đã khóa cố định kênh thu: Kênh %d (%s) | pk0=%ld, pk1=%ld\n",
                       lockedChannel, (lockedChannel == 0) ? "LEFT (L/R=GND)" : "RIGHT (L/R=3V3)", (long)pk0, (long)pk1);
       }
-      const int chIdx = lockedChannel;
+      const int chIdx = (lockedChannel >= 0) ? lockedChannel : 0;
 
       float blockSumSq = 0.0f;
       int32_t blockPeak = 0;
