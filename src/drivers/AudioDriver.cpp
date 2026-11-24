@@ -581,7 +581,7 @@ namespace AudioDriver {
   static bool voiceRecordingActive = false;
   static int recMaxVuPct = 0;
   static int lockedChannel = -1; // 0 = Left (L/R=GND), 1 = Right (L/R=3V3)
-  static int micSensMode = 1;    // 0: Thấp (3.5x), 1: Tiêu chuẩn (6.0x), 2: Cao (10.0x)
+  static int micSensMode = 1;    // 0: Thấp (1.8x), 1: Tiêu chuẩn (3.2x), 2: Cao (4.8x)
   static float dcPrevX = 0.0f;
   static float dcPrevY = 0.0f;
   static float preEmphPrev = 0.0f;
@@ -590,7 +590,7 @@ namespace AudioDriver {
   void setMicSensitivityMode(int mode) {
     micSensMode = constrain(mode, 0, 2);
     Serial.printf("🎙️ [MIC SENS] Đã đổi độ nhạy thu âm sang mức: %s\n",
-                  micSensMode == 0 ? "Thấp (3.5x)" : (micSensMode == 1 ? "Tiêu chuẩn (6.0x)" : "Cao (10.0x)"));
+                  micSensMode == 0 ? "Thấp (1.8x)" : (micSensMode == 1 ? "Tiêu chuẩn (3.2x)" : "Cao (4.8x)"));
   }
 
   uint32_t getRecordSampleRate() {
@@ -664,15 +664,15 @@ namespace AudioDriver {
           int32_t a = abs(pcmRecBuffer[k]);
           if (a > maxAmp) maxAmp = a;
         }
-        if (maxAmp > 20 && maxAmp < 24000) {
+        if (maxAmp > 50 && maxAmp < 24000) {
           float normGain = 26000.0f / (float)maxAmp;
-          if (normGain > 24.0f) normGain = 24.0f;
+          if (normGain > 8.0f) normGain = 8.0f;
           for (size_t k = 0; k < pcmRecSampleCount; k++) {
             int32_t val = (int32_t)(pcmRecBuffer[k] * normGain);
             pcmRecBuffer[k] = (int16_t)constrain(val, -31500, 31500);
           }
           s_recOverallPeak = (int32_t)(maxAmp * normGain);
-          Serial.printf("✨ [AUDIO NORMALIZE] Tự động nâng âm lượng: Peak %ld -> %ld (Gain: %.2fx)\n",
+          Serial.printf("✨ [AUDIO NORMALIZE] Tự động cân bằng âm lượng: Peak %ld -> %ld (Gain: %.2fx)\n",
                         (long)maxAmp, (long)s_recOverallPeak, normGain);
         } else {
           s_recOverallPeak = maxAmp;
@@ -694,10 +694,11 @@ namespace AudioDriver {
       if (!installMicRx()) return;
     }
 
-    // Hệ số khuếch đại (AGC Gain) theo cài đặt người dùng
-    float gain = 6.0f;
-    if (micSensMode == 0)      gain = 3.5f; // Thấp: phòng ồn hoặc nói sát mic
-    else if (micSensMode == 2) gain = 10.0f; // Cao: nói xa cách mic 40-70cm
+    // Hệ số khuếch đại (AGC Gain) chuẩn hóa:
+    // INMP441 có độ nhạy -26 dBFS @ 94 dB SPL. Chia 256.0f chuyển từ 24-bit sang 16-bit.
+    float gain = 3.2f;
+    if (micSensMode == 0)      gain = 1.8f; // Thấp: phòng ồn hoặc nói sát mic (<15cm)
+    else if (micSensMode == 2) gain = 4.8f; // Cao: nói xa cách mic (40-70cm)
 
     // Rút cạn toàn bộ dữ liệu đang chờ trong hàng đợi DMA (tối đa 16 lượt)
     int32_t stereoRaw[256 * 2];
@@ -705,11 +706,9 @@ namespace AudioDriver {
     float lastBlockSumSq = 0.0f;
     int lastFrames = 0;
     int32_t lastBlockPeak = 0;
-    int activeCh = 0;
 
     while (voiceRecordingActive && loops < 16 && pcmRecSampleCount < pcmRecAllocatedSamples) {
       size_t bytesRead = 0;
-      // Dùng timeout ngắn 2ms để không nghẽn nhưng vẫn cho phép DMA đẩy đủ dữ liệu
       esp_err_t err = i2s_read(I2S_PORT_MIC, stereoRaw, sizeof(stereoRaw), &bytesRead, pdMS_TO_TICKS(2));
       if (err != ESP_OK || bytesRead < 16) break;
       loops++;
@@ -717,41 +716,44 @@ namespace AudioDriver {
       int frames = bytesRead / (2 * sizeof(int32_t));
       if (frames <= 0) continue;
 
-      // 1. Phân tích năng lượng thực tế AC trên cả 2 kênh để TỰ ĐỘNG CHỌN KÊNH CHÍNH XÁC
-      // (Bảo đảm tương thích 100% mọi phiên bản phần cứng dù L/R nối GND, nối 3.3V hay bị đảo kênh)
-      int64_t sum0 = 0, sum1 = 0;
-      for (int k = 0; k < frames; k++) {
-        sum0 += (stereoRaw[k * 2] >> 8);
-        sum1 += (stereoRaw[k * 2 + 1] >> 8);
-      }
-      int32_t avg0 = (int32_t)(sum0 / frames);
-      int32_t avg1 = (int32_t)(sum1 / frames);
+      // 1. Khóa cứng kênh Micro (Lock Channel) ngay từ frame đầu tiên!
+      // TUYỆT ĐỐI KHÔNG ĐẢO KÊNH GIỮA CHỪNG (Tránh gây sốc điện áp DC làm nổ tiếng / rè / ù 1.5kHz)
+      if (lockedChannel < 0) {
+        int64_t sum0 = 0, sum1 = 0;
+        for (int k = 0; k < frames; k++) {
+          sum0 += (stereoRaw[k * 2] >> 8);
+          sum1 += (stereoRaw[k * 2 + 1] >> 8);
+        }
+        int32_t avg0 = (int32_t)(sum0 / frames);
+        int32_t avg1 = (int32_t)(sum1 / frames);
 
-      int64_t energy0 = 0, energy1 = 0;
-      int32_t pk0 = 0, pk1 = 0;
-      for (int k = 0; k < frames; k++) {
-        int32_t d0 = abs((stereoRaw[k * 2] >> 8) - avg0);
-        int32_t d1 = abs((stereoRaw[k * 2 + 1] >> 8) - avg1);
-        if (d0 > pk0) pk0 = d0;
-        if (d1 > pk1) pk1 = d1;
-        energy0 += (int64_t)d0 * d0;
-        energy1 += (int64_t)d1 * d1;
-      }
+        int64_t energy0 = 0, energy1 = 0;
+        int32_t pk0 = 0, pk1 = 0;
+        for (int k = 0; k < frames; k++) {
+          int32_t d0 = abs((stereoRaw[k * 2] >> 8) - avg0);
+          int32_t d1 = abs((stereoRaw[k * 2 + 1] >> 8) - avg1);
+          if (d0 > pk0) pk0 = d0;
+          if (d1 > pk1) pk1 = d1;
+          energy0 += (int64_t)d0 * d0;
+          energy1 += (int64_t)d1 * d1;
+        }
 
-      int chIdx = 0;
-      if (energy1 > energy0 * 2 && pk1 > 1000) {
-        chIdx = 1;
-      } else if (energy0 > energy1 * 2 && pk0 > 1000) {
-        chIdx = 0;
-      } else {
-        chIdx = (pk1 > pk0) ? 1 : 0;
+        if (energy1 > energy0 * 2 && pk1 > 1000) {
+          lockedChannel = 1;
+        } else if (energy0 > energy1 * 2 && pk0 > 1000) {
+          lockedChannel = 0;
+        } else {
+          lockedChannel = (pk1 >= pk0) ? 1 : 0;
+        }
+        Serial.printf("🎙️ [MIC LOCK] Đã khóa cố định kênh thu: Kênh %d (%s) | pk0=%ld, pk1=%ld\n",
+                      lockedChannel, (lockedChannel == 0) ? "LEFT (L/R=GND)" : "RIGHT (L/R=3V3)", (long)pk0, (long)pk1);
       }
-      activeCh = chIdx;
+      const int chIdx = lockedChannel;
 
       float blockSumSq = 0.0f;
       int32_t blockPeak = 0;
 
-      // 2. Xử lý DSP từng mẫu âm thanh ở tốc độ gốc 16,000 Hz trên kênh có âm thanh
+      // 2. Xử lý DSP từng mẫu âm thanh ở tốc độ gốc 16,000 Hz trên kênh đã khóa
       for (int i = 0; i < frames && pcmRecSampleCount < pcmRecAllocatedSamples; i++) {
         int32_t raw24 = (stereoRaw[i * 2 + chIdx] >> 8);
 
@@ -765,23 +767,35 @@ namespace AudioDriver {
         }
 
         // A. Bộ lọc High-Pass IIR chuẩn thoại 80Hz (alpha = 0.9695f @ 16kHz)
+        // Cắt bỏ 100% DC trôi, rung chấn cơ học và tiếng ù nguồn 50Hz
         float y = 0.9695f * (dcPrevY + (float)raw24 - dcPrevX);
         dcPrevX = (float)raw24;
         dcPrevY = y;
 
-        // B. Bộ lọc Pre-emphasis giọng nói: z[n] = y[n] - 0.40 * y[n-1]
-        float pe = y - 0.40f * preEmphPrev;
+        // B. Bộ lọc Pre-emphasis giọng nói tự nhiên, ấm áp: z[n] = y[n] - 0.25 * y[n-1]
+        float pe = y - 0.25f * preEmphPrev;
         preEmphPrev = y;
 
         int32_t absAc = (int32_t)fabsf(y);
         if (absAc > blockPeak) blockPeak = absAc;
 
-        // C. Chuẩn hóa sang 16-bit signed và nhân hệ số khuếch đại giọng nói
-        float s16 = (pe / 64.0f) * gain;
+        // C. Chuẩn hóa 24-bit sang 16-bit chuẩn (chia 256.0f) và nhân Gain
+        float s16 = (pe / 256.0f) * gain;
 
-        // D. Bộ kẹp đỉnh mềm (Soft Limiter): Tránh méo tiếng khi nói to
-        if (s16 > 31000.0f)       s16 = 31000.0f;
-        else if (s16 < -31000.0f) s16 = -31000.0f;
+        // D. Cổng khử nhiễu động (Dynamic Soft Noise Gate):
+        // Khi biên độ nhỏ (< 100 ~ tiếng quạt gió máy tính, xì nền), giảm 75% để nền âm tĩnh lặng hoàn toàn
+        if (fabsf(s16) < 100.0f) {
+          s16 *= 0.25f;
+        }
+
+        // E. Bộ kẹp đỉnh mềm (Soft Limiter): Tránh méo tiếng (No Hard Clipping) khi nói to
+        if (s16 > 30000.0f) {
+          float excess = s16 - 30000.0f;
+          s16 = 30000.0f + 1000.0f * (excess / (excess + 1000.0f));
+        } else if (s16 < -30000.0f) {
+          float excess = -s16 - 30000.0f;
+          s16 = -(30000.0f + 1000.0f * (excess / (excess + 1000.0f)));
+        }
 
         int16_t sample16 = (int16_t)s16;
         int32_t absS = abs((int32_t)sample16);
@@ -796,22 +810,22 @@ namespace AudioDriver {
       lastBlockPeak = blockPeak;
     }
 
-    // Cập nhật giao diện VU Meter & Sóng âm Oscilloscope trên ST7789 từ block mới nhất vừa hút được
-    if (lastFrames > 0) {
+    // Cập nhật giao diện VU Meter & Sóng âm Oscilloscope trên ST7789 từ block mới nhất
+    if (lastFrames > 0 && lockedChannel >= 0) {
       float rms = sqrtf(lastBlockSumSq / (float)lastFrames);
-      int pct = constrain((int)((rms * 100.0f) / 6000.0f), 0, 100);
+      int pct = constrain((int)((rms * 100.0f) / 4000.0f), 0, 100);
       lastMicPct = pct;
       if (pct > recMaxVuPct) recMaxVuPct = pct;
 
       for (int i = 0; i < 48; i++) {
         int idx = (i * lastFrames) / 48;
-        int32_t val = (idx < lastFrames) ? ((stereoRaw[idx * 2 + activeCh] >> 8) - (int32_t)dcPrevX) : 0;
+        int32_t val = (idx < lastFrames) ? ((stereoRaw[idx * 2 + lockedChannel] >> 8) - (int32_t)dcPrevX) : 0;
         int scaled = val / 25000;
         waveformBuf[i] = (int8_t)constrain(scaled, -28, 28);
       }
 
       lastMicPeak = lastBlockPeak;
-      activeChannelStr = (activeCh == 0) ? "LEFT CH (L/R=GND) AUTO" : "RIGHT CH (L/R=3V3) AUTO";
+      activeChannelStr = (lockedChannel == 0) ? "LEFT CH (L/R=GND) LOCKED" : "RIGHT CH (L/R=3V3) LOCKED";
     }
 
     if (pcmRecSampleCount >= pcmRecAllocatedSamples) {
