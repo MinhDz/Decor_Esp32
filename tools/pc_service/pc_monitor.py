@@ -146,7 +146,7 @@ if not HAS_NVML:
 
 def load_config():
     defaults = {
-        "esp32_ip": "192.168.1.233",
+        "esp32_ip": "192.168.1.82",
         "fallback_host": "tramvutru.local",
         "interval_seconds": 1.0,
         "timeout_seconds": 1.5

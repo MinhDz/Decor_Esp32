@@ -294,7 +294,7 @@ def collect_telemetry(net_meter):
 #             WORKER THREAD QUẢN LÝ GỬI THÔNG SỐ PC
 # =====================================================================
 class TelemetryWorker(threading.Thread):
-    def __init__(self, esp_ip="192.168.1.233", interval=1.2, enabled=True):
+    def __init__(self, esp_ip="192.168.1.82", interval=1.2, enabled=True):
         super().__init__(name="TelemetryWorker", daemon=True)
         self.esp_ip = esp_ip
         self.interval = float(interval)

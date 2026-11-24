@@ -230,7 +230,7 @@ class StreamSession:
         self.video_title = ""
         self.thumbnail_url = ""
         self.duration = 0
-        self.esp_ip = "192.168.1.233"
+        self.esp_ip = "192.168.1.82"
         self.fps = 15
         self.resolution = "240x240"
         self.volume = 100
@@ -845,7 +845,7 @@ class StreamSession:
         # Báo cho ESP32 dừng stream
         try:
             import requests
-            target = self.esp_ip if (self.esp_ip and self.esp_ip != "127.0.0.1") else "192.168.1.233"
+            target = self.esp_ip if (self.esp_ip and self.esp_ip != "127.0.0.1") else "192.168.1.82"
             requests.post(f"http://{target}/api/stream/stop", timeout=1.0)
         except Exception:
             pass
@@ -897,7 +897,7 @@ class PlaylistManager:
         self.tracks = []
         self.current_index = -1
         self.is_playing = False
-        self.esp_ip = "192.168.1.233"
+        self.esp_ip = "192.168.1.82"
         self.sync_thread = None
         self.sync_running = False
 
@@ -920,7 +920,7 @@ class PlaylistManager:
                     self.playlist_url = c.get("playlist_url", "")
                     self.cover_url = c.get("cover_url", "")
                     self.tracks = c.get("tracks", [])
-                    self.esp_ip = c.get("esp_ip", "192.168.1.233")
+                    self.esp_ip = c.get("esp_ip", "192.168.1.82")
                     if self.tracks:
                         for t in self.tracks:
                             if not t.get("thumbnail") and t.get("id"):
@@ -1415,7 +1415,7 @@ HTML_DASHBOARD = """
       <div class="row">
         <div class="col">
           <label>Địa chỉ IP ESP32:</label>
-          <input type="text" id="esp_ip" value="{{ cfg.esp_ip or '192.168.1.233' }}" placeholder="192.168.1.xxx hoặc 192.168.4.1">
+          <input type="text" id="esp_ip" value="{{ cfg.esp_ip or '192.168.1.82' }}" placeholder="192.168.1.xxx hoặc 192.168.4.1">
         </div>
         <div class="col">
           <label>Độ phân giải & Tỉ lệ:</label>
@@ -1635,7 +1635,7 @@ HTML_DASHBOARD = """
       try {
         await fetch('/api/stop', { method: 'POST' });
       } catch(e) {}
-      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.233';
+      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.82';
       try {
         await fetch('http://' + esp_ip + '/api/stream/stop', { method: 'POST', mode: 'no-cors' });
       } catch(e) {}
@@ -1697,7 +1697,7 @@ HTML_DASHBOARD = """
     let s_tabVideo = null;
 
     async function startBrowserTabShare() {
-      const esp_ip = document.getElementById('esp_ip').value.trim() || '192.168.1.233';
+      const esp_ip = document.getElementById('esp_ip').value.trim() || '192.168.1.82';
       try {
         s_tabStream = await navigator.mediaDevices.getDisplayMedia({
           video: {
@@ -1832,7 +1832,7 @@ HTML_DASHBOARD = """
       if (s_tabInterval) { clearInterval(s_tabInterval); s_tabInterval = null; }
       if (s_tabStream) { s_tabStream.getTracks().forEach(t => t.stop()); s_tabStream = null; }
       if (s_tabAudioCtx) { s_tabAudioCtx.close(); s_tabAudioCtx = null; }
-      const esp_ip = document.getElementById('esp_ip').value.trim() || '192.168.1.233';
+      const esp_ip = document.getElementById('esp_ip').value.trim() || '192.168.1.82';
       fetch('http://' + esp_ip + '/api/stream/stop', { method: 'POST' }).catch(()=>{});
       const dot = document.getElementById('dot');
       const dotText = document.getElementById('dot-text');
@@ -1850,7 +1850,7 @@ HTML_DASHBOARD = """
 
     async function loadPlaylist() {
       const url = document.getElementById('playlist_url').value.trim();
-      const esp_ip = document.getElementById('esp_ip').value.trim() || '192.168.1.233';
+      const esp_ip = document.getElementById('esp_ip').value.trim() || '192.168.1.82';
       const msg = document.getElementById('pl-load-msg');
       if (!url) {
         if (msg) { msg.style.color = "#ef4444"; msg.innerText = "❌ Vui lòng nhập link YouTube Playlist!"; }
@@ -2031,7 +2031,7 @@ HTML_DASHBOARD = """
     }
 
     async function loadSavedPlaylist(filename) {
-      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.233';
+      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.82';
       const msg = document.getElementById('pl-load-msg');
       if (msg) {
         msg.style.color = '#f59e0b';
@@ -2082,7 +2082,7 @@ HTML_DASHBOARD = """
     async function importPlaylistFromFile(ev) {
       const file = ev.target.files[0];
       if (!file) return;
-      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.233';
+      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.82';
       const fd = new FormData();
       fd.append('file', file);
       fd.append('esp_ip', esp_ip);
@@ -2171,7 +2171,7 @@ HTML_DASHBOARD = """
     }
 
     async function fetchStationLogs() {
-      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.233';
+      const esp_ip = (document.getElementById('esp_ip') ? document.getElementById('esp_ip').value.trim() : '') || '192.168.1.82';
       try {
         const res = await fetch('http://' + esp_ip + '/api/logs?limit=80&format=text');
         if (res.ok) {

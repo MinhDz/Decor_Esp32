@@ -1249,7 +1249,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               if (strlen(txt) > 0) {
                 s_lastAiFullReply = String(txt);
                 s_llmReceived = true;
-                s_ttsReceived = true;
+                s_ttsReceived = false; // Chỉ đánh dấu s_ttsReceived=true khi gói âm thanh PCM thực sự bắt đầu đổ về
                 s_lastAiReplyTime = millis();
                 const char* emo = doc["emotion"] | "";
                 if (strlen(emo) > 0) {
@@ -1711,9 +1711,15 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
       break;
     }
 
-    // Nếu sau 15 giây mà không nhận được bất kỳ phản hồi STT hay LLM nào -> Timeout
-    if (!s_ttsReceived && !s_llmReceived && (millis() - waitStart > 15000)) {
-      Serial.println("⏱️ [AI AUDIO] Timeout 15s không nhận được phản hồi từ AI Server.");
+    // Nếu sau 20 giây mà không nhận được bất kỳ phản hồi STT hay LLM/TTS nào -> Timeout
+    if (!s_ttsReceived && !s_llmReceived && (millis() - waitStart > 20000)) {
+      Serial.println("⏱️ [AI AUDIO] Timeout 20s không nhận được phản hồi từ AI Server.");
+      break;
+    }
+
+    // Nếu đã nhận được LLM text nhưng sau 20 giây vẫn chưa nhận được luồng audio TTS -> Timeout
+    if (s_llmReceived && !s_ttsReceived && (millis() - waitStart > 20000)) {
+      Serial.println("⏱️ [AI AUDIO] Timeout 20s không nhận được luồng âm thanh TTS từ Gateway.");
       break;
     }
 
@@ -1723,8 +1729,8 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
       continue;
     }
 
-    // Nếu không còn câu mới trong 5 giây và loa đã dừng
-    if ((s_ttsReceived || s_llmReceived) && s_lastAiReplyTime > 0 &&
+    // Nếu đã nhận audio và không còn câu mới trong 5 giây và loa đã dừng
+    if (s_ttsReceived && s_lastAiReplyTime > 0 &&
         (millis() - s_lastAiReplyTime >= 5000) && !TestAudio::isStreamPcmAsyncPlaying()) {
       Serial.println("⏱️ [AI AUDIO] Đã qua 5s không có thêm câu thoại mới và Loa đã phát xong.");
       break;

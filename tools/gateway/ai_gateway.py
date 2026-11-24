@@ -216,7 +216,7 @@ def synthesize_sentence_worker(text: str, voice: str) -> bytes:
             logger.warning(f"Google TTS lỗi: {e}")
 
     # 2. Mặc định: Ưu tiên Microsoft Edge Neural TTS (Hoài My / Nam Minh)
-    # Timeout 12 giây + 2 lần thử để chống rớt kết nối mạng mà không bị nhảy giọng
+    # Giới hạn timeout 3.5s (lần 1) và 2.5s (lần 2) để tránh treo, chuyển nhanh sang Google TTS fallback nếu Edge-TTS nghẽn mạng
     if not mp3_bytes:
         for attempt in range(2):
             async def _inner():
@@ -229,24 +229,26 @@ def synthesize_sentence_worker(text: str, voice: str) -> bytes:
                 return bytes(mp3)
 
             try:
+                t_sec = 3.5 if attempt == 0 else 2.5
                 async def _run_with_timeout():
-                    return await asyncio.wait_for(_inner(), timeout=12.0)
+                    return await asyncio.wait_for(_inner(), timeout=t_sec)
                 mp3_bytes = asyncio.run(_run_with_timeout())
                 if mp3_bytes:
                     engine = f"Edge-TTS ({voice})"
                     break
             except Exception as e:
                 if attempt == 0:
-                    logger.warning(f"Edge-TTS thử lại lần 2 cho câu '{text[:30]}...': {e}")
-                    time.sleep(0.3)
+                    logger.warning(f"Edge-TTS chậm/thử lại lần 2 cho câu '{text[:30]}...': {e}")
+                    time.sleep(0.1)
                 else:
-                    logger.error(f"Edge-TTS thất bại sau 2 lần thử: {e}")
+                    logger.warning(f"Edge-TTS không phản hồi, tự động dùng Google TTS fallback tức thì: {e}")
 
     # 3. Fallback chỉ khi Edge-TTS hoàn toàn không phản hồi sau 2 lần thử
     if not mp3_bytes:
         try:
             mp3_bytes = fetch_google_tts_mp3(text)
             engine = "Google-TTS (Fallback khi Edge-TTS mất kết nối)"
+            logger.info(f"⚡ [TTS FALLBACK] Đã chuyển đổi sang Google TTS tốc độ cao (0.6s) cho: '{text[:30]}...'")
             logger.warning(f"⚠️ Edge-TTS không phản hồi sau 2 lần thử, dùng tạm Google TTS cho: '{text[:30]}...'")
         except Exception as e:
             logger.error(f"Cả Edge-TTS và Google-TTS đều lỗi: {e}")
@@ -457,10 +459,10 @@ def normalize_gemini_model(model_name: str) -> str:
     if m.startswith("models/"):
         m = m[7:]
     lower_m = m.lower()
-    if lower_m in ["gemini-1.5-flash", "gemini-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite"]:
+    if lower_m in ["gemini-1.5-flash", "gemini-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"]:
         return "gemini-flash-lite-latest"
-    if lower_m in ["gemini-1.5-pro", "gemini-pro", "gemini-2.5-pro"]:
-        return "gemini-pro-latest"
+    if lower_m in ["gemini-1.5-pro", "gemini-pro", "gemini-2.5-pro", "gemini-pro-latest"]:
+        return "gemini-flash-lite-latest"
     return m
 
 def fetch_and_test_gemini_models(api_key: str) -> dict:
@@ -596,9 +598,9 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
 
     chosen_model = normalize_gemini_model(model_id or cfg.get("gemini_model") or "gemini-flash-lite-latest")
     candidate_models = []
-    for m in [chosen_model, "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-flash-latest"]:
+    for m in [chosen_model, cfg.get("gemini_model", "gemini-flash-lite-latest"), "gemini-flash-lite-latest", "gemini-3-flash-preview"]:
         norm = normalize_gemini_model(m)
-        if norm not in candidate_models:
+        if norm and norm not in candidate_models:
             candidate_models.append(norm)
 
     import base64
@@ -822,7 +824,7 @@ async def handle_http_gemini_models(request: web.Request) -> web.Response:
     data = await asyncio.to_thread(fetch_and_test_gemini_models, key)
     return web.json_response(data, headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Private-Network": "true"})
 
-async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemini-flash") -> tuple[str, str]:
+async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemini-flash-lite-latest") -> tuple[str, str]:
     """Gọi LLM từ text thuần (hỗ trợ DeepSeek, Gemini, fallback)."""
     gemini_key = cfg.get("gemini_api_key", "").strip()
     oai_key = cfg.get("openai_api_key", "").strip()
@@ -853,11 +855,11 @@ async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemi
 
     # 2. Mặc định gọi Gemini
     if gemini_key and "YOUR_" not in gemini_key:
-        chosen_model = normalize_gemini_model(model_id or cfg.get("gemini_model") or cfg.get("openai_model") or "gemini-flash-lite-latest")
+        chosen_model = normalize_gemini_model(model_id or cfg.get("gemini_model") or "gemini-flash-lite-latest")
         candidate_models = []
-        for m in [chosen_model, "gemini-flash-lite-latest", "gemini-3-flash-preview", "gemini-flash-latest", "gemini-pro-latest"]:
+        for m in [chosen_model, cfg.get("gemini_model", "gemini-flash-lite-latest"), "gemini-flash-lite-latest", "gemini-3-flash-preview"]:
             norm = normalize_gemini_model(m)
-            if norm not in candidate_models:
+            if norm and norm not in candidate_models:
                 candidate_models.append(norm)
 
         last_error = ""
@@ -928,7 +930,7 @@ async def handle_http_chat(request: web.Request) -> web.Response:
         try:
             d = json.loads(raw_body.decode('utf-8'))
             msg = d.get("message", "") or d.get("text", "")
-            model = d.get("model", cfg.get("ai_model", "gemini-flash"))
+            model = d.get("model", cfg.get("gemini_model", "gemini-flash-lite-latest"))
             voice = d.get("voice", cfg.get("tts_voice", "vi-VN-HoaiMyNeural"))
             stream_to_station = bool(d.get("stream_to_station", True))
         except Exception:
@@ -1212,6 +1214,7 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                     sample_rate = int(data.get("sample_rate", 16000))
                     logger.info(f"🎙️ Phiên mới: type={msg_type}, model={model_key}, search={enable_search}, sr={sample_rate}")
                 elif msg_type == "end":
+                    cfg = load_config()
                     logger.info(f"📦 Đã nhận xong {len(pcm_buf)} bytes PCM từ Mic ESP32. Bắt đầu xử lý...")
                     wav_bytes = pcm_to_wav_bytes(bytes(pcm_buf), sample_rate)
                     rec_dir = BASE_DIR / "recordings"
@@ -1238,12 +1241,13 @@ async def handle_websocket(request: web.Request) -> web.WebSocketResponse:
                         await ws.send_str(json.dumps({"type": "done", "status": "ok", "filename": save_name}))
                         continue
 
+                    model_to_use = cfg.get("gemini_model") or "gemini-flash-lite-latest"
                     if model_key == "deepseek-r1":
                         await process_with_openai_compat(cfg, wav_bytes, enable_search, ws)
                     elif model_key == "gemini-pro":
-                        await process_with_gemini(cfg, "gemini-flash-latest", wav_bytes, enable_search, ws)
+                        await process_with_gemini(cfg, model_to_use, wav_bytes, enable_search, ws)
                     else:
-                        await process_with_gemini(cfg, "gemini-flash-lite-latest", wav_bytes, enable_search, ws)
+                        await process_with_gemini(cfg, model_to_use, wav_bytes, enable_search, ws)
 
                     await ws.send_str(json.dumps({"type": "done"}))
                     logger.info("🏁 [DONE] Đã hoàn tất toàn bộ chu kỳ phản hồi.")

@@ -37,7 +37,7 @@ except Exception as e:
     HAS_TRANSCODER = False
 
 class TranscoderWorker:
-    def __init__(self, port=5050, esp_ip="192.168.1.233", enabled=True):
+    def __init__(self, port=5050, esp_ip="192.168.1.82", enabled=True):
         self.port = int(port)
         self.esp_ip = str(esp_ip).strip()
         self.enabled = enabled

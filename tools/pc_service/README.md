@@ -35,7 +35,7 @@ Dịch vụ chạy trên máy tính Windows để đọc các thông số phần
 Mở file `config.json` để thay đổi địa chỉ IP của ESP32 nếu mạng nhà bạn cấp IP khác:
 ```json
 {
-  "esp32_ip": "192.168.1.233",
+  "esp32_ip": "192.168.1.82",
   "fallback_host": "tramvutru.local",
   "interval_seconds": 1.0,
   "timeout_seconds": 1.5
