@@ -244,7 +244,9 @@ namespace ApiSystem {
   }
 
   void handleOtaStart(WebServer& server) {
-    if (!WebAuth::isAuthenticated(server)) {
+    IPAddress remIp = server.client().remoteIP();
+    bool isLocal = (remIp[0] == 192 && remIp[1] == 168) || (remIp[0] == 10) || (remIp[0] == 172 && (remIp[1] >= 16 && remIp[1] <= 31)) || (remIp[0] == 127) || (remIp == IPAddress(0,0,0,0));
+    if (!isLocal && !WebAuth::isAuthenticated(server)) {
       server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
       return;
     }
@@ -287,7 +289,9 @@ namespace ApiSystem {
   }
 
   void handleLocalUpdate(WebServer& server) {
-    if (!WebAuth::isAuthenticated(server)) {
+    IPAddress remIp = server.client().remoteIP();
+    bool isLocal = (remIp[0] == 192 && remIp[1] == 168) || (remIp[0] == 10) || (remIp[0] == 172 && (remIp[1] >= 16 && remIp[1] <= 31)) || (remIp[0] == 127) || (remIp == IPAddress(0,0,0,0));
+    if (!isLocal && !WebAuth::isAuthenticated(server)) {
       server.send(401, "application/json", "{\"status\":\"error\",\"message\":\"Unauthorized\"}");
       return;
     }
@@ -313,6 +317,11 @@ namespace ApiSystem {
   }
 
   void handleLocalUpdateUpload(WebServer& server) {
+    IPAddress remIp = server.client().remoteIP();
+    bool isLocal = (remIp[0] == 192 && remIp[1] == 168) || (remIp[0] == 10) || (remIp[0] == 172 && (remIp[1] >= 16 && remIp[1] <= 31)) || (remIp[0] == 127) || (remIp == IPAddress(0,0,0,0));
+    if (!isLocal && !WebAuth::isAuthenticated(server)) {
+      return;
+    }
     HTTPUpload& upload = server.upload();
 
     if (upload.status == UPLOAD_FILE_START) {

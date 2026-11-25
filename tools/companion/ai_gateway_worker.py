@@ -165,7 +165,7 @@ def synthesize_sentence_worker(text: str, voice: str) -> bytes:
                 return bytes(mp3)
 
             try:
-                t_sec = 3.5 if attempt == 0 else 2.5
+                t_sec = 6.0 if attempt == 0 else 4.0
                 async def _run_with_timeout():
                     return await asyncio.wait_for(_inner(), timeout=t_sec)
                 mp3_bytes = asyncio.run(_run_with_timeout())
@@ -385,15 +385,15 @@ async def stream_sentences_tts_pcm(sentences: list[str], voice: str, ws: web.Web
 def normalize_gemini_model(model_name: str) -> str:
     """Chuẩn hóa tên model Gemini, map các model cũ đã ngưng hoạt động sang model hiện đại."""
     if not model_name:
-        return "gemini-flash-lite-latest"
+        return "gemini-3-flash-preview"
     m = model_name.strip()
     if m.startswith("models/"):
         m = m[7:]
     lower_m = m.lower()
     if lower_m in ["gemini-1.5-flash", "gemini-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite", "gemini-flash-latest"]:
-        return "gemini-flash-lite-latest"
+        return "gemini-3-flash-preview"
     if lower_m in ["gemini-1.5-pro", "gemini-pro", "gemini-2.5-pro", "gemini-pro-latest"]:
-        return "gemini-flash-lite-latest"
+        return "gemini-3-flash-preview"
     return m
 
 def fetch_and_test_gemini_models(api_key: str) -> dict:
@@ -494,7 +494,7 @@ async def transcribe_audio_gemini(cfg: dict, wav_bytes: bytes) -> str:
         return ""
     import base64
     audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-flash-lite-latest:generateContent?key={api_key}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-3-flash-preview:generateContent?key={api_key}"
     payload = {
         "contents": [{
             "role": "user",
@@ -527,9 +527,9 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
     if not api_key or "YOUR_" in api_key:
         return ("", "Xin chào! Tôi là Trợ lý AI Trạm Decor chạy trên Companion. Hệ thống âm thanh đã đồng bộ sẵn sàng! Để đàm thoại thông minh, bạn chỉ cần điền Gemini API Key trong menu Cài đặt nhé!", "")
 
-    chosen_model = normalize_gemini_model(model_id or cfg.get("gemini_model") or "gemini-flash-lite-latest")
+    chosen_model = normalize_gemini_model(model_id or cfg.get("gemini_model") or "gemini-3-flash-preview")
     candidate_models = []
-    for m in [chosen_model, cfg.get("gemini_model", "gemini-flash-lite-latest"), "gemini-flash-lite-latest", "gemini-3-flash-preview"]:
+    for m in [chosen_model, cfg.get("gemini_model", "gemini-3-flash-preview"), "gemini-3-flash-preview", "gemini-flash-lite-latest"]:
         norm = normalize_gemini_model(m)
         if norm and norm not in candidate_models:
             candidate_models.append(norm)

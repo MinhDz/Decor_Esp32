@@ -16,5 +16,5 @@
   "openai_model": "deepseek-reasoner",
   "autostart": true,
   "notify_on_startup": true,
-  "gemini_model": "gemini-flash-lite-latest"
+  "gemini_model": "gemini-3-flash-preview"
 }
