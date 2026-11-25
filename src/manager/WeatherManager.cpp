@@ -135,7 +135,7 @@ void WeatherManager::init() {
   s_weatherData.iconType = WEATHER_ICON_SUN;
   s_weatherData.isValid = false;
   s_weatherData.lastFetchMs = 0;
-  s_lastFetchAttemptMs = 0;
+  s_lastFetchAttemptMs = millis(); // Hoãn lần gọi đầu tiên 5-10s để hệ thống mạng khởi tạo ổn định
 }
 
 void WeatherManager::loop() {
@@ -144,6 +144,11 @@ void WeatherManager::loop() {
 
   unsigned long now = millis();
   unsigned long interval = s_weatherData.isValid ? WEATHER_FETCH_INTERVAL : WEATHER_RETRY_INTERVAL;
+
+  // Lần đầu tiên chờ tối thiểu 6 giây sau boot để IP và NTP ổn định
+  if (s_weatherData.lastFetchMs == 0) {
+    if (now < 6000) return;
+  }
 
   if (s_weatherData.lastFetchMs == 0 || (now - s_lastFetchAttemptMs >= interval)) {
     refreshNow();
@@ -157,12 +162,18 @@ bool WeatherManager::refreshNow() {
   }
   if (s_isFetching) return false;
 
+  // Bảo vệ Heap nội bộ: Chỉ chạy truy vấn thời tiết khi Heap còn an toàn
+  if (ESP.getFreeHeap() < 28000) {
+    Serial.println("⚠️ [WEATHER] Heap nội bộ thấp (<28KB), tạm hoãn cập nhật thời tiết.");
+    return false;
+  }
+
   s_lastFetchAttemptMs = millis();
   // Khởi chạy tác vụ nhẹ trên Core 0 để hoàn toàn không chặn giao diện hiển thị & âm thanh trên Core 1
   BaseType_t res = xTaskCreatePinnedToCore(
     doFetchWeatherTask,
     "WeatherTask",
-    6144,
+    4096,
     NULL,
     1,
     NULL,

@@ -41,22 +41,28 @@ size_t WebRoutes::trimMemory() {
 static void handleRoot() {
   WebRoutes::markWebActivity();
 
-  // 1. Ưu tiên phục vụ file nén gzip (/index.html.gz, ~132 KB) siêu tốc độ, giải phóng 100% tài nguyên CPU & WiFi
+  // 1. Ưu tiên phục vụ file nén gzip (/index.html.gz, ~140 KB) siêu tốc độ, giải phóng 100% tài nguyên CPU & WiFi
   if (LittleFS.exists("/index.html.gz")) {
     File file = LittleFS.open("/index.html.gz", "r");
-    server.sendHeader("Cache-Control", "no-cache");
-    server.streamFile(file, "text/html");
-    file.close();
-    return;
+    if (file && file.size() > 1000) {
+      server.sendHeader("Cache-Control", "no-cache");
+      server.streamFile(file, "text/html");
+      file.close();
+      return;
+    }
+    if (file) file.close();
   }
 
   // 2. Phục vụ index.html trực tiếp bằng streamFile chuẩn non-blocking
   if (LittleFS.exists("/index.html")) {
     File file = LittleFS.open("/index.html", "r");
-    server.sendHeader("Cache-Control", "no-cache");
-    server.streamFile(file, "text/html");
-    file.close();
-    return;
+    if (file && file.size() > 1000) {
+      server.sendHeader("Cache-Control", "no-cache");
+      server.streamFile(file, "text/html");
+      file.close();
+      return;
+    }
+    if (file) file.close();
   }
 
   server.send(404, "text/plain", "Chưa tìm thấy index.html trên LittleFS!");

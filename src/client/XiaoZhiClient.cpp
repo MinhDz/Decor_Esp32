@@ -118,6 +118,14 @@ String XiaoZhiClient::getOrCreateDeviceUuid() {
 }
 
 String XiaoZhiClient::queryOTA(bool printToSerial) {
+  loadAIConfigIfNeeded();
+  if (isPcGatewayMode()) {
+    if (printToSerial) {
+      Serial.println("ℹ️ [AI GATEWAY] Đang chạy chế độ PC Local Gateway, bỏ qua truy vấn XiaoZhi Cloud OTA.");
+    }
+    return "";
+  }
+
   if (WiFi.status() != WL_CONNECTED) {
     if (printToSerial) {
       Serial.println("⚠️ [XIAOZHI OTA] ESP32 chưa kết nối Wi-Fi, không thể kiểm tra OTA.");
@@ -1354,8 +1362,9 @@ void XiaoZhiClient::startWebSocket() {
     if (esp_websocket_client_is_connected(s_wsClient) && s_wsConnected) {
       return; // Vẫn đang kết nối tốt, không tạo lại
     }
-    // Socket bị ngắt hoặc mất kết nối -> Dọn dẹp triệt để trước khi tạo mới
-    stopWebSocket();
+    // Client đã tồn tại nhưng chưa kết nối: esp_websocket_client tự động thử kết nối lại
+    // Tuyệt đối không destroy & recreate liên tục để tránh rò rỉ socket lwIP!
+    return;
   }
 
   if (isPcGatewayMode()) {
@@ -1483,11 +1492,12 @@ void XiaoZhiClient::startWebSocket() {
 
 void XiaoZhiClient::stopWebSocket() {
   if (s_wsClient != nullptr) {
-    Serial.println("⏹️ [XIAOZHI WS] Đang đóng kết nối WebSocket...");
-    esp_websocket_client_stop(s_wsClient);
-    esp_websocket_client_destroy(s_wsClient);
+    Serial.println("⏹️ [AI WS] Đang đóng kết nối WebSocket...");
+    esp_websocket_client_handle_t temp = s_wsClient;
     s_wsClient = nullptr;
     s_wsConnected = false;
+    esp_websocket_client_stop(temp);
+    esp_websocket_client_destroy(temp);
   }
   if (s_opusDecoder != nullptr) {
     opus_decoder_destroy(s_opusDecoder);
@@ -1500,61 +1510,31 @@ bool XiaoZhiClient::isWebSocketConnected() {
   return (esp_websocket_client_is_connected(s_wsClient) && s_wsConnected);
 }
 
-static void wsRestartTask(void* pv) {
-  XiaoZhiClient::stopWebSocket();
-  vTaskDelay(pdMS_TO_TICKS(500));
-  XiaoZhiClient::startWebSocket();
-  s_isRestartingWs = false;
-  vTaskDelete(NULL);
-}
-
-static void restartWebSocketAsync() {
-  if (s_isRestartingWs) return;
-  s_isRestartingWs = true;
-  BaseType_t res = xTaskCreatePinnedToCore(wsRestartTask, "WsRestartTask", 4096, NULL, 1, NULL, 0);
-  if (res != pdPASS) {
-    s_isRestartingWs = false;
-  }
-}
-
 void XiaoZhiClient::loopWebSocket() {
   static uint32_t s_lastWsCheck = 0;
   uint32_t now = millis();
-  if (now - s_lastWsCheck < 3000) return;
+  if (now - s_lastWsCheck < 2000) return;
   s_lastWsCheck = now;
 
-  static uint32_t s_wifiDisconnectStart = 0;
   if (WiFi.status() != WL_CONNECTED) {
-    if (s_wifiDisconnectStart == 0) s_wifiDisconnectStart = now;
-    // Chỉ đóng socket nếu WiFi rớt liên tục trên 8 giây
-    if (s_wsClient != nullptr && (now - s_wifiDisconnectStart > 8000) && !s_isRestartingWs) {
-      restartWebSocketAsync();
+    if (s_wsClient != nullptr && s_wsConnected) {
+      s_wsConnected = false;
     }
     return;
   }
-  s_wifiDisconnectStart = 0;
 
-  if (isDeviceBound()) {
-    if (s_wsClient == nullptr && !s_isRestartingWs) {
-      Serial.println("🚀 [XIAOZHI WS] Khởi chạy WebSocket kết nối lần đầu...");
-      startWebSocket();
-    } else if (!isWebSocketConnected() && !s_isRestartingWs) {
-      // esp_websocket_client tự động reconnect ngầm.
-      // Nếu sau 3s..10s vẫn chưa kết nối lại được, kích hoạt restartWebSocketAsync để tái tạo socket sạch sẽ
-      if (s_lastWsDisconnectMs > 0 && (now - s_lastWsDisconnectMs >= s_wsReconnectBackoffMs)) {
-        Serial.printf("🔄 [XIAOZHI WS] Mất kết nối >%u s -> Khởi động lại WebSocket (Async Non-blocking)...\n",
-                      (unsigned)(s_wsReconnectBackoffMs / 1000));
-        uint32_t nextBackoff = s_wsReconnectBackoffMs + 2000;
-        if (nextBackoff > 10000) nextBackoff = 10000;
-        s_wsReconnectBackoffMs = nextBackoff;
-        s_lastWsDisconnectMs = now;
-        restartWebSocketAsync();
-      }
+  loadAIConfigIfNeeded();
+  if (!isDeviceBound()) {
+    if (s_wsClient != nullptr) {
+      stopWebSocket();
     }
-  } else {
-    if (s_wsClient != nullptr && !s_isRestartingWs) {
-      restartWebSocketAsync();
-    }
+    return;
+  }
+
+  // Khởi tạo WebSocket Client 1 lần duy nhất khi có Wi-Fi
+  // esp_websocket_client tự động duy trì và auto-reconnect an toàn trong task riêng
+  if (s_wsClient == nullptr) {
+    startWebSocket();
   }
 }
 
@@ -1621,13 +1601,14 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
     return false;
   }
 
-  // Khởi động lại WebSocket nếu chưa kết nối
+  // Chờ hoặc khởi động WebSocket nếu chưa kết nối
   if (!isWebSocketConnected()) {
-    Serial.println("🔄 [XIAOZHI AUDIO] WebSocket chưa kết nối, đang thiết lập lại kết nối tới XiaoZhi Cloud...");
-    stopWebSocket();
-    startWebSocket();
+    if (!s_wsClient) {
+      Serial.println("🔄 [AI AUDIO] WebSocket chưa kết nối, đang thiết lập kết nối...");
+      startWebSocket();
+    }
     uint32_t t0 = millis();
-    while (!isWebSocketConnected() && (millis() - t0 < 4000)) {
+    while (!isWebSocketConnected() && (millis() - t0 < 3000)) {
       delay(50);
     }
   }

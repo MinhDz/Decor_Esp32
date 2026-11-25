@@ -108,9 +108,7 @@ void setup() {
   // 5. Nếu đã kết nối Wi-Fi, tự động kiểm tra OTA và thông tin kích hoạt XiaoZhi Cloud
   if (WifiManager::isConnected()) {
     TimeManager::onWifiConnected();
-    Serial.println("🌐 Đang kiểm tra OTA và lấy thông tin xác thực từ XiaoZhi Cloud...");
     XiaoZhiClient::queryOTA(true);
-    WeatherManager::refreshNow();
   }
 }
 

@@ -867,7 +867,7 @@ namespace AudioDriver {
           lockedChannel = 1;
         }
       }
-      const int chIdx = lockedChannel;
+      const int chIdx = 0;
 
       float blockSumSq = 0.0f;
       int32_t blockPeak = 0;
