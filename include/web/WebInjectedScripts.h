@@ -1301,7 +1301,7 @@ static const char MEDIA_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     { cmd: "status mem", display: "status mem", type: "MOD", badge: "badge-mod", desc: "Bộ nhớ RAM: Heap tự do, PSRAM 8MB, chế độ dọn rác nghiêm ngặt", syntax: "status mem" },
     { cmd: "status motor", display: "status motor", type: "MOD", badge: "badge-mod", desc: "Động cơ cối xay gió: Tốc độ %, chế độ quay, chân cầu H L298N", syntax: "status motor" },
     { cmd: "status led", display: "status led", type: "MOD", badge: "badge-mod", desc: "Hệ thống đèn: Bóng Edison trái/phải, dải LED COB nước chảy", syntax: "status led" },
-    { cmd: "status xiaozhi", display: "status xiaozhi", type: "MOD", badge: "badge-mod", desc: "Trợ lý ảo XiaoZhi AI: Kết nối WebSocket, hội thoại giọng nói", syntax: "status xiaozhi" },
+    { cmd: "status xiaozhi", display: "status xiaozhi", type: "MOD", badge: "badge-mod", desc: "Trợ lý AI: Kết nối WebSocket, hội thoại giọng nói", syntax: "status xiaozhi" },
     { cmd: "status display", display: "status display", type: "MOD", badge: "badge-mod", desc: "Màn hình ST7789: Chế độ hiển thị 0-19, độ sáng đèn nền", syntax: "status display" },
     { cmd: "status sys", display: "status sys", type: "MOD", badge: "badge-mod", desc: "Thông số ESP32-S3: Core rev, CPU 240MHz, bản phân vùng, Uptime", syntax: "status sys" },
     { cmd: "status profiler", display: "status profiler", type: "MOD", badge: "badge-mod", desc: "Giám sát hiệu năng: FPS, thời gian chu kỳ (µs), tác vụ CPU", syntax: "status profiler" },
@@ -2903,7 +2903,7 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
             <span id="xz-vu-val" class="vu-val">0%</span>
           </div>
           <div class="voice-vol-dock">
-            <span title="Âm lượng thoại XiaoZhi AI" style="font-size:0.75rem;">🔊</span>
+            <span title="Âm lượng thoại Trợ lý AI" style="font-size:0.75rem;">🔊</span>
             <button class="vol-btn" onclick="window.adjustXiaoZhiVolume(-5)">-</button>
             <span id="xz-vol-label" class="vol-val">80%</span>
             <button class="vol-btn" onclick="window.adjustXiaoZhiVolume(5)">+</button>
@@ -3000,7 +3000,7 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     const badge = document.getElementById('chat-status-badge');
     if (badge) {
       badge.className = 'chat-status-tag cloud';
-      badge.innerText = '🌐 XiaoZhi Hub Trực Tiếp';
+      badge.innerText = '🌐 Trợ Lý AI Trực Tiếp';
     }
     const modeToggle = document.querySelector('#tab-chat .ai-mode-toggle-group');
     if (modeToggle) modeToggle.style.display = 'none';
@@ -3011,7 +3011,7 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     const hint = document.getElementById('xz-mic-sub-hint');
     if (btn) {
       if (xzLastState === 'listening') {
-        hint.innerText = "Đang gửi âm thanh tới XiaoZhi...";
+        hint.innerText = "Đang gửi âm thanh tới Trợ lý AI...";
       } else {
         btn.className = 'xz-mic-button listening';
         hint.innerText = "🎙️ Đang mở Micro trên ESP32... Hãy nói!";
@@ -3187,7 +3187,7 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       el.innerHTML = `
         <div class="chat-avatar">🤖</div>
         <div class="chat-bubble">
-          <div style="font-size:0.75rem; color:#a5b4fc; margin-bottom:4px;">XiaoZhi đang suy nghĩ...</div>
+          <div style="font-size:0.75rem; color:#a5b4fc; margin-bottom:4px;">Trợ lý AI đang suy nghĩ...</div>
           <div class="typing-dots">
             <div class="typing-dot"></div>
             <div class="typing-dot"></div>
@@ -3238,12 +3238,12 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       if (vuVal) vuVal.innerText = mic + '%';
     } else if (state === 'thinking') {
       if (statusText) statusText.innerText = 'ĐANG XỬ LÝ...';
-      if (hint) hint.innerText = '⏳ XiaoZhi đang suy nghĩ câu trả lời...';
+      if (hint) hint.innerText = '⏳ Trợ lý AI đang suy nghĩ câu trả lời...';
       if (vuBox) vuBox.style.display = 'none';
       showTypingDot();
     } else if (state === 'replying') {
       if (statusText) statusText.innerText = 'ĐANG PHÁT ÂM THANH';
-      if (hint) hint.innerText = '🔊 XiaoZhi đang trả lời qua loa...';
+      if (hint) hint.innerText = '🔊 Trợ lý AI đang trả lời qua loa...';
       if (vuBox) vuBox.style.display = 'none';
       removeTypingDot();
     } else if (state === 'binding') {
@@ -3266,7 +3266,7 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     }
 
     // 1. Thêm/Cập nhật bong bóng của User
-    if (userText && userText.length > 0 && !userText.startsWith("Xin chào XiaoZhi") && !userText.startsWith("Dang gui") && !userText.startsWith("(Da nhan am thanh)")) {
+    if (userText && userText.length > 0 && !userText.startsWith("Xin chào") && !userText.startsWith("Dang gui") && !userText.startsWith("(Da nhan am thanh)")) {
       if (!xzActiveUserBubble) {
         xzActiveUserBubble = appendChatBubble('user', userText);
       } else {
@@ -3275,12 +3275,14 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
       }
     }
 
-    // 2. Thêm/Cập nhật bong bóng của XiaoZhi
+    // 2. Thêm/Cập nhật bong bóng của AI
     if (aiReply && aiReply.length > 0 && !aiReply.startsWith("Nhấn phím [OK]") && !aiReply.startsWith("Chua phat hien tieng noi") && !aiReply.startsWith("Xin chao!")) {
       removeTypingDot();
       let cleanReply = aiReply;
       if (cleanReply.indexOf('XiaoZhi: ') >= 0) {
         cleanReply = cleanReply.substring(cleanReply.indexOf('XiaoZhi: ') + 9);
+      } else if (cleanReply.indexOf('AI: ') >= 0) {
+        cleanReply = cleanReply.substring(cleanReply.indexOf('AI: ') + 4);
       }
       if (!xzActiveBotBubble) {
         xzActiveBotBubble = appendChatBubble('bot', cleanReply, '✨ ' + emotion);
@@ -5481,7 +5483,7 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     { id: 2,  title: "Máy tính",  icon: "📊", desc: "3. Giám sát Hiệu năng Máy tính (PC)", mode: "pchud" },
     { id: 3,  title: "Thư viện",  icon: "🌄", desc: "4. Bộ sưu tập Hình ảnh & Ảnh nền", tab: "images" },
     { id: 4,  title: "Bộ nhớ",    icon: "📁", desc: "5. Quản lý Tệp tin & Bộ nhớ lưu trữ", tab: "images" },
-    { id: 5,  title: "Trợ lý AI", icon: "🤖", desc: "6. Trò chuyện Giọng nói XiaoZhi AI", tab: "chat" },
+    { id: 5,  title: "Trợ lý AI", icon: "🤖", desc: "6. Trò chuyện Trợ lý AI", tab: "chat" },
     { id: 6,  title: "Âm nhạc",   icon: "🎵", desc: "7. Trình phát Âm nhạc & Sóng nhạc", tab: "music" },
     { id: 7,  title: "Đồng hồ",   icon: "⏰", desc: "8. Đồng hồ: Báo thức, Bấm giờ & Hẹn giờ", mode: "clock" },
     { id: 8,  title: "Lịch",      icon: "📅", desc: "9. Lịch Vạn Niên & Tra cứu Ngày tháng", mode: "calendar" },
@@ -5620,7 +5622,7 @@ static const char KEYPAD_PAGE_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
                   <div class="sim-eye right"></div>
                 </div>
                 <div class="sim-sub-box">
-                  <div class="sim-sub-sender">🤖 TRỢ LÝ XIAOZHI AI</div>
+                  <div class="sim-sub-sender">🤖 TRỢ LÝ AI</div>
                   <div class="sim-sub-content" id="sim-sub-content">Xin chào! Hãy trò chuyện cùng mình nhé.</div>
                 </div>
               </div>

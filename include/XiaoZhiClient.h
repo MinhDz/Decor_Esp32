@@ -72,4 +72,7 @@ public:
   static bool isPcGatewayMode();
 };
 
+// Bí danh tương thích cho hệ thống Trợ Lý AI
+using AiAssistantClient = XiaoZhiClient;
+
 

@@ -223,13 +223,18 @@ namespace ApiXiaoZhi {
     server.on("/api/config/ai", HTTP_GET, [&server]() { handleGetAIConfig(server); });
     server.on("/api/config/ai", HTTP_POST, [&server]() { handleSaveAIConfig(server); });
     server.on("/api/xiaozhi/ping_gateway", HTTP_GET, [&server]() { handlePingGateway(server); });
+    server.on("/api/ai/ping_gateway", HTTP_GET, [&server]() { handlePingGateway(server); });
     server.on("/api/xiaozhi/gemini_models", HTTP_GET, [&server]() { handleGeminiModels(server); });
+    server.on("/api/ai/gemini_models", HTTP_GET, [&server]() { handleGeminiModels(server); });
     server.on("/api/xiaozhi/ota", HTTP_GET, [&server]() { handleXiaoZhiOTA(server); });
     server.on("/api/xiaozhi/ota", HTTP_POST, [&server]() { handleXiaoZhiOTA(server); });
     server.on("/api/xiaozhi/unbind", HTTP_GET, [&server]() { handleXiaoZhiUnbind(server); });
     server.on("/api/xiaozhi/unbind", HTTP_POST, [&server]() { handleXiaoZhiUnbind(server); });
     server.on("/api/xiaozhi/chat_status", HTTP_GET, [&server]() { handleXiaoZhiChatStatus(server); });
+    server.on("/api/ai/chat_status", HTTP_GET, [&server]() { handleXiaoZhiChatStatus(server); });
+    server.on("/api/ai/status", HTTP_GET, [&server]() { handleXiaoZhiChatStatus(server); });
     server.on("/api/xiaozhi/action", HTTP_POST, [&server]() { handleXiaoZhiAction(server); });
+    server.on("/api/ai/action", HTTP_POST, [&server]() { handleXiaoZhiAction(server); });
     server.on("/api/ai/chat", HTTP_POST, [&server]() { handleXiaoZhiChat(server); });
     server.on("/api/ai/chat", HTTP_GET, [&server]() { handleXiaoZhiChat(server); });
     server.on("/api/news", HTTP_GET, [&server]() { handleGetDailyNews(server); });

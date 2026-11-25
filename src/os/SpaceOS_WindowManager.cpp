@@ -111,8 +111,8 @@ namespace TestDisplay {
   };
   static AiConvState s40AiState = AI_STATE_IDLE;
   static int s40AiPromptCursor = 0;
-  static String s40AiUserSpeechText = "Xin chào XiaoZhi, giới thiệu về bạn và nhiệt độ phòng hiện tại đi!";
-  static String s40AiReplyText = "Nhấn phím [OK] để bắt đầu trò chuyện với XiaoZhi qua Micro.";
+  static String s40AiUserSpeechText = "Xin chào Trợ lý AI, giới thiệu về bạn và nhiệt độ phòng hiện tại đi!";
+  static String s40AiReplyText = "Nhấn phím [OK] để bắt đầu trò chuyện với Trợ lý AI qua Micro.";
   static String s40AiWrappedLines[28];
   static int s40AiTotalLines = 0;
   static int s40AiScrollLine = 0;
@@ -190,7 +190,7 @@ namespace TestDisplay {
   static uint8_t s_doiMatFrameIdx = 0;
   static unsigned long lastExternalEmojiSync = 0;
   static bool isAutoBlinkActive = false;
-  static String customSubtitle = "Xin chào! Mình là trợ lý ảo XiaoZhi trên Trạm Decor Vũ Trụ!";
+  static String customSubtitle = "Xin chào! Mình là Trợ lý AI trên Trạm Decor Vũ Trụ!";
   static uint8_t graphHistoryCpu[20] = {0};
   static uint8_t graphHistoryGpu[20] = {0};
 
@@ -1662,16 +1662,16 @@ namespace TestDisplay {
     tft->fillRoundRect(10, subY, w - 20, subH, 8, C_CARD_BG);
     tft->drawRoundRect(10, subY, w - 20, subH, 8, 0x2188);
 
-    // Badge "• XIAOZHI AI" giống hệt trên Web UI
+    // Badge "• TRỢ LÝ AI" giống hệt trên Web UI
     tft->fillCircle(20, subY + 13, 3, C_NEON_CYAN);
     tft->setTextSize(1);
     tft->setTextColor(C_NEON_CYAN, C_CARD_BG);
     tft->setCursor(28, subY + 9);
-    tft->print("TRỢ LÝ XIAOZHI AI");
+    tft->print("TRỢ LÝ AI");
 
     String cleanSub = toCleanAscii(customSubtitle);
     if (cleanSub.length() == 0) {
-      cleanSub = "Xin chào! Mình là XiaoZhi * Hãy chạm biểu cảm hoặc trò chuyện cùng mình nhé!";
+      cleanSub = "Xin chào! Mình là Trợ lý AI * Hãy chạm biểu cảm hoặc trò chuyện cùng mình nhé!";
     }
     tft->setTextColor(C_WHITE, C_CARD_BG);
     int totalChars = vnStrLen(cleanSub);
@@ -2701,7 +2701,7 @@ namespace TestDisplay {
     "3. Giám sát Hiệu năng Máy tính (PC)",
     "4. Bộ sưu tập Hình ảnh & Ảnh nền",
     "5. Quản lý Tệp tin & Bộ nhớ lưu trữ",
-    "6. Trò chuyện Giọng nói XiaoZhi AI",
+    "6. Trò chuyện Trợ lý AI",
     "7. Trình phát Âm nhạc & Sóng nhạc",
     "8. Đồng hồ: Báo thức, Bấm giờ & Hẹn giờ",
     "9. Lịch Vạn Niên & Tra cứu Ngày tháng",
@@ -3982,7 +3982,7 @@ namespace TestDisplay {
     if (s40AiState == AI_STATE_IDLE) {
       tft->setTextColor(C_NEON_CYAN, 0x0862);
       tft->setCursor(14, 204);
-      tft->print("TRO LY XIAOZHI SAN SANG");
+      tft->print("TRO LY AI SAN SANG");
 
       tft->setTextColor(C_YELLOW, 0x0862);
       tft->setCursor(14, 222);
@@ -3990,7 +3990,7 @@ namespace TestDisplay {
 
       tft->setTextColor(C_WHITE, 0x0862);
       tft->setCursor(14, 240);
-      tft->print("XiaoZhi se lang nghe & tra loi ban.");
+      tft->print("AI se lang nghe & tra loi ban.");
       tft->setCursor(14, 256);
       tft->print("Bieu cam va giong noi song dong.");
 
@@ -4035,11 +4035,11 @@ namespace TestDisplay {
       tft->drawRoundRect(12, 266, W - 24, 22, 5, C_NEON_PINK);
       tft->setTextColor(C_NEON_PINK, 0x2008);
       tft->setCursor(18, 273);
-      tft->print(s40AiSttPhaseMsg.length() > 0 ? s40AiSttPhaseMsg : ">> XiaoZhi dang suy nghi...");
+      tft->print(s40AiSttPhaseMsg.length() > 0 ? s40AiSttPhaseMsg : ">> AI dang suy nghi...");
     } else if (s40AiState == AI_STATE_REPLYING) {
       tft->setTextColor(C_NEON_CYAN, 0x0862);
       tft->setCursor(14, 203);
-      tft->print("TRO CHUYEN CUNG XIAOZHI");
+      tft->print("TRO CHUYEN TRO LY AI");
 
       int visibleRows = 5;
       int maxStart = (s40AiTotalLines > visibleRows) ? (s40AiTotalLines - visibleRows) : 0;
@@ -4060,17 +4060,18 @@ namespace TestDisplay {
             tft->print("Ban:");
             tft->setTextColor(0xFFE0, 0x0862); // Vàng sáng cho lời nói người dùng
             tft->print(curLine.substring(4));
-          } else if (curLine.startsWith("XiaoZhi:")) {
+          } else if (curLine.startsWith("XiaoZhi:") || curLine.startsWith("AI:") || curLine.startsWith("Tro ly AI:")) {
+            int prefixLen = curLine.startsWith("XiaoZhi:") ? 8 : (curLine.startsWith("AI:") ? 3 : 10);
             tft->setTextColor(C_NEON_CYAN, 0x0862);
             tft->setCursor(12, curY);
-            tft->print("XiaoZhi:");
+            tft->print("AI:");
             tft->setTextColor(C_WHITE, 0x0862); // Trắng sáng cho phản hồi AI
-            tft->print(curLine.substring(8));
+            tft->print(curLine.substring(prefixLen));
           } else {
-            // Xác định dòng này là lời của Ban hay XiaoZhi
+            // Xác định dòng này là lời của Ban hay AI
             bool isAi = false;
             for (int k = 0; k <= lineIdx; k++) {
-              if (s40AiWrappedLines[k].indexOf("XiaoZhi:") >= 0) {
+              if (s40AiWrappedLines[k].indexOf("XiaoZhi:") >= 0 || s40AiWrappedLines[k].indexOf("AI:") >= 0) {
                 isAi = true;
                 break;
               }
@@ -4232,7 +4233,7 @@ namespace TestDisplay {
       s40AiState = AI_STATE_IDLE;
       eyeState = 0;
       s40AiEmotionTag = "IDLE";
-      s40AiReplyText = "Xin chao! Toi la Tro ly XiaoZhi AI.\nBam [OK] de bat dau tro chuyen.";
+      s40AiReplyText = "Xin chao! Toi la Tro ly AI Decor.\nBam [OK] de bat dau tro chuyen.";
       s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
       s40AiScrollLine = 0;
       drawXiaoZhiAssistantScreen(true);
@@ -4271,7 +4272,7 @@ namespace TestDisplay {
 
     if (fullRedraw) {
       tft->fillRect(0, 0, W, 296, C_BLACK);
-      drawSymbianHeader("TRO LY XIAOZHI AI");
+      drawSymbianHeader("TRO LY AI");
       drawXiaoZhiEyesBox(6, 24, W - 12, 140, eyeState, 2);
       drawXiaoZhiAssistantStatusStrip();
       drawXiaoZhiConversationBoxOnly();
@@ -4330,7 +4331,7 @@ namespace TestDisplay {
     if (sampleCount < 4800) {
       s40AiEmotionTag = "CONFUSED";
       eyeState = 8;
-      s40AiReplyText = "XiaoZhi chua nghe ro cau noi.\nBan hay giu man hinh hoac bam [OK] va noi lai nhe!";
+      s40AiReplyText = "Tro ly AI chua nghe ro cau noi.\nBan hay giu man hinh hoac bam [OK] va noi lai nhe!";
       s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
       s40AiScrollLine = 0;
       s40AiAutoScroll = true;
@@ -4347,7 +4348,7 @@ namespace TestDisplay {
     eyeState = 5; // LOOK UP (Mắt nhìn lên suy nghĩ)
     lastExternalEmojiSync = millis();
     s40AiUserSpeechText = "Dang lang nghe cau hoi...";
-    s40AiSttPhaseMsg = ">> XiaoZhi dang suy nghi tra loi...";
+    s40AiSttPhaseMsg = ">> Tro ly AI dang suy nghi tra loi...";
 
     drawXiaoZhiEyesBox(6, 24, tft->width() - 12, 140, eyeState, 2);
     drawXiaoZhiAssistantStatusStrip();
@@ -8428,9 +8429,9 @@ namespace TestDisplay {
           XiaoZhiClient::queryOTA(true);
           if (XiaoZhiClient::isDeviceBound()) {
             TestAudio::playOkChime();
-            showSymbianToast("KET NOI XIAOZHI THANH CONG!");
+            showSymbianToast("KET NOI TRO LY AI THANH CONG!");
             s40AiState = AI_STATE_IDLE;
-            s40AiReplyText = "Xin chao! Toi la Tro ly XiaoZhi AI.\nBam [OK] de bat dau tro chuyen.";
+            s40AiReplyText = "Xin chao! Toi la Tro ly AI Decor.\nBam [OK] de bat dau tro chuyen.";
             drawXiaoZhiAssistantScreen(true);
           } else {
             String authCode = XiaoZhiClient::getLastAuthCode();
@@ -10831,7 +10832,7 @@ namespace TestDisplay {
             XiaoZhiClient::queryOTA(false);
             if (XiaoZhiClient::isDeviceBound()) {
               TestAudio::playOkChime();
-              showSymbianToast("KET NOI XIAOZHI THANH CONG!");
+              showSymbianToast("KET NOI TRO LY AI THANH CONG!");
               s40AiState = AI_STATE_IDLE;
               s40AiReplyText = "Xin chao! Thiet bi da ket noi thanh cong voi XiaoZhi Hub! Nhan [OK] de bat dau hoi thoai.";
               drawXiaoZhiAssistantScreen(true);
@@ -10989,7 +10990,7 @@ namespace TestDisplay {
           String cleanStt = XiaoZhiClient::stripVietnameseToAscii(liveStt);
           if (cleanStt != s40AiUserSpeechText) {
             s40AiUserSpeechText = cleanStt;
-            s40AiSttPhaseMsg = ">> XiaoZhi dang suy nghi tra loi...";
+            s40AiSttPhaseMsg = ">> Tro ly AI dang suy nghi tra loi...";
             drawXiaoZhiAssistantStatusStrip();
             drawXiaoZhiConversationBoxOnly();
           }
@@ -11008,13 +11009,13 @@ namespace TestDisplay {
             emotionTag = XiaoZhiClient::getLastEmotion();
           }
 
-          if (recognizedUserText.length() > 0) {
+          if (recognizedUserText.length() > 0 && recognizedUserText != "(Giọng nói)") {
             s40AiUserSpeechText = XiaoZhiClient::stripVietnameseToAscii(recognizedUserText);
           } else if (s40AiUserSpeechText == "Dang lang nghe cau hoi...") {
             s40AiUserSpeechText = "(Da gui giong noi)";
           }
           String replyAscii = XiaoZhiClient::stripVietnameseToAscii(aiReplyText);
-          s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;
+          s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\nAI: " + replyAscii;
           if (emotionTag.length() > 0) s40AiEmotionTag = emotionTag;
           eyeState = mapAiEmotionToEyeState(s40AiEmotionTag, replyAscii);
           lastExternalEmojiSync = now;
@@ -11032,7 +11033,7 @@ namespace TestDisplay {
           if (XiaoZhiClient::isPcGatewayMode()) {
             s40AiReplyText = "Chua ket noi toi PC AI Gateway.\nHay kiem tra start_gateway.bat nhe!";
           } else {
-            s40AiReplyText = "Chua the ket noi toi XiaoZhi Hub.\nVui long kiem tra lai ket noi Wi-Fi!";
+            s40AiReplyText = "Chua the ket noi toi AI Server.\nVui long kiem tra lai ket noi Wi-Fi!";
           }
           s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
           s40AiScrollLine = 0;
@@ -11042,11 +11043,11 @@ namespace TestDisplay {
           drawXiaoZhiAssistantScreen(true);
         }
       } else if (s40AiState == AI_STATE_REPLYING) {
-        // 1. Cập nhật câu thoại thời gian thực nếu XiaoZhi Cloud gửi thêm câu mới (streaming nhiều câu)
+        // 1. Cập nhật câu thoại thời gian thực nếu Server gửi thêm câu mới (streaming nhiều câu)
         String fullAiReply = XiaoZhiClient::getLastLlmReply();
         if (fullAiReply.length() > 0) {
           String replyAscii = XiaoZhiClient::stripVietnameseToAscii(fullAiReply);
-          String expectedReplyText = "Ban: " + s40AiUserSpeechText + "\nXiaoZhi: " + replyAscii;
+          String expectedReplyText = "Ban: " + s40AiUserSpeechText + "\nAI: " + replyAscii;
           if (expectedReplyText != s40AiReplyText) {
             s40AiReplyText = expectedReplyText;
             int prevTotal = s40AiTotalLines;
@@ -11334,15 +11335,19 @@ namespace TestDisplay {
       stateStr = "idle";
     }
 
-    // 1. STT User Text (Ưu tiên UTF-8 gốc có dấu đầy đủ từ XiaoZhi Cloud nếu có)
+    // 1. STT User Text (Ưu tiên UTF-8 gốc có dấu đầy đủ từ AI Gateway / Cloud nếu có)
     String sttUtf8 = XiaoZhiClient::getLastSttText();
-    if (sttUtf8.length() > 0) {
+    if (sttUtf8.length() > 0 && sttUtf8 != "(Giọng nói)") {
       userText = sttUtf8;
+    } else if (s40AiUserSpeechText != "Dang lang nghe cau hoi...") {
+      userText = s40AiUserSpeechText;
+    } else if (aiReply.length() > 0 && s40AiState != AI_STATE_LISTENING && s40AiState != AI_STATE_IDLE) {
+      userText = "Đã gửi câu hỏi";
     } else {
       userText = s40AiUserSpeechText;
     }
 
-    // 2. AI Reply Text (Ưu tiên UTF-8 gốc có dấu đầy đủ từ XiaoZhi Cloud nếu có)
+    // 2. AI Reply Text (Ưu tiên UTF-8 gốc có dấu đầy đủ từ AI Gateway / Cloud nếu có)
     String llmUtf8 = XiaoZhiClient::getLastLlmReply();
     if (llmUtf8.length() > 0) {
       aiReply = llmUtf8;

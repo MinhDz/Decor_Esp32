@@ -183,7 +183,7 @@ ScavengeReport MemoryScavenger::scavenge(bool forceAll, const char* reason) {
   s_lastReport.timestamp       = millis() / 1000;
   s_lastReport.triggerReason   = reason;
 
-  if (totalFreed > 0 || forceAll) {
+  if (totalFreed > 0) {
     s_totalScavengeRuns++;
     s_cumulativeFreedKb += (uint32_t)(totalFreed / 1024);
 
@@ -204,9 +204,9 @@ void MemoryScavenger::loop() {
   if (now - s_lastPeriodicCheckMs < 10000) return; // Kiểm tra định kỳ mỗi 10 giây
   s_lastPeriodicCheckMs = now;
 
-  // 1. CẢNH BÁO BỘ NHỚ NỘI KHẨN CẤP (Heap < 65KB): Bắt buộc dọn RAM ngay lập tức ở mọi chế độ
-  if (ESP.getFreeHeap() < 65536) {
-    LOG_W("SCAVENGER", "Heap thap duoi nguong an toan (%u KB) -> Kich hoat don RAM khan cap!", (unsigned)(ESP.getFreeHeap() / 1024));
+  // 1. CẢNH BÁO BỘ NHỚ NỘI KHẨN CẤP (Heap < 28KB): Bắt buộc dọn RAM ngay lập tức ở mọi chế độ
+  if (ESP.getFreeHeap() < 28672) {
+    LOG_W("SCAVENGER", "Heap thấp dưới ngưỡng an toàn (%u KB) -> Kích hoạt dọn RAM khẩn cấp!", (unsigned)(ESP.getFreeHeap() / 1024));
     scavenge(true, "LOW_RAM_ALERT");
     return;
   }

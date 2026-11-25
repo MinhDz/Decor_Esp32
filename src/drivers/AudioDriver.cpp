@@ -1931,10 +1931,13 @@ namespace AudioDriver {
       );
     }
 
+    const uint8_t* byteSrc = (const uint8_t*)samples;
     taskENTER_CRITICAL(&s_asyncStreamMux);
     for (size_t i = 0; i < sampleCount; i++) {
       if (s_asyncStreamCount < cap) {
-        s_asyncStreamRingBuf[s_asyncStreamTail] = samples[i];
+        int16_t sampleVal;
+        memcpy(&sampleVal, byteSrc + i * sizeof(int16_t), sizeof(int16_t));
+        s_asyncStreamRingBuf[s_asyncStreamTail] = sampleVal;
         s_asyncStreamTail = (s_asyncStreamTail + 1) % cap;
         s_asyncStreamCount++;
       } else {
@@ -2151,16 +2154,20 @@ namespace AudioDriver {
 
     // 2. Giải phóng bộ đệm stream bất đồng bộ khi không phát
     if (!isStreamPcmAsyncPlaying() && s_asyncStreamRingBuf != nullptr) {
+      int16_t* bufToFree = nullptr;
       taskENTER_CRITICAL(&s_asyncStreamMux);
-      free(s_asyncStreamRingBuf);
+      bufToFree = s_asyncStreamRingBuf;
       s_asyncStreamRingBuf = nullptr;
       s_asyncStreamHead = 0;
       s_asyncStreamTail = 0;
       s_asyncStreamCount = 0;
       taskEXIT_CRITICAL(&s_asyncStreamMux);
-      size_t freedStream = ASYNC_STREAM_RING_CAPACITY * sizeof(int16_t);
-      totalFreed += freedStream;
-      Serial.printf("🧹 [TRIM AUDIO] Đã giải phóng bộ đệm stream RingBuffer (%u KB)\n", (unsigned int)(freedStream / 1024));
+      if (bufToFree != nullptr) {
+        free(bufToFree);
+        size_t freedStream = ASYNC_STREAM_RING_CAPACITY * sizeof(int16_t);
+        totalFreed += freedStream;
+        Serial.printf("🧹 [TRIM AUDIO] Đã giải phóng bộ đệm stream RingBuffer (%u KB)\n", (unsigned int)(freedStream / 1024));
+      }
     }
 
     

@@ -43,6 +43,7 @@ static volatile uint32_t s_lastAiReplyTime = 0;
 static volatile bool s_localIntentHandled = false;
 static uint32_t s_localIntentHandledMs = 0;
 static String s_localIntentReplyText = "";
+static volatile bool s_asyncConvAbort = false;
 
 // Cấu hình AI Backend: 0 = XiaoZhi Cloud Hub, 1 = PC Local AI Gateway (Decor AI)
 static int s_aiBackend = 1;
@@ -1083,13 +1084,14 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
       Serial.println("🟡 [XIAOZHI WS] Mất kết nối WebSocket tới XiaoZhi Cloud.");
       break;
     case WEBSOCKET_EVENT_DATA:
-      if (data && data->data_len > 0) {
+      if (data && data->data_len > 0 && data->data_ptr != nullptr) {
         if (data->op_code == 0x01) { // Text frame JSON
-          String msg = String(data->data_ptr).substring(0, data->data_len);
-          Serial.printf("📩 [XIAOZHI WS RCV]: %s\n", msg.c_str());
+          #if DEBUG_SERIAL
+          Serial.printf("📩 [AI WS RCV]: %.*s\n", (int)(data->data_len > 120 ? 120 : data->data_len), (const char*)data->data_ptr);
+          #endif
 
           JsonDocument doc;
-          DeserializationError err = deserializeJson(doc, msg);
+          DeserializationError err = deserializeJson(doc, (const char*)data->data_ptr, data->data_len);
           if (!err) {
             // 1. Trích xuất thuộc tính emotion / emoji tổng quát từ MỌI frame JSON
             if (doc["emotion"].is<const char*>()) {
@@ -1373,9 +1375,9 @@ void XiaoZhiClient::startWebSocket() {
     ws_cfg.pingpong_timeout_sec = 15;
     ws_cfg.disable_pingpong_discon = false;
     ws_cfg.keep_alive_enable = true;
-    ws_cfg.task_stack = 8192;
+    ws_cfg.task_stack = 4096;
     ws_cfg.task_prio = 5;
-    ws_cfg.buffer_size = 8192;
+    ws_cfg.buffer_size = 4096;
 
     Serial.println("\n🚀 [PC GATEWAY WS] Đang mở kết nối WebSocket tới PC Local AI Gateway...");
     Serial.printf("🌐 Endpoint : %s\n", s_wsUri.c_str());
@@ -1669,6 +1671,10 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
   size_t offset = 0;
   bool sendOk = true;
   while (offset < totalBytes && isWebSocketConnected()) {
+    if (s_asyncConvAbort) {
+      Serial.println("⏹️ [AI AUDIO] Huỷ gửi âm thanh do nhận lệnh abort.");
+      return false;
+    }
     size_t chunk = (totalBytes - offset > FRAME_BYTES) ? FRAME_BYTES : (totalBytes - offset);
     int bSent = esp_websocket_client_send_bin(s_wsClient, (const char*)(bytePtr + offset), chunk, pdMS_TO_TICKS(1000));
     if (bSent < 0) {
@@ -1690,7 +1696,7 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
       String sid = s_sessionId.length() > 0 ? s_sessionId : "";
       String stopMsg = "{\"session_id\":\"" + sid + "\",\"type\":\"listen\",\"state\":\"stop\"}";
       esp_websocket_client_send_text(s_wsClient, stopMsg.c_str(), stopMsg.length(), pdMS_TO_TICKS(1500));
-      Serial.println("⏹️ [XIAOZHI AUDIO] Đã kết thúc truyền âm thanh. Đang chờ XiaoZhi Hub phản hồi...");
+      Serial.println("⏹️ [AI AUDIO] Đã kết thúc truyền âm thanh. Đang chờ AI phản hồi...");
     }
   } else {
     Serial.println("⚠️ [AI AUDIO] Quá trình gửi âm thanh bị gián đoạn do mất kết nối socket.");
@@ -1700,6 +1706,10 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
   // 4. Chờ nhận phản hồi STT và LLM/TTS từ server (hỗ trợ đọc bài báo dài lên đến 120 giây)
   uint32_t waitStart = millis();
   while ((millis() - waitStart < 120000) && isWebSocketConnected()) {
+    if (s_asyncConvAbort) {
+      Serial.println("⏹️ [AI AUDIO] Dừng chờ phản hồi do nhận lệnh abort.");
+      break;
+    }
     String currentPartial = (s_lastAiFullReply.length() > 0) ? s_lastAiFullReply : s_lastLlmText;
     if (onProgress) {
       onProgress(s_lastSttText, currentPartial, s_lastEmotion, false);
@@ -1777,7 +1787,7 @@ static String s_asyncResultEmotion = "happy";
 static portMUX_TYPE s_asyncConvMux = portMUX_INITIALIZER_UNLOCKED;
 
 static void asyncConversationTask(void* param) {
-  Serial.println("🤖 [XIAOZHI CONV TASK] Bắt đầu tác vụ đàm thoại bất đồng bộ trên Core 0...");
+  Serial.println("🤖 [AI CONV TASK] Bắt đầu tác vụ đàm thoại bất đồng bộ trên Core 0...");
   String userText = "";
   String aiReply = "";
   String emotion = "happy";
@@ -1798,16 +1808,16 @@ static void asyncConversationTask(void* param) {
   s_asyncResultEmotion = emotion;
   s_asyncConvHasResult = ok;
   s_asyncConvRunning = false;
+  s_asyncConvTaskHandle = nullptr;
   taskEXIT_CRITICAL(&s_asyncConvMux);
 
-  Serial.printf("🤖 [XIAOZHI CONV TASK] Hoàn tất đàm thoại (ok=%d). Giải phóng task Core 0.\n", ok);
-  s_asyncConvTaskHandle = nullptr;
+  Serial.printf("🤖 [AI CONV TASK] Hoàn tất đàm thoại (ok=%d). Giải phóng task Core 0.\n", ok);
   vTaskDelete(NULL);
 }
 
 bool XiaoZhiClient::startAudioConversationAsync(const int16_t* pcmSamples, size_t sampleCount, uint32_t sampleRate) {
   if (!pcmSamples || sampleCount < 800) {
-    Serial.println("⚠️ [XIAOZHI ASYNC] Dữ liệu PCM quá ngắn, bỏ qua.");
+    Serial.println("⚠️ [AI ASYNC] Dữ liệu PCM quá ngắn, bỏ qua.");
     return false;
   }
 
@@ -1824,7 +1834,7 @@ bool XiaoZhiClient::startAudioConversationAsync(const int16_t* pcmSamples, size_
   }
 
   if (!s_asyncConvPcm) {
-    Serial.println("❌ [XIAOZHI ASYNC] Không thể cấp phát bộ đệm PCM!");
+    Serial.println("❌ [AI ASYNC] Không thể cấp phát bộ đệm PCM!");
     return false;
   }
 
@@ -1835,6 +1845,7 @@ bool XiaoZhiClient::startAudioConversationAsync(const int16_t* pcmSamples, size_
 
   taskENTER_CRITICAL(&s_asyncConvMux);
   s_asyncConvRunning = true;
+  s_asyncConvAbort = false;
   s_asyncConvHasResult = false;
   s_asyncResultUserText = "";
   s_asyncResultAiReply = "";
@@ -1843,8 +1854,8 @@ bool XiaoZhiClient::startAudioConversationAsync(const int16_t* pcmSamples, size_
 
   BaseType_t res = xTaskCreatePinnedToCore(
     asyncConversationTask,
-    "XiaoZhiConvTask",
-    8192,
+    "AiConvTask",
+    4096, // Giảm từ 8192 xuống 4096 để tiết kiệm 4KB internal SRAM
     nullptr,
     2, // Priority 2 trên Core 0 (không nghẽn Core 1 UI)
     &s_asyncConvTaskHandle,
@@ -1880,13 +1891,18 @@ void XiaoZhiClient::getLatestTurnResult(String& outUserText, String& outAiReply,
 }
 
 void XiaoZhiClient::abortConversation() {
-  if (s_asyncConvTaskHandle != nullptr) {
-    vTaskDelete(s_asyncConvTaskHandle);
-    s_asyncConvTaskHandle = nullptr;
+  if (s_asyncConvRunning) {
+    s_asyncConvAbort = true;
+    uint32_t waitStart = millis();
+    while (s_asyncConvRunning && (millis() - waitStart < 120)) {
+      vTaskDelay(pdMS_TO_TICKS(10));
+    }
   }
   taskENTER_CRITICAL(&s_asyncConvMux);
   s_asyncConvRunning = false;
   s_asyncConvHasResult = false;
+  s_asyncConvAbort = false;
+  s_asyncConvTaskHandle = nullptr;
   taskEXIT_CRITICAL(&s_asyncConvMux);
 }
 
