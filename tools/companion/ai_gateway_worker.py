@@ -993,6 +993,8 @@ class AiGatewayServer:
         logger.info(f"🤖 [WEB CHAT] Phản hồi: {reply_text} (Emotion: {emotion})")
 
         streamed = False
+        dead_clients = {c for c in ACTIVE_WS_CLIENTS if c.closed}
+        ACTIVE_WS_CLIENTS.difference_update(dead_clients)
         if stream_to_station and ACTIVE_WS_CLIENTS:
             sentences = split_into_smart_sentences(reply_text, max_chars=130)
             logger.info(f"📢 [WEB CHAT] Bắt đầu stream câu trả lời ({len(sentences)} câu) xuống {len(ACTIVE_WS_CLIENTS)} trạm ESP32...")
