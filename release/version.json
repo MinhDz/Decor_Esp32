@@ -4,6 +4,6 @@
   "build_date": "2026-11-26",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
   "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.3.9/firmware.bin",
-  "size": 2231424,
+  "size": 2248400,
   "changelog": "🚀 Space OS v3.3.9 - AI Assistant Custom Identity, Voice Wake from AOD & Full MCP PC/Station Control:\n- Cho phép đặt tên riêng cho Trợ lý AI (ai_name) và câu khẩu lệnh đánh thức (wake_word).\n- Hỗ trợ đánh thức bằng giọng nói trực tiếp từ màn hình Always On Display (AOD) chuyển thẳng vào chế độ Trò chuyện AI.\n- Mở rộng hệ thống 19 công cụ MCP (Model Context Protocol) điều khiển toàn diện Trạm Decor (self.*) và Máy tính PC qua DecorSpaceCompanion (pc.*: hẹn giờ/hủy tắt máy, khóa màn hình, đọc/ghi Clipboard, mở ứng dụng Windows, tìm kiếm & mở YouTube/URL trên trình duyệt).\n- Khắc phục triệt để lỗi GitHub Actions Cloud OTA Pipeline (ghim platform espressif32 @ ^6.9.0 và tự động đồng bộ release/firmware.bin + release/version.json)."
 }
