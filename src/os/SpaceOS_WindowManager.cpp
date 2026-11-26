@@ -1986,8 +1986,7 @@ namespace TestDisplay {
       String savedPath = TestAudio::saveRecordedVoiceWithTimestamp("/recording");
       s_diagLastSavedFilename = savedPath;
 
-      // 2. Bắn bản thu âm lên WebSocket cho Máy Tính nghe thử (cổng 8766 riêng biệt)
-      TestAudio::pushRecordedAudioToWebSocketAsync("", 8766);
+      // 2. Bắn bản thu âm lên WebSocket cho Máy Tính nghe thử (cổng 8765 AI Gateway)
       if (XiaoZhiClient::getPcGatewayPort() == 8765) {
         TestAudio::pushRecordedAudioToWebSocketAsync(XiaoZhiClient::getPcGatewayIp(), 8765);
       }
@@ -3979,10 +3978,15 @@ namespace TestDisplay {
     tft->drawRoundRect(6, 196, W - 12, 98, 8, borderCol);
 
     tft->setTextSize(1);
+    String aiCustomName = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getAiName());
+    if (aiCustomName.length() == 0) aiCustomName = "XiaoZhi";
+    String aiCustomUpper = aiCustomName;
+    aiCustomUpper.toUpperCase();
+
     if (s40AiState == AI_STATE_IDLE) {
       tft->setTextColor(C_NEON_CYAN, 0x0862);
       tft->setCursor(14, 204);
-      tft->print("TRO LY AI SAN SANG");
+      tft->printf("TRO LY %s SAN SANG", aiCustomUpper.c_str());
 
       tft->setTextColor(C_YELLOW, 0x0862);
       tft->setCursor(14, 222);
@@ -3990,9 +3994,10 @@ namespace TestDisplay {
 
       tft->setTextColor(C_WHITE, 0x0862);
       tft->setCursor(14, 240);
-      tft->print("AI se lang nghe & tra loi ban.");
+      String wkAscii = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getWakeWord());
+      tft->printf("Goi \"%s\" de danh thuc AI", wkAscii.c_str());
       tft->setCursor(14, 256);
-      tft->print("Bieu cam va giong noi song dong.");
+      tft->print("tu man hinh khoa Always On Display.");
 
       tft->setTextColor(C_SLATE, 0x0862);
       tft->setCursor(14, 274);
@@ -4039,7 +4044,7 @@ namespace TestDisplay {
     } else if (s40AiState == AI_STATE_REPLYING) {
       tft->setTextColor(C_NEON_CYAN, 0x0862);
       tft->setCursor(14, 203);
-      tft->print("TRO CHUYEN TRO LY AI");
+      tft->printf("TRO CHUYEN CUNG %s", aiCustomUpper.c_str());
 
       int visibleRows = 5;
       int maxStart = (s40AiTotalLines > visibleRows) ? (s40AiTotalLines - visibleRows) : 0;
@@ -4060,11 +4065,12 @@ namespace TestDisplay {
             tft->print("Ban:");
             tft->setTextColor(0xFFE0, 0x0862); // Vàng sáng cho lời nói người dùng
             tft->print(curLine.substring(4));
-          } else if (curLine.startsWith("XiaoZhi:") || curLine.startsWith("AI:") || curLine.startsWith("Tro ly AI:")) {
-            int prefixLen = curLine.startsWith("XiaoZhi:") ? 8 : (curLine.startsWith("AI:") ? 3 : 10);
+          } else if (curLine.startsWith("XiaoZhi:") || curLine.startsWith("AI:") || curLine.startsWith("Tro ly AI:") || curLine.startsWith(aiCustomName + ":")) {
+            int colonPos = curLine.indexOf(':');
+            int prefixLen = (colonPos > 0) ? (colonPos + 1) : 3;
             tft->setTextColor(C_NEON_CYAN, 0x0862);
             tft->setCursor(12, curY);
-            tft->print("AI:");
+            tft->print(aiCustomName + ":");
             tft->setTextColor(C_WHITE, 0x0862); // Trắng sáng cho phản hồi AI
             tft->print(curLine.substring(prefixLen));
           } else {
@@ -4217,11 +4223,13 @@ namespace TestDisplay {
 
     // 1. Chế độ PC Local AI Gateway (kết nối trực tiếp PC Companion qua LAN):
     //    Không cần xác thực OTP qua Cloud XiaoZhi, sẵn sàng trò chuyện ngay lập tức!
+    String aiCustomName = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getAiName());
+    if (aiCustomName.length() == 0) aiCustomName = "XiaoZhi";
     if (XiaoZhiClient::isPcGatewayMode()) {
       s40AiState = AI_STATE_IDLE;
       eyeState = 0;
       s40AiEmotionTag = "IDLE";
-      s40AiReplyText = "Xin chao! Tro ly AI da san sang.\nNhan giu man hinh hoac bam [OK] de noi.";
+      s40AiReplyText = "Xin chao! Minh la " + aiCustomName + ".\nNhan giu man hinh hoac bam [OK] de noi.";
       s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
       s40AiScrollLine = 0;
       drawXiaoZhiAssistantScreen(true);
@@ -4233,7 +4241,7 @@ namespace TestDisplay {
       s40AiState = AI_STATE_IDLE;
       eyeState = 0;
       s40AiEmotionTag = "IDLE";
-      s40AiReplyText = "Xin chao! Toi la Tro ly AI Decor.\nBam [OK] de bat dau tro chuyen.";
+      s40AiReplyText = "Xin chao! Minh la " + aiCustomName + ".\nBam [OK] de bat dau tro chuyen.";
       s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
       s40AiScrollLine = 0;
       drawXiaoZhiAssistantScreen(true);
@@ -4272,7 +4280,9 @@ namespace TestDisplay {
 
     if (fullRedraw) {
       tft->fillRect(0, 0, W, 296, C_BLACK);
-      drawSymbianHeader("TRO LY AI");
+      String hdrName = "TRO LY " + XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getAiName());
+      hdrName.toUpperCase();
+      drawSymbianHeader(hdrName.c_str());
       drawXiaoZhiEyesBox(6, 24, W - 12, 140, eyeState, 2);
       drawXiaoZhiAssistantStatusStrip();
       drawXiaoZhiConversationBoxOnly();
@@ -10590,14 +10600,56 @@ namespace TestDisplay {
           DisplayDriver::setAodBacklight();
           tft->fillScreen(C_BLACK);
           drawAlwaysOnDisplayScreen(true);
-          Serial.printf("🌙 [AOD MODE] Chuyển sang Always On Display (Đèn nền siêu mờ PWM=4) sau %u giây.\n", (unsigned)timeoutSec);
+          if (XiaoZhiClient::isVoiceWakeEnabled()) {
+            TestAudio::enableMicMonitor(true);
+          }
+          Serial.printf("🌙 [AOD MODE] Chuyển sang Always On Display (Đèn nền siêu mờ PWM=4, VoiceWake=%s) sau %u giây.\n",
+                        XiaoZhiClient::isVoiceWakeEnabled() ? "ON" : "OFF", (unsigned)timeoutSec);
         } else {
           // Chế độ Sleep: Xóa đen màn hình và tắt hoàn toàn đèn nền (PWM=0)
           DisplayDriver::setSleeping(true);
           tft->fillScreen(C_BLACK);
+          if (XiaoZhiClient::isVoiceWakeEnabled()) {
+            TestAudio::enableMicMonitor(true);
+          }
           Serial.printf("🌙 [SLEEP MODE] Đã tắt hoàn toàn màn hình sau %u giây.\n", (unsigned)timeoutSec);
         }
       }
+    }
+
+    // Kiểm tra tín hiệu đánh thức AI từ câu nói Wake Word (từ AOD / Màn hình chờ -> Chuyển thẳng sang Chế độ Trò chuyện AI!)
+    if (XiaoZhiClient::isVoiceWakeTriggered()) {
+      XiaoZhiClient::clearVoiceWakeTrigger();
+      lastUserActivityMs = now;
+      isScreenSleeping = false;
+      setBacklightBrightness(screenBrightnessPct);
+      PowerManagementService::notifyUserActivity();
+
+      String uTxt = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getLastSttText());
+      String rTxt = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getLastLlmReply());
+      String aiNameStr = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getAiName());
+      if (aiNameStr.length() == 0) aiNameStr = "AI";
+
+      currentMode = 1;
+      s40AiTurnId++;
+      if (rTxt.length() > 0) {
+        s40AiUserSpeechText = (uTxt.length() > 0) ? uTxt : XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getWakeWord());
+        s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\n" + aiNameStr + ": " + rTxt;
+        s40AiEmotionTag = XiaoZhiClient::getLastEmotion();
+        if (s40AiEmotionTag.length() == 0) s40AiEmotionTag = "happy";
+        eyeState = mapAiEmotionToEyeState(s40AiEmotionTag, rTxt);
+        s40AiTotalLines = wrapTextWordBoundary(s40AiReplyText, 34, s40AiWrappedLines, 28);
+        s40AiScrollLine = 0;
+        s40AiAutoScroll = true;
+        s40AiLastScrollMs = now;
+        s40AiState = AI_STATE_REPLYING;
+        drawXiaoZhiAssistantScreen(true);
+      } else {
+        enterXiaoZhiAssistantMode(false);
+        startXiaoZhiListening();
+      }
+      Serial.println("🔆 [AOD VOICE WAKE] Đã đánh thức trạm từ Always On Display -> Chuyển thẳng sang Chế độ Trò chuyện AI!");
+      return;
     }
 
     // Nếu đang ở trạng thái AOD / Sleep:
@@ -10605,6 +10657,53 @@ namespace TestDisplay {
       if (alwaysOnDisplayEnabled && (now - lastSecondTick >= 1000)) {
         lastSecondTick = now;
         drawAlwaysOnDisplayScreen(false);
+      }
+
+      // Lắng nghe câu nói đánh thức AI (Wake Word Detection) trong chế độ Always On Display
+      if (XiaoZhiClient::isVoiceWakeEnabled() && WiFi.status() == WL_CONNECTED && !XiaoZhiClient::isConversationActive()) {
+        static bool s_aodListening = false;
+        static unsigned long s_aodListenStartMs = 0;
+        static unsigned long s_aodLastVoiceMs = 0;
+        static unsigned long s_aodCooldownUntilMs = 0;
+
+        if (!s_aodListening) {
+          if (now >= s_aodCooldownUntilMs) {
+            if (!TestAudio::isMicMonitorActive()) {
+              TestAudio::enableMicMonitor(true);
+            }
+            int micLv = TestAudio::getLastMicLevelPct();
+            if (micLv >= 16) {
+              // Phát hiện có tiếng người gọi trong phòng -> Thu âm câu nói để kiểm tra Wake Word & câu lệnh
+              s_aodListening = true;
+              s_aodListenStartMs = now;
+              s_aodLastVoiceMs = now;
+              XiaoZhiClient::clearLastTurn();
+              TestAudio::startVoiceRecording();
+              Serial.printf("🎙️ [AOD WAKE LISTEN] Phát hiện giọng nói trên AOD (VU=%d%%) -> Bắt đầu thu câu nói đánh thức...\n", micLv);
+            }
+          }
+        } else {
+          TestAudio::pollVoiceRecording();
+          int micLv = TestAudio::getLastMicLevelPct();
+          if (micLv >= 8) {
+            s_aodLastVoiceMs = now;
+          }
+          unsigned long recDur = now - s_aodListenStartMs;
+          unsigned long silDur = now - s_aodLastVoiceMs;
+          if ((recDur >= 1100 && silDur >= 900) || recDur >= 4500) {
+            TestAudio::stopVoiceRecording();
+            s_aodListening = false;
+            s_aodCooldownUntilMs = now + 2500;
+            size_t sc = TestAudio::getRecordedSampleCount();
+            const int16_t* pcm = TestAudio::getRecordedPcmBuffer();
+            if (sc >= 6400 && pcm != nullptr) {
+              Serial.printf("🚀 [AOD WAKE CHECK] Gửi %u mẫu âm thanh lên AI kiểm tra câu đánh thức \"%s\"...\n",
+                            (unsigned)sc, XiaoZhiClient::getWakeWord().c_str());
+              XiaoZhiClient::startAudioConversationAsync(pcm, sc, TestAudio::getRecordSampleRate());
+            }
+            TestAudio::enableMicMonitor(true);
+          }
+        }
       }
       return;
     }
@@ -11014,8 +11113,10 @@ namespace TestDisplay {
           } else if (s40AiUserSpeechText == "Dang lang nghe cau hoi...") {
             s40AiUserSpeechText = "(Da gui giong noi)";
           }
+          String aiNameStr = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getAiName());
+          if (aiNameStr.length() == 0) aiNameStr = "AI";
           String replyAscii = XiaoZhiClient::stripVietnameseToAscii(aiReplyText);
-          s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\nAI: " + replyAscii;
+          s40AiReplyText = "Ban: " + s40AiUserSpeechText + "\n" + aiNameStr + ": " + replyAscii;
           if (emotionTag.length() > 0) s40AiEmotionTag = emotionTag;
           eyeState = mapAiEmotionToEyeState(s40AiEmotionTag, replyAscii);
           lastExternalEmojiSync = now;
@@ -11046,8 +11147,10 @@ namespace TestDisplay {
         // 1. Cập nhật câu thoại thời gian thực nếu Server gửi thêm câu mới (streaming nhiều câu)
         String fullAiReply = XiaoZhiClient::getLastLlmReply();
         if (fullAiReply.length() > 0) {
+          String aiNameStr = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getAiName());
+          if (aiNameStr.length() == 0) aiNameStr = "AI";
           String replyAscii = XiaoZhiClient::stripVietnameseToAscii(fullAiReply);
-          String expectedReplyText = "Ban: " + s40AiUserSpeechText + "\nAI: " + replyAscii;
+          String expectedReplyText = "Ban: " + s40AiUserSpeechText + "\n" + aiNameStr + ": " + replyAscii;
           if (expectedReplyText != s40AiReplyText) {
             s40AiReplyText = expectedReplyText;
             int prevTotal = s40AiTotalLines;

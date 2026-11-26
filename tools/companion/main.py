@@ -44,6 +44,7 @@ logger = logging.getLogger("MainCompanion")
 from telemetry_worker import TelemetryWorker
 from transcoder_worker import TranscoderWorker
 from ai_gateway_worker import AiGatewayWorker
+from discovery_worker import DiscoveryWorker
 from settings_dialog import SettingsDialog
 from tray_app import SystemTrayApp
 
@@ -114,6 +115,30 @@ def main():
     if ai_enabled:
         ai_gateway.start()
 
+    # 4B. Khởi tạo UDP Discovery Worker (Cổng 8767 - Đồng bộ IP 2 chiều tự động)
+    def on_station_discovered(discovered_ip):
+        logger.info(f"🎯 [AUTO SYNC] Đồng bộ Trạm Decor sang IP mới: {discovered_ip}")
+        c = cfg_mgr.load_config()
+        if c.get("esp32_ip") != discovered_ip:
+            c["esp32_ip"] = discovered_ip
+            cfg_mgr.save_config(c)
+        telemetry.set_ip(discovered_ip)
+        transcoder.set_esp_ip(discovered_ip)
+        if hasattr(settings_dlg, 'ip_entry'):
+            try:
+                settings_dlg.ip_entry.delete(0, 'end')
+                settings_dlg.ip_entry.insert(0, discovered_ip)
+            except Exception:
+                pass
+
+    discovery = DiscoveryWorker(
+        current_esp_ip=esp_ip,
+        gateway_port=ai_port,
+        transcoder_port=tran_port,
+        on_station_discovered=on_station_discovered
+    )
+    discovery.start()
+
     # 5. Định nghĩa callback cập nhật khi người dùng lưu cài đặt từ Settings Dialog
     def on_settings_saved(new_cfg):
         new_ip = new_cfg.get("esp32_ip", esp_ip)
@@ -128,6 +153,7 @@ def main():
         telemetry.set_ip(new_ip)
         telemetry.set_interval(new_interval)
         telemetry.set_enabled(new_mon)
+        discovery.set_esp_ip(new_ip)
 
         transcoder.set_esp_ip(new_ip)
         if new_tran:
@@ -156,6 +182,7 @@ def main():
     # Xử lý đóng an toàn khi nhận Ctrl+C
     def handle_sigint(signum, frame):
         logger.info("Nhận tín hiệu dừng (SIGINT)...")
+        discovery.stop()
         telemetry.stop()
         transcoder.stop()
         ai_gateway.stop()
@@ -175,6 +202,7 @@ def main():
 
     # Khi người dùng chọn Thoát từ khay hệ thống, mainloop kết thúc:
     logger.info("Main loop đã kết thúc, tiến hành dọn dẹp các dịch vụ...")
+    discovery.stop()
     telemetry.stop()
     transcoder.stop()
     ai_gateway.stop()

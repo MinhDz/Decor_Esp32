@@ -2523,7 +2523,7 @@
     <!-- Panel Cấu Hình AI Đa Nền Tảng (Gemini / DeepSeek / XiaoZhi) -->
     <div id="panel-ai-config" class="designer-panel" style="display: none; margin-bottom: 14px;">
       <div class="designer-title">
-        <span>⚙️ Thiết Lập Trợ Lý AI Đa Nền Tảng (Gemini / DeepSeek / XiaoZhi)</span>
+        <span>⚙️ Thiết Lập Trợ Lý AI Đa Nền Tảng (Gemini / DeepSeek / Local PC)</span>
         <button class="btn-secondary" style="padding:4px 10px; font-size:0.75rem;" onclick="toggleAIConfigPanel()">Đóng</button>
       </div>
 
@@ -2574,6 +2574,20 @@
             <option value="vi-VN-NamMinhNeural">Nam Minh (Nam miền Bắc trầm ấm)</option>
             <option value="vi-google">Chị Google (Nữ miền Bắc chuẩn - Google TTS)</option>
           </select>
+        </div>
+
+        <div class="form-group">
+          <label>🤖 Đặt Tên Cho Trợ Lý AI Trên Trạm:</label>
+          <input type="text" id="ai-cfg-name" value="XiaoZhi" placeholder="ví dụ: Jarvis, Gome, Na, XiaoZhi...">
+          <span style="font-size:0.71rem; color:#94a3b8; display:block; margin-top:3px;">Tên hiển thị trên màn hình trạm và cách AI tự xưng khi trò chuyện.</span>
+        </div>
+        <div class="form-group">
+          <label>🎙️ Câu Nói Đánh Thức AI (Từ Màn Hình Chờ / AOD):</label>
+          <input type="text" id="ai-cfg-wake-word" value="XiaoZhi ơi" placeholder="ví dụ: Jarvis ơi, Gome ơi, XiaoZhi ơi...">
+          <label style="display:flex; align-items:center; gap:6px; font-size:0.73rem; color:#10b981; margin-top:4px; cursor:pointer;">
+            <input type="checkbox" id="ai-cfg-voice-wake" checked>
+            <span>Tự động đánh thức trạm từ Always On Display chuyển thẳng sang Trò chuyện AI</span>
+          </label>
         </div>
 
         <!-- KHỐI NHẬP KHÓA API KEY CỦA CÁC MÔ HÌNH AI -->
@@ -3054,16 +3068,16 @@
         <div class="chat-header-left">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-weight: 700; color: #38bdf8; font-size: 0.9rem;">🤖 Trợ Lý AI Trạm Decor</span>
-            <span id="chat-status-badge" class="chat-status-tag sim">⚡ Chế Độ Mô Phỏng</span>
+            <span id="chat-status-badge" class="chat-status-tag online">🟢 Sẵn Sàng</span>
           </div>
 
-          <!-- Chuyển đổi chế độ: Mô Phỏng Thông Minh <---> XiaoZhi Cloud AI -->
+          <!-- Chuyển đổi chế độ: Mô Phỏng Thông Minh <---> Trợ Lý AI Trực Tiếp -->
           <div class="ai-mode-toggle-group">
-            <button id="btn-mode-sim" class="ai-mode-btn active sim" onclick="setAIMode('sim')" title="Chế độ Giả lập Offline với kịch bản phản hồi nhanh">
+            <button id="btn-mode-sim" class="ai-mode-btn" onclick="setAIMode('sim')" title="Chế độ Giả lập Offline với kịch bản phản hồi nhanh">
               ⚡ Mô Phỏng
             </button>
-            <button id="btn-mode-cloud" class="ai-mode-btn" onclick="setAIMode('cloud')" title="Kết nối trực tiếp tới XiaoZhi Cloud AI qua WebSocket">
-              🌐 XiaoZhi Cloud
+            <button id="btn-mode-cloud" class="ai-mode-btn active cloud" onclick="setAIMode('cloud')" title="Kết nối trực tiếp tới Trợ Lý AI / PC Gateway qua WebSocket">
+              🌐 Trợ Lý AI (Online)
             </button>
           </div>
         </div>
@@ -3442,10 +3456,10 @@
   let compressedBlobToUpload = null;
   const MAX_IMAGES = 15;
 
-  // XiaoZhi AI WebSocket state & Mode
+  // Trợ Lý AI WebSocket state & Mode
   let xiaoZhiSocket = null;
   let isXiaoZhiConnected = false;
-  let currentAIMode = 'sim'; // 'sim' (Mô phỏng) hoặc 'cloud' (XiaoZhi Cloud AI trực tiếp)
+  let currentAIMode = 'cloud'; // 'cloud' (Trợ Lý AI trực tiếp / PC Gateway) hoặc 'sim' (Mô phỏng offline)
   let xiaoZhiPingTimer = null;
   let lastPingTime = 0;
   let xiaoZhiReconnectTimer = null;
@@ -4925,6 +4939,15 @@
         if (document.getElementById('ai-cfg-pc-voice') && aiConfig.tts_voice) {
           document.getElementById('ai-cfg-pc-voice').value = aiConfig.tts_voice;
         }
+        if (document.getElementById('ai-cfg-name')) {
+          document.getElementById('ai-cfg-name').value = aiConfig.ai_name || 'XiaoZhi';
+        }
+        if (document.getElementById('ai-cfg-wake-word')) {
+          document.getElementById('ai-cfg-wake-word').value = aiConfig.wake_word || ((aiConfig.ai_name || 'XiaoZhi') + ' ơi');
+        }
+        if (document.getElementById('ai-cfg-voice-wake')) {
+          document.getElementById('ai-cfg-voice-wake').checked = (aiConfig.voice_wake_enabled !== false);
+        }
         if (document.getElementById('ai-cfg-gemini-key') && aiConfig.gemini_api_key) {
           document.getElementById('ai-cfg-gemini-key').value = aiConfig.gemini_api_key;
         }
@@ -4983,6 +5006,9 @@
     aiConfig.pc_gateway_port = parseInt(document.getElementById('ai-cfg-pc-port').value.trim()) || 8765;
     aiConfig.ai_model = document.getElementById('ai-cfg-pc-model').value;
     aiConfig.tts_voice = document.getElementById('ai-cfg-pc-voice').value;
+    aiConfig.ai_name = (document.getElementById('ai-cfg-name') ? document.getElementById('ai-cfg-name').value.trim() : "") || "XiaoZhi";
+    aiConfig.wake_word = (document.getElementById('ai-cfg-wake-word') ? document.getElementById('ai-cfg-wake-word').value.trim() : "") || (aiConfig.ai_name + " ơi");
+    aiConfig.voice_wake_enabled = document.getElementById('ai-cfg-voice-wake') ? document.getElementById('ai-cfg-voice-wake').checked : true;
     aiConfig.gemini_api_key = (document.getElementById('ai-cfg-gemini-key') ? document.getElementById('ai-cfg-gemini-key').value.trim() : "");
     aiConfig.openai_api_key = (document.getElementById('ai-cfg-deepseek-key') ? document.getElementById('ai-cfg-deepseek-key').value.trim() : "");
     aiConfig.openai_base_url = (document.getElementById('ai-cfg-deepseek-base') ? document.getElementById('ai-cfg-deepseek-base').value.trim() : "https://api.deepseek.com");
@@ -5024,7 +5050,10 @@
             openai_api_key: aiConfig.openai_api_key,
             openai_base_url: aiConfig.openai_base_url,
             openai_model: aiConfig.ai_model,
-            ai_gateway_voice: aiConfig.tts_voice
+            ai_gateway_voice: aiConfig.tts_voice,
+            ai_name: aiConfig.ai_name,
+            wake_word: aiConfig.wake_word,
+            voice_wake_enabled: aiConfig.voice_wake_enabled
           }),
           signal: AbortSignal.timeout(3000)
         });
@@ -5072,19 +5101,19 @@
 
     if (status === 'online') {
       badge.className = 'chat-status-tag online';
-      badge.innerHTML = `🟢 Cloud Online ${latency !== null ? `<span class="ping-indicator">(${latency}ms)</span>` : ''}`;
+      badge.innerHTML = `🟢 Trợ Lý AI Online ${latency !== null ? `<span class="ping-indicator">(${latency}ms)</span>` : ''}`;
     } else if (status === 'connecting') {
       badge.className = 'chat-status-tag';
-      badge.innerHTML = '🟡 Đang Kết Nối XiaoZhi...';
+      badge.innerHTML = '🟡 Đang Kết Nối Trợ Lý AI...';
     } else if (status === 'reconnecting') {
       badge.className = 'chat-status-tag';
       badge.innerHTML = '🔄 Đang Kết Nối Lại... (5s)';
     } else if (status === 'error') {
       badge.className = 'chat-status-tag error';
-      badge.innerHTML = '🔴 Lỗi Kết Nối Cloud';
+      badge.innerHTML = '🔴 Lỗi Kết Nối AI';
     } else {
-      badge.className = 'chat-status-tag sim';
-      badge.innerHTML = '⚡ Chế Độ Mô Phỏng';
+      badge.className = 'chat-status-tag online';
+      badge.innerHTML = '🟢 Trợ Lý AI Sẵn Sàng';
     }
   }
 
@@ -5590,7 +5619,7 @@
             removeTypingIndicator();
             const reply = data.text || data.delta || "";
             if (reply) {
-              appendBotMessage(reply, data.emotion || 'XiaoZhi AI');
+              appendBotMessage(reply, data.emotion || 'Trợ Lý AI');
               if (data.emotion) syncEmojiWithEmotion(data.emotion);
             }
           }
@@ -5646,7 +5675,7 @@
   }
 
   // Cập nhật khung phụ đề 2-3 dòng chữ ở phần dưới của Màn hình Biểu Cảm & đồng bộ sang ESP32 ST7789
-  function updateScreenSubtitle(text, sender = "XIAOZHI AI", badgeColor = "#38bdf8", pushToEsp = true) {
+  function updateScreenSubtitle(text, sender = "TRỢ LÝ AI", badgeColor = "#38bdf8", pushToEsp = true) {
     if (pushToEsp) {
       const cleanSub = removeVietnameseAccents(text);
       if (cleanSub) syncScreenToEsp({ subtitle: cleanSub });
@@ -5707,7 +5736,7 @@
     scrollChatToBottom();
 
     // Cập nhật phụ đề 2-3 dòng chữ phản hồi của XiaoZhi lên màn hình ảo
-    updateScreenSubtitle(text, "XIAOZHI AI", "#38bdf8");
+    updateScreenSubtitle(text, "TRỢ LÝ AI", "#38bdf8");
 
     // Hiển thị ngắn lên slogan màn hình demo
     const slogan = document.getElementById('demo-slogan');
@@ -5734,7 +5763,7 @@
     scrollChatToBottom();
 
     // Hiển thị trạng thái đang xử lý lên màn hình
-    updateScreenSubtitle("Đang lắng nghe và xử lý phản hồi...", "XIAOZHI AI", "#f59e0b");
+    updateScreenSubtitle("Đang lắng nghe và xử lý phản hồi...", "TRỢ LÝ AI", "#f59e0b");
   }
 
   function removeTypingIndicator() {
@@ -5789,7 +5818,7 @@
       } else {
         setTimeout(() => {
           removeTypingIndicator();
-          appendBotMessage("⚠️ Hiện tại chưa kết nối được với XiaoZhi Cloud WebSocket. Đang thử kết nối lại... (Bạn có thể bấm nút '⚡ Mô Phỏng' ở trên để trò chuyện giả lập ngay nhé!)", "Cảnh báo");
+          appendBotMessage("⚠️ Hiện tại chưa kết nối được với Trợ Lý AI. Đang thử kết nối lại... (Bạn có thể bấm nút '⚡ Mô Phỏng' ở trên để trò chuyện giả lập ngay nhé!)", "Cảnh báo");
           connectXiaoZhiWebSocket();
         }, 600);
       }
@@ -5878,7 +5907,7 @@
       let emotionBadge = "✨ Biểu cảm";
 
       if (state === 'angry') {
-        reply = "Grừ grừ... Mắt đỏ rực lửa rồi! Ai làm cho XiaoZhi tức giận thế này? 😡";
+        reply = "Grừ grừ... Mắt đỏ rực lửa rồi! Ai làm cho Trợ lý AI tức giận thế này? 😡";
         emotionBadge = "😡 Giận dữ";
       } else if (state === 'confused') {
         reply = "@@ Đầu óc mình đang quay mòng mòng vì bối rối quá nè! 😵";
@@ -5902,7 +5931,7 @@
         reply = "Hihi, hôm nay tâm trạng vui phơi phới! Nụ cười rạng rỡ đã hiện lên màn hình rồi nhé! 😄";
         emotionBadge = "😄 Vui vẻ";
       } else if (state === 'listen') {
-        reply = "XiaoZhi đang chăm chú lắng nghe giọng nói của bạn đây. Hãy nói câu lệnh tiếp theo nhé! 🎙️";
+        reply = "Trợ lý AI đang chăm chú lắng nghe giọng nói của bạn đây. Hãy nói câu lệnh tiếp theo nhé! 🎙️";
         emotionBadge = "🎙️ Lắng nghe";
       } else {
         reply = "Đã trở về trạng thái mặt cười bình thường thân thiện mặc định rồi bạn nhé! 😊";
@@ -5913,7 +5942,7 @@
     }, 450);
   }
 
-  // Điều khiển Micro và Trò chuyện XiaoZhi AI thực tế
+  // Điều khiển Micro và Trò chuyện Trợ Lý AI thực tế
   let xzCurVol = 80;
   let xzLastState = "";
 
@@ -5922,7 +5951,7 @@
     const hint = document.getElementById('xz-mic-sub-hint');
     if (btn) {
       if (xzLastState === 'listening') {
-        hint.innerText = "Đang gửi âm thanh tới XiaoZhi...";
+        hint.innerText = "Đang gửi âm thanh tới Trợ lý AI...";
       } else {
         btn.className = 'xz-mic-button listening';
         hint.innerText = "🎙️ Đang mở Micro trên ESP32... Hãy nói!";
@@ -6115,7 +6144,7 @@
         setScreenMode('emoji');
         setEmojiState('happy', true, true);
       } else if (lower.includes("lắng nghe") || lower.includes("nghe") || lower.includes("listen")) {
-        reply = "XiaoZhi đang chăm chú lắng nghe giọng nói của bạn đây! Sóng âm đang thu nhận tín hiệu... 🎙️";
+        reply = "Trợ lý AI đang chăm chú lắng nghe giọng nói của bạn đây! Sóng âm đang thu nhận tín hiệu... 🎙️";
         emotion = "🎙️ Lắng nghe";
         setScreenMode('emoji');
         setEmojiState('listen', true, true);
@@ -6208,15 +6237,15 @@
         emotion = "😂 Hài hước";
         setEmojiState('happy', true, true);
       } else if (lower.includes("giới thiệu") || lower.includes("decor")) {
-        reply = "Chào bạn! Đây là Trạm Decor Vũ Trụ DIY sử dụng ESP32-S3 N16R8 và màn hình LCD 240x320 đứng dọc. Thiết bị có thể hiển thị đồng hồ Standby, thông số PC HUD, biểu cảm tương tác XiaoZhi và kết nối thông minh qua Wi-Fi!";
+        reply = "Chào bạn! Đây là Trạm Decor Vũ Trụ DIY sử dụng ESP32-S3 N16R8 và màn hình LCD 240x320 đứng dọc. Thiết bị có thể hiển thị đồng hồ Standby, thông số PC HUD, biểu cảm tương tác Trợ Lý AI và kết nối thông minh qua Wi-Fi!";
         emotion = "🚀 Tự hào";
         setEmojiState('happy', true, true);
       } else if (lower.includes("xin chào") || lower.includes("hello") || lower.includes("hi")) {
-        reply = "Chào bạn! Mình là XiaoZhi. Rất vui được gặp bạn tại Trạm Decor Vũ Trụ. Bạn có thể bấm các biểu cảm mẫu hoặc ra lệnh cho mình bất cứ lúc nào! ✨";
+        reply = "Chào bạn! Mình là Trợ Lý AI. Rất vui được gặp bạn tại Trạm Decor Vũ Trụ. Bạn có thể bấm các biểu cảm mẫu hoặc ra lệnh cho mình bất cứ lúc nào! ✨";
         emotion = "👋 Thân thiện";
         setEmojiState('happy', true, true);
       } else {
-        reply = `Mình đã nhận được câu hỏi: "${userText}". XiaoZhi đang xử lý và phản hồi ngay trên giao diện chat này nhé! Khi bạn nhập Token trong Cài Đặt ⚙️, mình sẽ kết nối trực tiếp với XiaoZhi Cloud AI!`;
+        reply = `Mình đã nhận được câu hỏi: "${userText}". Trợ lý AI đang xử lý và phản hồi ngay trên giao diện chat này nhé!`;
         emotion = "💡 Trợ lý AI";
         setEmojiState('speak', true, true);
         setTimeout(() => { setEmojiState('idle', true, true); }, 1200);
@@ -8295,7 +8324,7 @@
     { cmd: "status mem", display: "status mem", type: "MOD", badge: "badge-mod", desc: "Bộ nhớ RAM: Heap tự do, PSRAM 8MB, chế độ dọn rác nghiêm ngặt", syntax: "status mem" },
     { cmd: "status motor", display: "status motor", type: "MOD", badge: "badge-mod", desc: "Động cơ cối xay gió: Tốc độ %, chế độ quay, chân cầu H L298N", syntax: "status motor" },
     { cmd: "status led", display: "status led", type: "MOD", badge: "badge-mod", desc: "Hệ thống đèn: Bóng Edison trái/phải, dải LED COB nước chảy", syntax: "status led" },
-    { cmd: "status xiaozhi", display: "status xiaozhi", type: "MOD", badge: "badge-mod", desc: "Trợ lý ảo XiaoZhi AI: Kết nối WebSocket, hội thoại giọng nói", syntax: "status xiaozhi" },
+    { cmd: "status xiaozhi", display: "status xiaozhi", type: "MOD", badge: "badge-mod", desc: "Trợ lý ảo Trợ Lý AI: Kết nối WebSocket, hội thoại giọng nói", syntax: "status xiaozhi" },
     { cmd: "status display", display: "status display", type: "MOD", badge: "badge-mod", desc: "Màn hình ST7789: Chế độ hiển thị 0-19, độ sáng đèn nền", syntax: "status display" },
     { cmd: "status sys", display: "status sys", type: "MOD", badge: "badge-mod", desc: "Thông số ESP32-S3: Core rev, CPU 240MHz, bản phân vùng, Uptime", syntax: "status sys" },
     { cmd: "status profiler", display: "status profiler", type: "MOD", badge: "badge-mod", desc: "Giám sát hiệu năng: FPS, thời gian chu kỳ (µs), tác vụ CPU", syntax: "status profiler" },
@@ -9994,7 +10023,7 @@
     const badge = document.getElementById('chat-status-badge');
     if (badge) {
       badge.className = 'chat-status-tag cloud';
-      badge.innerText = '🌐 XiaoZhi Hub Trực Tiếp';
+      badge.innerText = '🟢 PC AI Gateway Online';
     }
     const modeToggle = document.querySelector('#tab-chat .ai-mode-toggle-group');
     if (modeToggle) modeToggle.style.display = 'none';
@@ -10005,7 +10034,7 @@
     const hint = document.getElementById('xz-mic-sub-hint');
     if (btn) {
       if (xzLastState === 'listening') {
-        hint.innerText = "Đang gửi âm thanh tới XiaoZhi...";
+        hint.innerText = "Đang gửi âm thanh tới Trợ lý AI...";
       } else {
         btn.className = 'xz-mic-button listening';
         hint.innerText = "🎙️ Đang mở Micro trên ESP32... Hãy nói!";
@@ -10181,7 +10210,7 @@
       el.innerHTML = `
         <div class="chat-avatar">🤖</div>
         <div class="chat-bubble">
-          <div style="font-size:0.75rem; color:#a5b4fc; margin-bottom:4px;">XiaoZhi đang suy nghĩ...</div>
+          <div style="font-size:0.75rem; color:#a5b4fc; margin-bottom:4px;">Trợ lý AI đang suy nghĩ...</div>
           <div class="typing-dots">
             <div class="typing-dot"></div>
             <div class="typing-dot"></div>
@@ -10224,6 +10253,27 @@
     if (btn) btn.className = 'xz-mic-button ' + state;
     if (statusIcon) statusIcon.className = 'status-dot ' + state;
 
+    const chatBadge = document.getElementById('chat-status-badge');
+    if (chatBadge) {
+      if (data.ai_backend === 1) {
+        if (data.ws_connected) {
+          chatBadge.className = 'chat-status-tag online';
+          chatBadge.innerHTML = '🟢 PC AI Gateway Online';
+        } else {
+          chatBadge.className = 'chat-status-tag error';
+          chatBadge.innerHTML = '🔴 Chưa kết nối PC Gateway';
+        }
+      } else {
+        if (data.ws_connected) {
+          chatBadge.className = 'chat-status-tag online';
+          chatBadge.innerHTML = '🟢 Cloud AI Online';
+        } else {
+          chatBadge.className = 'chat-status-tag';
+          chatBadge.innerHTML = '🟡 Chờ kết nối Cloud';
+        }
+      }
+    }
+
     if (state === 'listening') {
       if (statusText) statusText.innerText = 'ĐANG LẮNG NGHE...';
       if (hint) hint.innerText = '🎙️ Micro đang thu âm... Hãy nói câu hỏi vào thiết bị!';
@@ -10232,12 +10282,12 @@
       if (vuVal) vuVal.innerText = mic + '%';
     } else if (state === 'thinking') {
       if (statusText) statusText.innerText = 'ĐANG XỬ LÝ...';
-      if (hint) hint.innerText = '⏳ XiaoZhi đang suy nghĩ câu trả lời...';
+      if (hint) hint.innerText = '⏳ Trợ lý AI đang suy nghĩ câu trả lời...';
       if (vuBox) vuBox.style.display = 'none';
       showTypingDot();
     } else if (state === 'replying') {
       if (statusText) statusText.innerText = 'ĐANG PHÁT ÂM THANH';
-      if (hint) hint.innerText = '🔊 XiaoZhi đang trả lời qua loa...';
+      if (hint) hint.innerText = '🔊 Trợ lý AI đang trả lời qua loa...';
       if (vuBox) vuBox.style.display = 'none';
       removeTypingDot();
     } else if (state === 'binding') {
@@ -11659,7 +11709,7 @@
               <option value="9">9: Thở đối xứng lệch pha (Dual Breath)</option>
               <option value="10">10: Dòng năng lượng sạc (Power Flow)</option>
               <option value="11">11: Nhịp nhạc VU Meter (Stereo Spectrum)</option>
-              <option value="12">12: Giọng nói AI (XiaoZhi Voice Reactive)</option>
+              <option value="12">12: Giọng nói AI (AI Voice Reactive)</option>
               <option value="13">13: Tự động thông minh (Smart Fusion)</option>
             </select>
             <div class="decor-slider-row">
@@ -11689,7 +11739,7 @@
               <option value="9">9: Thở đối xứng lệch pha (Dual Breath)</option>
               <option value="10">10: Dòng năng lượng sạc (Power Flow)</option>
               <option value="11">11: Nhịp nhạc VU Meter (Stereo Spectrum)</option>
-              <option value="12">12: Giọng nói AI (XiaoZhi Voice Reactive)</option>
+              <option value="12">12: Giọng nói AI (AI Voice Reactive)</option>
               <option value="13">13: Tự động thông minh (Smart Fusion)</option>
             </select>
             <div class="decor-slider-row">
@@ -12468,7 +12518,7 @@
     { id: 2,  title: "Máy tính",  icon: "📊", desc: "3. Giám sát Hiệu năng Máy tính (PC)", mode: "pchud" },
     { id: 3,  title: "Thư viện",  icon: "🌄", desc: "4. Bộ sưu tập Hình ảnh & Ảnh nền", tab: "images" },
     { id: 4,  title: "Bộ nhớ",    icon: "📁", desc: "5. Quản lý Tệp tin & Bộ nhớ lưu trữ", tab: "images" },
-    { id: 5,  title: "Trợ lý AI", icon: "🤖", desc: "6. Trò chuyện Giọng nói XiaoZhi AI", tab: "chat" },
+    { id: 5,  title: "Trợ lý AI", icon: "🤖", desc: "6. Trò chuyện Giọng nói Trợ Lý AI", tab: "chat" },
     { id: 6,  title: "Âm nhạc",   icon: "🎵", desc: "7. Trình phát Âm nhạc & Sóng nhạc", tab: "music" },
     { id: 7,  title: "Đồng hồ",   icon: "⏰", desc: "8. Đồng hồ: Báo thức, Bấm giờ & Hẹn giờ", mode: "clock" },
     { id: 8,  title: "Lịch",      icon: "📅", desc: "9. Lịch Vạn Niên & Tra cứu Ngày tháng", mode: "calendar" },
@@ -12600,14 +12650,14 @@
                 </div>
               </div>
 
-              <!-- Mode 1 / 11: XiaoZhi AI -->
+              <!-- Mode 1 / 11: Trợ Lý AI -->
               <div class="sim-view" id="sim-view-xiaozhi" style="display:none;">
                 <div class="sim-eyes-stage">
                   <div class="sim-eye left"></div>
                   <div class="sim-eye right"></div>
                 </div>
                 <div class="sim-sub-box">
-                  <div class="sim-sub-sender">🤖 TRỢ LÝ XIAOZHI AI</div>
+                  <div class="sim-sub-sender">🤖 TRỢ LÝ AI</div>
                   <div class="sim-sub-content" id="sim-sub-content">Xin chào! Hãy trò chuyện cùng mình nhé.</div>
                 </div>
               </div>

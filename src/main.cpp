@@ -17,6 +17,7 @@
 #include "TimeManager.h"
 #include "MemoryScavenger.h"
 #include "services/PowerManagementService.h"
+#include "manager/DiscoveryManager.h"
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
@@ -29,6 +30,7 @@ static void networkServerTask(void* pvParameters) {
     WifiManager::loop();
     WebRoutes::handleClient();
     XiaoZhiClient::loopWebSocket();
+    DiscoveryManager::loop();
     vTaskDelay(pdMS_TO_TICKS(2)); // Nhường nhịp 2ms cho LwIP và Wi-Fi task trên Core 0
   }
 }
@@ -92,6 +94,9 @@ void setup() {
 
   // 4. Khởi tạo Web Server & Toàn bộ REST APIs đồng bộ thời gian thực với Web UI
   WebRoutes::begin();
+
+  // 4A. Khởi tạo UDP Discovery Service (Cổng 8767 tự đồng bộ IP PC Companion)
+  DiscoveryManager::init();
 
   // 4B. Tách toàn bộ Web Server, DNS Captive Portal & WebSocket sang Core 0 (Đề xuất 1)
   // Giải phóng Core 1 chuyên cho UI SpaceOS, Render ST7789 và Giải mã Video

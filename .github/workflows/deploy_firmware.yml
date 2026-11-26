@@ -4,9 +4,15 @@ on:
   push:
     branches:
       - main
+    paths-ignore:
+      - 'release/**'
+      - '**.md'
     tags:
       - 'v*'
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -16,33 +22,101 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
-          cache: 'pip'
+          python-version: '3.11'
+
+      - name: Cache PlatformIO
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.platformio
+            .pio/libdeps
+          key: ${{ runner.os }}-pio-${{ hashFiles('platformio.ini') }}
+          restore-keys: |
+            ${{ runner.os }}-pio-
 
       - name: Install PlatformIO
         run: |
           python -m pip install --upgrade pip
-          pip install platformio
+          pip install -U platformio
 
       - name: Build Firmware
         run: |
           pio run -e esp32-s3-devkitc-1
 
-      - name: Copy Firmware Binary to Release Directory
+      - name: Update Release Binary & OTA Manifest (version.json)
         run: |
           mkdir -p release
           cp .pio/build/esp32-s3-devkitc-1/firmware.bin release/firmware.bin
           ls -lh release/
+          python3 - << 'EOF'
+          import json, os, re, subprocess
+          from datetime import datetime
+
+          with open('include/OtaManager.h', 'r', encoding='utf-8') as f:
+              content = f.read()
+          m = re.search(r'#define\s+FIRMWARE_VERSION\s+"([^"]+)"', content)
+          fw_version = m.group(1) if m else "v3.3.9"
+
+          bin_size = os.path.getsize('release/firmware.bin')
+          build_date = datetime.utcnow().strftime('%Y-%m-%d')
+
+          try:
+              commit_msg = subprocess.check_output(['git', 'log', '-1', '--pretty=%B']).decode('utf-8').strip()
+          except Exception:
+              commit_msg = f"Space OS {fw_version} Automated Cloud OTA Build"
+
+          version_path = 'release/version.json'
+          data = {}
+          if os.path.exists(version_path):
+              try:
+                  with open(version_path, 'r', encoding='utf-8') as f:
+                      data = json.load(f)
+              except Exception:
+                  data = {}
+
+          old_ver = data.get("version", "")
+          data["version"] = fw_version
+          data["name"] = "Space OS"
+          data["build_date"] = build_date
+          data["bin_url"] = "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin"
+          data["release_url"] = f"https://github.com/MinhDz/Decor_Esp32/releases/download/{fw_version}/firmware.bin"
+          data["size"] = bin_size
+          if old_ver != fw_version or not data.get("changelog"):
+              data["changelog"] = f"🚀 Space OS {fw_version} ({build_date}):\n- {commit_msg}"
+
+          with open(version_path, 'w', encoding='utf-8') as f:
+              json.dump(data, f, ensure_ascii=False, indent=2)
+              f.write('\n')
+          print(f"Updated version.json -> version={fw_version}, size={bin_size} bytes")
+          EOF
+
+      - name: Commit & Push OTA Firmware to main branch
+        if: github.ref == 'refs/heads/main'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add release/firmware.bin release/version.json
+          if ! git diff --cached --quiet; then
+            git commit -m "chore(ota): auto-deploy firmware.bin and version.json [skip ci]"
+            git pull --rebase origin main
+            git push origin HEAD:main
+          else
+            echo "No changes in release artifacts to commit."
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: space-os-firmware
-          path: release/firmware.bin
+          path: |
+            release/firmware.bin
+            release/version.json
 
       - name: Create GitHub Release (on tag)
         if: startsWith(github.ref, 'refs/tags/v')

@@ -12,5 +12,7 @@ namespace ApiXiaoZhi {
   void handleXiaoZhiUnbind(WebServer& server);
   void handleXiaoZhiChatStatus(WebServer& server);
   void handleXiaoZhiAction(WebServer& server);
+  void handleMcpToolsList(WebServer& server);
+  void handleMcpToolCall(WebServer& server);
 }
 

@@ -623,22 +623,10 @@ namespace AudioDriver {
       int frames = bytesRead / (2 * sizeof(int32_t));
       if (frames <= 0) continue;
 
-      // 1. Tự động kiểm tra kênh: INMP441 chuẩn là Kênh 0 (LEFT, L/R=GND).
-      // Chỉ chuyển sang Kênh 1 (RIGHT) nếu phát hiện Kênh 1 có tín hiệu thực sự vượt trội.
-      if (lockedChannel == 0) {
-        int32_t pk0 = 0, pk1 = 0;
-        for (int k = 0; k < frames; k++) {
-          int32_t v0 = abs(s_micTaskRaw[k * 2] >> 8);
-          int32_t v1 = abs(s_micTaskRaw[k * 2 + 1] >> 8);
-          if (v0 > pk0) pk0 = v0;
-          if (v1 > pk1) pk1 = v1;
-        }
-        if (pk1 > 3000 && pk1 > pk0 * 3) {
-          lockedChannel = 1;
-          Serial.printf("🎙️ [MIC TASK LOCK] Kênh RIGHT có tín hiệu mạnh hơn (pk0=%ld, pk1=%ld) -> Khóa Kênh 1\n", (long)pk0, (long)pk1);
-        }
-      }
-      const int chIdx = lockedChannel;
+      // 1. Khóa cố định Kênh 0 (LEFT, L/R=GND) của Micro INMP441
+      // Phần cứng chỉ có 1 mic với chân L/R nối đất, Kênh 1 (Right) là chân hở High-Z
+      lockedChannel = 0;
+      const int chIdx = 0;
 
       float blockSumSq = 0.0f;
       int32_t blockPeak = 0;
@@ -693,13 +681,13 @@ namespace AudioDriver {
 
         for (int i = 0; i < 48; i++) {
           int idx = (i * frames) / 48;
-          int32_t val = (idx < frames) ? ((s_micTaskRaw[idx * 2 + lockedChannel] >> 8) - (int32_t)dcPrevX) : 0;
+          int32_t val = (idx < frames) ? ((s_micTaskRaw[idx * 2] >> 8) - (int32_t)dcPrevX) : 0;
           int scaled = val / 25000;
           waveformBuf[i] = (int8_t)constrain(scaled, -28, 28);
         }
 
         lastMicPeak = blockPeak;
-        activeChannelStr = (lockedChannel == 0) ? "LEFT CH (L/R=GND) LOCKED" : "RIGHT CH (L/R=3V3) LOCKED";
+        activeChannelStr = "LEFT (L/R=GND)";
       }
     }
 
@@ -803,9 +791,9 @@ namespace AudioDriver {
           int32_t a = abs(pcmRecBuffer[k]);
           if (a > maxAmp) maxAmp = a;
         }
-        if (maxAmp > 200 && maxAmp < 24000) {
+        if (maxAmp > 600 && maxAmp < 24000) {
           float normGain = 26000.0f / (float)maxAmp;
-          if (normGain > 4.0f) normGain = 4.0f;
+          if (normGain > 4.0f) normGain = 2.2f;
           for (size_t k = 0; k < pcmRecSampleCount; k++) {
             int32_t val = (int32_t)(pcmRecBuffer[k] * normGain);
             pcmRecBuffer[k] = (int16_t)constrain(val, -31500, 31500);
@@ -855,18 +843,7 @@ namespace AudioDriver {
       int frames = bytesRead / (2 * sizeof(int32_t));
       if (frames <= 0) continue;
 
-      if (lockedChannel == 0) {
-        int32_t pk0 = 0, pk1 = 0;
-        for (int k = 0; k < frames; k++) {
-          int32_t v0 = abs(stereoRaw[k * 2] >> 8);
-          int32_t v1 = abs(stereoRaw[k * 2 + 1] >> 8);
-          if (v0 > pk0) pk0 = v0;
-          if (v1 > pk1) pk1 = v1;
-        }
-        if (pk1 > 3000 && pk1 > pk0 * 3) {
-          lockedChannel = 1;
-        }
-      }
+      lockedChannel = 0;
       const int chIdx = 0;
 
       float blockSumSq = 0.0f;
@@ -920,13 +897,13 @@ namespace AudioDriver {
 
       for (int i = 0; i < 48; i++) {
         int idx = (i * lastFrames) / 48;
-        int32_t val = (idx < lastFrames) ? ((stereoRaw[idx * 2 + lockedChannel] >> 8) - (int32_t)dcPrevX) : 0;
+        int32_t val = (idx < lastFrames) ? ((stereoRaw[idx * 2] >> 8) - (int32_t)dcPrevX) : 0;
         int scaled = val / 25000;
         waveformBuf[i] = (int8_t)constrain(scaled, -28, 28);
       }
 
       lastMicPeak = lastBlockPeak;
-      activeChannelStr = (lockedChannel == 0) ? "LEFT CH (L/R=GND) LOCKED" : "RIGHT CH (L/R=3V3) LOCKED";
+      activeChannelStr = "LEFT (L/R=GND)";
     }
 
     if (pcmRecSampleCount >= pcmRecAllocatedSamples) {
@@ -936,7 +913,7 @@ namespace AudioDriver {
   void loop() {
     // 1. Quản lý tiết kiệm điện Mic INMP441
     if (voiceRecordingActive) {
-      resumeMic();
+      //resumeMic();
       pollVoiceRecording();
       return;
     }
@@ -1143,8 +1120,13 @@ namespace AudioDriver {
       Serial.println("⚠️ [SD WAV] Khong co du lieu thu am de luu!");
       return false;
     }
-    if (!TestSDCard::isMounted()) {
+    if (!TestSDCard::isMounted() || !StorageDriver::isHealthy()) {
       Serial.println("⚠️ [SD WAV] The nho SD chua duoc Mount!");
+      return false;
+    }
+
+    if (!StorageDriver::lock(pdMS_TO_TICKS(1000))) {
+      Serial.println("⚠️ [SD WAV] The SD dang ban, khong the khoa bus!");
       return false;
     }
 
@@ -1159,6 +1141,7 @@ namespace AudioDriver {
 
     File f = SD.open(filepath, FILE_WRITE);
     if (!f) {
+      StorageDriver::unlock();
       Serial.printf("❌ [SD WAV] Khong mo duoc %s (Kiem tra the nho SD)!\n", filepath);
       return false;
     }
@@ -1200,6 +1183,7 @@ namespace AudioDriver {
     f.write(header, 44);
     f.write((const uint8_t*)pcmRecBuffer, dataBytes);
     f.close();
+    StorageDriver::unlock();
 
     Serial.printf("💾 [SD WAV] Da luu ban thu am thanh cong vao SD: %s (%u mau, %u bytes)!\n",
                   filepath, (unsigned)pcmRecSampleCount, (unsigned)(dataBytes + 44));
@@ -1594,12 +1578,12 @@ namespace AudioDriver {
                     asyncSdFilePath.c_str(), (unsigned)f.size());
 
       // Cấp phát trong Octal PSRAM (nếu có) hoặc DRAM: 64KB đệm nạp trước (Pre-buffering 3-5 giây nhạc)
-      mp3dec_t* mp3d = (mp3dec_t*)malloc(sizeof(mp3dec_t));
+      mp3dec_t* mp3d = (mp3dec_t*)(psramFound() ? ps_malloc(sizeof(mp3dec_t)) : malloc(sizeof(mp3dec_t)));
       const int MP3_BUF_SIZE = 64 * 1024; // 64KB đệm nạp trước chống giật 100%
       uint8_t* mp3Buf = psramFound() ? (uint8_t*)ps_malloc(MP3_BUF_SIZE) : (uint8_t*)malloc(32768);
       const int effectiveBufSize = mp3Buf ? (psramFound() ? MP3_BUF_SIZE : 32768) : 0;
-      mp3d_sample_t* pcmOut = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
-      int16_t* stereoPcm = (int16_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t));
+      mp3d_sample_t* pcmOut = (mp3d_sample_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t)));
+      int16_t* stereoPcm = (int16_t*)(psramFound() ? ps_malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)) : malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * 2 * sizeof(int16_t)));
 
       if (mp3d && mp3Buf && pcmOut && stereoPcm) {
         mp3dec_init(mp3d);
@@ -1708,8 +1692,8 @@ namespace AudioDriver {
       currentSampleRate = wavSampleRate;
       i2s_set_sample_rates(I2S_PORT_SPK, currentSampleRate);
       const size_t WAV_CHUNK = 2048; // Nâng từ 512 lên 2048 mẫu (4096 bytes)
-      int16_t* chunk = (int16_t*)malloc(WAV_CHUNK * sizeof(int16_t));
-      int16_t* stereoChunk = (int16_t*)malloc(WAV_CHUNK * 2 * sizeof(int16_t));
+      int16_t* chunk = (int16_t*)(psramFound() ? ps_malloc(WAV_CHUNK * sizeof(int16_t)) : malloc(WAV_CHUNK * sizeof(int16_t)));
+      int16_t* stereoChunk = (int16_t*)(psramFound() ? ps_malloc(WAV_CHUNK * 2 * sizeof(int16_t)) : malloc(WAV_CHUNK * 2 * sizeof(int16_t)));
       size_t totalBytes = (f.size() > 44) ? (f.size() - 44) : 0;
       size_t bytesRead = 0;
 
@@ -2069,7 +2053,7 @@ namespace AudioDriver {
     xTaskCreatePinnedToCore(
       audioPwmTask,
       "AudioPwmTask",
-      16384,
+      5120,
       (void*)(uintptr_t)pin,
       2,
       &audioTaskHandle,
@@ -2084,7 +2068,7 @@ namespace AudioDriver {
     xTaskCreatePinnedToCore(
       audioPwmTask,
       "AudioPwmTask",
-      16384,
+      5120,
       (void*)(uintptr_t)pin,
       2,
       &audioTaskHandle,
@@ -2099,7 +2083,7 @@ namespace AudioDriver {
     xTaskCreatePinnedToCore(
       audioPwmTask,
       "AudioPwmTask",
-      16384,
+      5120,
       (void*)(uintptr_t)pin,
       2,
       &audioTaskHandle,

@@ -12,6 +12,7 @@
 #include <WiFiUdp.h>
 #include <esp_wifi.h>
 #include <DNSServer.h>
+#include <lwip/dns.h>
 #include <LittleFS.h>
 #include <Preferences.h>
 #include <vector>
@@ -251,6 +252,14 @@ bool WifiManager::smartConnect() {
       WiFi.setSleep(false);
       esp_wifi_set_ps(WIFI_PS_NONE);
       WiFi.setTxPower(WIFI_POWER_17dBm);
+
+      // Thiết lập Fallback DNS Google & Cloudflare chống lỗi DNS nhà mạng
+      ip_addr_t d1, d2;
+      IP_ADDR4(&d1, 8, 8, 8, 8);
+      IP_ADDR4(&d2, 1, 1, 1, 1);
+      dns_setserver(1, &d1);
+      dns_setserver(2, &d2);
+
       Serial.printf("✅ [Smart-WiFi] Kết nối THÀNH CÔNG tới '%s'! IP: %s (Ping 1-4ms)\n", target.ssid.c_str(), WiFi.localIP().toString().c_str());
       LOG_I("WIFI", "Ket noi THÀNH CONG toi '%s'! IP: %s, RSSI: %d dBm",
             target.ssid.c_str(), WiFi.localIP().toString().c_str(), WiFi.RSSI());
@@ -317,6 +326,14 @@ bool WifiManager::connectDirect(const String& ssid, const String& password, bool
     WiFi.setSleep(false);
     esp_wifi_set_ps(WIFI_PS_NONE);
     WiFi.setTxPower(WIFI_POWER_17dBm);
+
+    // Thiết lập Fallback DNS Google & Cloudflare chống lỗi DNS nhà mạng
+    ip_addr_t d1, d2;
+    IP_ADDR4(&d1, 8, 8, 8, 8);
+    IP_ADDR4(&d2, 1, 1, 1, 1);
+    dns_setserver(1, &d1);
+    dns_setserver(2, &d2);
+
     HardwareManager::setLedColor(0, 255, 120); // Xanh lá
     lastWifiNotification = "Đã kết nối: " + ssid + " (" + WiFi.localIP().toString() + ")";
     Serial.printf("✅ Đã kết nối thành công tới %s! IP: %s (Ping 1-4ms)\n", ssid.c_str(), WiFi.localIP().toString().c_str());

@@ -51,6 +51,10 @@ static String s_pcGatewayIp = "192.168.1.8";
 static int s_pcGatewayPort = 8765;
 static String s_aiModel = "gemini-flash-lite-latest";
 static String s_ttsVoice = "vi-VN-HoaiMyNeural";
+static String s_aiName = "XiaoZhi";
+static String s_wakeWord = "XiaoZhi ơi";
+static bool s_voiceWakeEnabled = true;
+static volatile bool s_voiceWakeTriggered = false;
 static bool s_aiConfigLoaded = false;
 
 static void loadAIConfigIfNeeded() {
@@ -67,6 +71,9 @@ static void loadAIConfigIfNeeded() {
       }
       if (doc["pc_gateway_ip"].is<const char*>()) {
         s_pcGatewayIp = doc["pc_gateway_ip"].as<String>();
+        if (s_pcGatewayIp == "192.168.1.238" || s_pcGatewayIp.length() == 0) {
+          s_pcGatewayIp = "192.168.1.8";
+        }
       }
       if (doc["pc_gateway_port"].is<int>()) {
         s_pcGatewayPort = doc["pc_gateway_port"].as<int>();
@@ -77,12 +84,25 @@ static void loadAIConfigIfNeeded() {
       if (doc["tts_voice"].is<const char*>()) {
         s_ttsVoice = doc["tts_voice"].as<String>();
       }
+      if (doc["ai_name"].is<const char*>()) {
+        String n = doc["ai_name"].as<String>();
+        n.trim();
+        if (n.length() > 0) s_aiName = n;
+      }
+      if (doc["wake_word"].is<const char*>()) {
+        String w = doc["wake_word"].as<String>();
+        w.trim();
+        if (w.length() > 0) s_wakeWord = w;
+      }
+      if (doc["voice_wake_enabled"].is<bool>()) {
+        s_voiceWakeEnabled = doc["voice_wake_enabled"].as<bool>();
+      }
     }
   }
 }
 
 static OpusDecoder* s_opusDecoder = nullptr;
-static int16_t s_pcmDecodeBuf[1920]; // Tối đa 120ms âm thanh @ 16000Hz Mono
+static int16_t* s_pcmDecodeBuf = nullptr; // Cấp phát trong PSRAM khi cần
 
 static void ensureOpusDecoder() {
   if (s_opusDecoder == nullptr) {
@@ -93,6 +113,9 @@ static void ensureOpusDecoder() {
     } else {
       Serial.printf("❌ [OPUS] Lỗi khởi tạo Opus Decoder (err=%d)\n", err);
     }
+  }
+  if (s_pcmDecodeBuf == nullptr) {
+    s_pcmDecodeBuf = psramFound() ? (int16_t*)ps_malloc(1920 * sizeof(int16_t)) : (int16_t*)malloc(1920 * sizeof(int16_t));
   }
 }
 
@@ -277,12 +300,15 @@ void XiaoZhiClient::getAIConfig(JsonDocument& doc) {
   }
   doc["uuid"] = getOrCreateDeviceUuid();
 
-  // Bổ sung cấu hình Backend PC Gateway
+  // Bổ sung cấu hình Backend PC Gateway & Cá nhân hóa tên AI / Wake Word
   doc["ai_backend"] = s_aiBackend;
   doc["pc_gateway_ip"] = s_pcGatewayIp;
   doc["pc_gateway_port"] = s_pcGatewayPort;
   doc["ai_model"] = s_aiModel;
   doc["tts_voice"] = s_ttsVoice;
+  doc["ai_name"] = s_aiName;
+  doc["wake_word"] = s_wakeWord;
+  doc["voice_wake_enabled"] = s_voiceWakeEnabled;
 }
 
 bool XiaoZhiClient::saveAIConfig(const String& body) {
@@ -290,15 +316,46 @@ bool XiaoZhiClient::saveAIConfig(const String& body) {
   DeserializationError err = deserializeJson(doc, body);
   if (err) return false;
 
-  if (doc["ai_backend"].is<int>()) s_aiBackend = doc["ai_backend"].as<int>();
-  if (doc["pc_gateway_ip"].is<const char*>()) s_pcGatewayIp = doc["pc_gateway_ip"].as<String>();
-  if (doc["pc_gateway_port"].is<int>()) s_pcGatewayPort = doc["pc_gateway_port"].as<int>();
-  if (doc["ai_model"].is<const char*>()) s_aiModel = doc["ai_model"].as<String>();
-  if (doc["tts_voice"].is<const char*>()) s_ttsVoice = doc["tts_voice"].as<String>();
+  loadAIConfigIfNeeded();
+  JsonDocument fullDoc;
+  if (LittleFS.exists(FILE_CONFIG)) {
+    File rf = LittleFS.open(FILE_CONFIG, "r");
+    if (rf) {
+      deserializeJson(fullDoc, rf);
+      rf.close();
+    }
+  }
+
+  for (JsonPairConst kv : doc.as<JsonObjectConst>()) {
+    fullDoc[kv.key()] = kv.value();
+  }
+
+  if (fullDoc["ai_backend"].is<int>()) s_aiBackend = fullDoc["ai_backend"].as<int>();
+  if (fullDoc["pc_gateway_ip"].is<const char*>()) s_pcGatewayIp = fullDoc["pc_gateway_ip"].as<String>();
+  if (fullDoc["pc_gateway_port"].is<int>()) s_pcGatewayPort = fullDoc["pc_gateway_port"].as<int>();
+  if (fullDoc["ai_model"].is<const char*>()) s_aiModel = fullDoc["ai_model"].as<String>();
+  if (fullDoc["tts_voice"].is<const char*>()) s_ttsVoice = fullDoc["tts_voice"].as<String>();
+  if (fullDoc["ai_name"].is<const char*>()) {
+    String n = fullDoc["ai_name"].as<String>();
+    n.trim();
+    if (n.length() > 0) s_aiName = n;
+  }
+  if (fullDoc["wake_word"].is<const char*>()) {
+    String w = fullDoc["wake_word"].as<String>();
+    w.trim();
+    if (w.length() > 0) s_wakeWord = w;
+  }
+  if (fullDoc["voice_wake_enabled"].is<bool>()) {
+    s_voiceWakeEnabled = fullDoc["voice_wake_enabled"].as<bool>();
+  }
+
+  fullDoc["ai_name"] = s_aiName;
+  fullDoc["wake_word"] = s_wakeWord;
+  fullDoc["voice_wake_enabled"] = s_voiceWakeEnabled;
 
   File file = LittleFS.open(FILE_CONFIG, "w");
   if (!file) return false;
-  file.print(body);
+  serializeJson(fullDoc, file);
   file.close();
 
   s_lastBoundCheckMs = 0; // Xóa cache để cập nhật ngay trạng thái bound
@@ -307,12 +364,19 @@ bool XiaoZhiClient::saveAIConfig(const String& body) {
 
   // Khởi động lại kết nối WebSocket với backend mới
   stopWebSocket();
+  startWebSocket();
   return true;
 }
 
 int XiaoZhiClient::getAiBackend() { loadAIConfigIfNeeded(); return s_aiBackend; }
 void XiaoZhiClient::setAiBackend(int backend) { s_aiBackend = backend; }
-String XiaoZhiClient::getPcGatewayIp() { loadAIConfigIfNeeded(); return s_pcGatewayIp; }
+String XiaoZhiClient::getPcGatewayIp() {
+  loadAIConfigIfNeeded();
+  if (s_pcGatewayIp == "192.168.1.238" || s_pcGatewayIp.length() == 0) {
+    s_pcGatewayIp = "192.168.1.8";
+  }
+  return s_pcGatewayIp;
+}
 void XiaoZhiClient::setPcGatewayIp(const String& ip) { s_pcGatewayIp = ip; }
 int XiaoZhiClient::getPcGatewayPort() { loadAIConfigIfNeeded(); return s_pcGatewayPort; }
 void XiaoZhiClient::setPcGatewayPort(int port) { s_pcGatewayPort = port; }
@@ -320,7 +384,90 @@ String XiaoZhiClient::getAiModel() { loadAIConfigIfNeeded(); return s_aiModel; }
 void XiaoZhiClient::setAiModel(const String& model) { s_aiModel = model; }
 String XiaoZhiClient::getTtsVoice() { loadAIConfigIfNeeded(); return s_ttsVoice; }
 void XiaoZhiClient::setTtsVoice(const String& voice) { s_ttsVoice = voice; }
+String XiaoZhiClient::getAiName() {
+  loadAIConfigIfNeeded();
+  return s_aiName.length() > 0 ? s_aiName : String("XiaoZhi");
+}
+void XiaoZhiClient::setAiName(const String& name) {
+  loadAIConfigIfNeeded();
+  String n = name;
+  n.trim();
+  if (n.length() > 0) {
+    s_aiName = n;
+    JsonDocument doc;
+    doc["ai_name"] = s_aiName;
+    String body;
+    serializeJson(doc, body);
+    saveAIConfig(body);
+  }
+}
+String XiaoZhiClient::getWakeWord() {
+  loadAIConfigIfNeeded();
+  return s_wakeWord.length() > 0 ? s_wakeWord : (getAiName() + " ơi");
+}
+void XiaoZhiClient::setWakeWord(const String& word) {
+  loadAIConfigIfNeeded();
+  String w = word;
+  w.trim();
+  if (w.length() > 0) {
+    s_wakeWord = w;
+    JsonDocument doc;
+    doc["wake_word"] = s_wakeWord;
+    String body;
+    serializeJson(doc, body);
+    saveAIConfig(body);
+  }
+}
+bool XiaoZhiClient::isVoiceWakeEnabled() {
+  loadAIConfigIfNeeded();
+  return s_voiceWakeEnabled;
+}
+void XiaoZhiClient::setVoiceWakeEnabled(bool enabled) {
+  loadAIConfigIfNeeded();
+  s_voiceWakeEnabled = enabled;
+}
+bool XiaoZhiClient::isVoiceWakeTriggered() {
+  return s_voiceWakeTriggered;
+}
+void XiaoZhiClient::clearVoiceWakeTrigger() {
+  s_voiceWakeTriggered = false;
+}
+void XiaoZhiClient::triggerVoiceWake(const String& replyText, const String& userText) {
+  if (userText.length() > 0) {
+    s_lastSttText = userText;
+    s_sttReceived = true;
+  }
+  if (replyText.length() > 0) {
+    s_lastAiFullReply = replyText;
+    s_llmReceived = true;
+    s_lastAiReplyTime = millis();
+  }
+  s_voiceWakeTriggered = true;
+}
 bool XiaoZhiClient::isPcGatewayMode() { loadAIConfigIfNeeded(); return (s_aiBackend == 1); }
+
+bool XiaoZhiClient::updatePcGatewayIpDynamic(const String& newIp, int newPort) {
+  if (newIp.length() == 0 || newIp == "0.0.0.0" || newIp == "255.255.255.255") return false;
+  loadAIConfigIfNeeded();
+  bool changed = false;
+  if (s_pcGatewayIp != newIp) {
+    s_pcGatewayIp = newIp;
+    changed = true;
+  }
+  if (newPort > 0 && s_pcGatewayPort != newPort) {
+    s_pcGatewayPort = newPort;
+    changed = true;
+  }
+  if (changed) {
+    Serial.printf("🎯 [AUTO-DISCOVERY] PC AI Gateway cap nhat IP moi: %s:%d -> Tu dong ket noi lai!\n",
+                  s_pcGatewayIp.c_str(), s_pcGatewayPort);
+    if (isPcGatewayMode()) {
+      stopWebSocket();
+      startWebSocket();
+    }
+  }
+  return changed;
+}
 
 String XiaoZhiClient::getLastAuthCode() {
   return s_lastAuthCode;
@@ -1147,6 +1294,21 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 s_lastSttText = String(txt);
                 s_sttReceived = true;
                 Serial.printf("🎤 [XIAOZHI WS STT]: \"%s\"\n", s_lastSttText.c_str());
+                // Kiểm tra xem câu STT có chứa từ khóa đánh thức (Wake Word) hoặc tên AI không khi đang ở chế độ AOD / Sleep
+                if (DisplayDriver::isSleeping() && XiaoZhiClient::isVoiceWakeEnabled()) {
+                  String sttNorm = XiaoZhiClient::stripVietnameseToAscii(s_lastSttText);
+                  sttNorm.toLowerCase();
+                  String wkNorm = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getWakeWord());
+                  wkNorm.toLowerCase();
+                  String nameNorm = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getAiName());
+                  nameNorm.toLowerCase();
+                  if ((wkNorm.length() > 0 && sttNorm.indexOf(wkNorm) >= 0) ||
+                      (nameNorm.length() >= 2 && sttNorm.indexOf(nameNorm) >= 0) ||
+                      sttNorm.indexOf("tro ly") >= 0 || sttNorm.indexOf("thuc day") >= 0) {
+                    s_voiceWakeTriggered = true;
+                    Serial.printf("🔆 [STT WAKE MATCH] Phát hiện câu nói đánh thức \"%s\" từ AOD!\n", s_lastSttText.c_str());
+                  }
+                }
                 executeLocalVoiceIntent(s_lastSttText);
               }
             } else if (strcmp(type, "llm") == 0) {
@@ -1255,6 +1417,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               }
             } else if (strcmp(type, "answer") == 0) {
               TestAudio::stopStreamPcmAsync(); // Xóa sạch bộ đệm âm thanh cũ để tránh phát đè hoặc tồn đọng
+              bool wakeTriggered = doc["wake_triggered"] | false;
               const char* txt = doc["text"] | "";
               if (strlen(txt) > 0) {
                 s_lastAiFullReply = String(txt);
@@ -1267,9 +1430,17 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 } else {
                   s_lastEmotion = XiaoZhiClient::detectEmotionFromText(s_lastAiFullReply);
                 }
-                Serial.printf("🤖 [PC GATEWAY ANSWER]: \"%s\" | Emotion: %s\n", s_lastAiFullReply.c_str(), s_lastEmotion.c_str());
+                if (wakeTriggered || DisplayDriver::isSleeping()) {
+                  s_voiceWakeTriggered = true;
+                }
+                Serial.printf("🤖 [PC GATEWAY ANSWER]: \"%s\" | Emotion: %s | Wake=%d\n", s_lastAiFullReply.c_str(), s_lastEmotion.c_str(), wakeTriggered);
                 executeLocalVoiceIntent(s_lastAiFullReply, true);
               }
+            } else if (strcmp(type, "wake") == 0) {
+              const char* uTxt = doc["user_text"] | "";
+              const char* rTxt = doc["reply"] | "";
+              XiaoZhiClient::triggerVoiceWake(String(rTxt), String(uTxt));
+              Serial.printf("🔆 [VOICE WAKE WS] Nhận tín hiệu đánh thức AI từ AOD/Standby: user=\"%s\"\n", uTxt);
             } else if (strcmp(type, "done") == 0) {
               s_ttsFinished = true;
               Serial.println("⏹️ [PC GATEWAY DONE]: Đã nhận xong toàn bộ câu thoại từ PC Gateway.");
@@ -1370,6 +1541,7 @@ void XiaoZhiClient::startWebSocket() {
   if (isPcGatewayMode()) {
     // KẾT NỐI PC LOCAL AI GATEWAY (DECOR AI STATION)
     String host = s_pcGatewayIp.length() > 0 ? s_pcGatewayIp : "192.168.1.8";
+    if (host == "192.168.1.238") host = "192.168.1.8";
     int port = s_pcGatewayPort > 0 ? s_pcGatewayPort : 8765;
     s_wsUri = "ws://" + host + ":" + String(port) + "/ws";
     s_wsHeaders = "";
@@ -1601,14 +1773,13 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
     return false;
   }
 
-  // Chờ hoặc khởi động WebSocket nếu chưa kết nối
+  // Chờ hoặc khởi động lại WebSocket nếu chưa kết nối
   if (!isWebSocketConnected()) {
-    if (!s_wsClient) {
-      Serial.println("🔄 [AI AUDIO] WebSocket chưa kết nối, đang thiết lập kết nối...");
-      startWebSocket();
-    }
+    Serial.println("🔄 [AI AUDIO] WebSocket chưa kết nối, đang thiết lập lại kết nối...");
+    stopWebSocket();
+    startWebSocket();
     uint32_t t0 = millis();
-    while (!isWebSocketConnected() && (millis() - t0 < 3000)) {
+    while (!isWebSocketConnected() && (millis() - t0 < 3500)) {
       delay(50);
     }
   }
@@ -1624,7 +1795,11 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
   // 1. Gửi bản tin bắt đầu thu âm
   if (isPcGatewayMode()) {
     TestAudio::stopStreamPcmAsync(); // Dừng phát âm thanh cũ khi người dùng bắt đầu nói câu mới
-    String startMsg = "{\"type\":\"start\",\"model\":\"" + s_aiModel + "\",\"search\":true,\"sample_rate\":" + String(sampleRate) + "}";
+    String aiName = getAiName();
+    String wakeW = getWakeWord();
+    bool isWakeCheck = DisplayDriver::isSleeping();
+    String startMsg = "{\"type\":\"start\",\"model\":\"" + s_aiModel + "\",\"search\":true,\"sample_rate\":" + String(sampleRate) +
+                      ",\"ai_name\":\"" + aiName + "\",\"wake_word\":\"" + wakeW + "\",\"wake_check\":" + (isWakeCheck ? "true" : "false") + "}";
     int retStart = esp_websocket_client_send_text(s_wsClient, startMsg.c_str(), startMsg.length(), pdMS_TO_TICKS(1500));
     if (retStart < 0) {
       Serial.println("❌ [PC GATEWAY AUDIO] Gửi start message thất bại!");

@@ -69,7 +69,17 @@ public:
   static void setAiModel(const String& model);
   static String getTtsVoice();
   static void setTtsVoice(const String& voice);
+  static String getAiName();
+  static void setAiName(const String& name);
+  static String getWakeWord();
+  static void setWakeWord(const String& word);
+  static bool isVoiceWakeEnabled();
+  static void setVoiceWakeEnabled(bool enabled);
+  static bool isVoiceWakeTriggered();
+  static void clearVoiceWakeTrigger();
+  static void triggerVoiceWake(const String& replyText = "", const String& userText = "");
   static bool isPcGatewayMode();
+  static bool updatePcGatewayIpDynamic(const String& newIp, int newPort = 8765);
 };
 
 // Bí danh tương thích cho hệ thống Trợ Lý AI

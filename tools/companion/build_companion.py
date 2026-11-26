@@ -64,6 +64,8 @@ def build_exe():
         "--hidden-import=aiohttp.web",
         "--hidden-import=edge_tts",
         "--hidden-import=ai_gateway_worker",
+        "--hidden-import=mcp_controller",
+        "--hidden-import=discovery_worker",
         "--hidden-import=wave",
         "--hidden-import=xml.etree.ElementTree",
         MAIN_PY

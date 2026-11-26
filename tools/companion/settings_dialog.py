@@ -73,6 +73,12 @@ class SettingsDialog:
             self.port_entry.insert(0, str(cfg.get("transcoder_port", 5050)))
             self.ai_port_entry.delete(0, "end")
             self.ai_port_entry.insert(0, str(cfg.get("ai_gateway_port", 8765)))
+            if hasattr(self, "ai_name_entry"):
+                self.ai_name_entry.delete(0, "end")
+                self.ai_name_entry.insert(0, cfg.get("ai_name", "XiaoZhi"))
+            if hasattr(self, "wake_word_entry"):
+                self.wake_word_entry.delete(0, "end")
+                self.wake_word_entry.insert(0, cfg.get("wake_word", "XiaoZhi ơi"))
             self.gemini_entry.delete(0, "end")
             self.gemini_entry.insert(0, cfg.get("gemini_api_key", ""))
             if hasattr(self, "gemini_model_combo"):
@@ -267,6 +273,35 @@ class SettingsDialog:
         self.voice_combo = ttk.Combobox(row_voice, values=voice_labels, state="readonly", width=26)
         self.voice_combo.set(init_label)
         self.voice_combo.pack(side="left", padx=(8, 0))
+
+        # Tên Trợ lý AI & Câu nói đánh thức từ AOD
+        row_identity = tk.Frame(ai_card, bg=BG_CARD)
+        row_identity.pack(fill="x", pady=4)
+        tk.Label(row_identity, text="Tên AI:", font=("Segoe UI", 9), bg=BG_CARD, fg=TEXT_MAIN).pack(side="left")
+        self.ai_name_entry = tk.Entry(
+            row_identity,
+            font=("Segoe UI", 9),
+            bg=BG_INPUT,
+            fg=TEXT_MAIN,
+            insertbackground=TEXT_MAIN,
+            relief="flat",
+            width=12
+        )
+        self.ai_name_entry.insert(0, cfg.get("ai_name", "XiaoZhi"))
+        self.ai_name_entry.pack(side="left", padx=(6, 12))
+
+        tk.Label(row_identity, text="Câu đánh thức AOD:", font=("Segoe UI", 9), bg=BG_CARD, fg=TEXT_MAIN).pack(side="left")
+        self.wake_word_entry = tk.Entry(
+            row_identity,
+            font=("Segoe UI", 9),
+            bg=BG_INPUT,
+            fg=TEXT_MAIN,
+            insertbackground=TEXT_MAIN,
+            relief="flat",
+            width=16
+        )
+        self.wake_word_entry.insert(0, cfg.get("wake_word", "XiaoZhi ơi"))
+        self.wake_word_entry.pack(side="left", padx=(6, 0), fill="x", expand=True)
 
         # Test phát âm thanh
         row_test_ai = tk.Frame(ai_card, bg=BG_CARD)
@@ -638,6 +673,10 @@ class SettingsDialog:
         cfg["ai_gateway_enabled"] = self.var_ai_enabled.get()
         cfg["ai_gateway_port"] = new_ai_port
         cfg["ai_gateway_voice"] = voice_code
+        if hasattr(self, "ai_name_entry"):
+            cfg["ai_name"] = self.ai_name_entry.get().strip() or "XiaoZhi"
+        if hasattr(self, "wake_word_entry"):
+            cfg["wake_word"] = self.wake_word_entry.get().strip() or (cfg.get("ai_name", "XiaoZhi") + " ơi")
         cfg["gemini_api_key"] = self.gemini_entry.get().strip()
         if hasattr(self, "gemini_model_combo"):
             sel_model = self.gemini_model_combo.get().strip() or "gemini-flash-lite-latest"
@@ -648,6 +687,23 @@ class SettingsDialog:
 
         # Lưu file cấu hình
         self.cfg_manager.save_config(cfg)
+
+        # Đồng bộ tên AI và câu đánh thức xuống Trạm ESP32 (nếu trạm đang online)
+        def _sync_identity_to_esp():
+            try:
+                if new_ip:
+                    requests.post(
+                        f"http://{new_ip}/api/config/ai",
+                        json={
+                            "ai_name": cfg.get("ai_name", "XiaoZhi"),
+                            "wake_word": cfg.get("wake_word", "XiaoZhi ơi"),
+                            "voice_wake_enabled": True
+                        },
+                        timeout=2.5
+                    )
+            except Exception:
+                pass
+        threading.Thread(target=_sync_identity_to_esp, daemon=True).start()
 
         # Cài đặt Windows Auto-start Registry
         self.cfg_manager.set_windows_autostart(cfg["autostart"])

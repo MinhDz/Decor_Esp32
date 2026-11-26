@@ -1,9 +1,9 @@
 {
-  "version": "v3.2.9",
+  "version": "v3.3.9",
   "name": "Space OS",
-  "build_date": "2026-11-09",
+  "build_date": "2026-11-26",
   "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
-  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.2.9/firmware.bin",
-  "size": 2481904,
-  "changelog": "🚀 Space OS v3.2.9 - Cinema Mode Power Governor & Infinite Stream Stability:\n- Khắc phục triệt để lỗi Brownout (Sụt áp) & Ngoại lệ Crash khi hết video:\n  + Vô hiệu hóa ngắt nhạy của RTC Brownout Detector trước các xung cao tần.\n  + Kích hoạt Cinema Mode: Tự động hạ đèn Edison về 10% và tắt LED COB khi stream để dãn tải ~400mA.\n  + Triệt tiêu vòng lặp đệ quy khi thoát Stream Mode 17 và phân tách tác vụ đa nhân (Core Decoupling) an toàn.\n  + Tăng gấp đôi Stack cho tác vụ Unified Stream lên 8KB và hạ công suất phát Wi-Fi về 17dBm ổn định nguồn điện.\n- Mở rộng Trợ lý Không Gian XiaoZhi AI & MCP Tools:\n  + Thêm khẩu lệnh truy vấn thời gian thực: Báo cáo trạng thái tổng thể trạm, pin, Wi-Fi, thẻ nhớ SD, thời tiết phòng.\n  + Điều khiển đa phương tiện qua AI: Chuyển bài nhạc, mở ứng dụng game, đổi hình nền tự động.\n  + Tối ưu Jitter Buffer 240ms và Ping-Pong Frame Buffer trên PSRAM loại bỏ xé hình và nuốt âm."
+  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.3.9/firmware.bin",
+  "size": 2231424,
+  "changelog": "🚀 Space OS v3.3.9 - AI Assistant Custom Identity, Voice Wake from AOD & Full MCP PC/Station Control:\n- Cho phép đặt tên riêng cho Trợ lý AI (ai_name) và câu khẩu lệnh đánh thức (wake_word).\n- Hỗ trợ đánh thức bằng giọng nói trực tiếp từ màn hình Always On Display (AOD) chuyển thẳng vào chế độ Trò chuyện AI.\n- Mở rộng hệ thống 19 công cụ MCP (Model Context Protocol) điều khiển toàn diện Trạm Decor (self.*) và Máy tính PC qua DecorSpaceCompanion (pc.*: hẹn giờ/hủy tắt máy, khóa màn hình, đọc/ghi Clipboard, mở ứng dụng Windows, tìm kiếm & mở YouTube/URL trên trình duyệt).\n- Khắc phục triệt để lỗi GitHub Actions Cloud OTA Pipeline (ghim platform espressif32 @ ^6.9.0 và tự động đồng bộ release/firmware.bin + release/version.json)."
 }

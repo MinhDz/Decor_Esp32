@@ -371,6 +371,17 @@ class TelemetryWorker(threading.Thread):
                 if self.consecutive_fails >= 3:
                     self.is_station_online = False
 
+            # Tự động thử phân giải mDNS 'tramvutru.local' khi mất kết nối liên tục
+            if self.consecutive_fails >= 3 and self.consecutive_fails % 3 == 0:
+                try:
+                    import socket
+                    resolved_ip = socket.gethostbyname("tramvutru.local")
+                    if resolved_ip and resolved_ip != ip:
+                        logger.info(f"🎯 [mDNS] Phân giải tramvutru.local thành công: {resolved_ip} (cũ: {ip}) -> Tự động chuyển IP!")
+                        self.set_ip(resolved_ip)
+                except Exception:
+                    pass
+
             elapsed = time.time() - start_t
             sleep_t = max(0.1, interval - elapsed)
             time.sleep(sleep_t)

@@ -11,6 +11,7 @@
 #include "WifiManager.h"
 #include "WebAuth.h"
 #include "drivers/TouchDriver.h"
+#include "XiaoZhiClient.h"
 
 #include "drivers/StorageDriver.h"
 #include <ArduinoJson.h>
@@ -394,7 +395,17 @@ namespace ApiHardware {
       server.send(400, "application/json", "{\"error\":\"Missing body\"}");
       return;
     }
-    PcStatsManager::recordPcIp(server.client().remoteIP());
+    IPAddress remoteIp = server.client().remoteIP();
+    PcStatsManager::recordPcIp(remoteIp);
+
+    // Tự động đồng bộ IP PC Gateway cho Trợ lý AI khi nhận thông số PC HUD
+    if (XiaoZhiClient::isPcGatewayMode() && remoteIp != IPAddress(0, 0, 0, 0)) {
+      String remoteIpStr = remoteIp.toString();
+      if (remoteIpStr != XiaoZhiClient::getPcGatewayIp()) {
+        XiaoZhiClient::updatePcGatewayIpDynamic(remoteIpStr, XiaoZhiClient::getPcGatewayPort());
+      }
+    }
+
     bool ok = PcStatsManager::updateMetrics(server.arg("plain"));
     if (ok) {
       server.send(200, "application/json", "{\"status\":\"ok\",\"is_live\":true}");
@@ -416,6 +427,8 @@ namespace ApiHardware {
 
     server.on("/api/pc/metrics", HTTP_GET, [&server]() { handlePcMetricsGet(server); });
     server.on("/api/pc/metrics", HTTP_POST, [&server]() { handlePcMetricsPost(server); });
+    server.on("/api/hardware/pc_metrics", HTTP_GET, [&server]() { handlePcMetricsGet(server); });
+    server.on("/api/hardware/pc_metrics", HTTP_POST, [&server]() { handlePcMetricsPost(server); });
 
     server.on("/api/touch/config", HTTP_GET, [&server]() {
       int16_t minX, maxX, minY, maxY;

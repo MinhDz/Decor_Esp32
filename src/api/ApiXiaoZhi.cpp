@@ -1,5 +1,6 @@
 #include "api/ApiXiaoZhi.h"
 #include "XiaoZhiClient.h"
+#include "client/McpTools.h"
 #include "WifiManager.h"
 #include "tests/TestDisplay.h"
 #include "tests/TestAudio.h"
@@ -90,6 +91,9 @@ namespace ApiXiaoZhi {
     doc["pc_gateway_port"] = XiaoZhiClient::getPcGatewayPort();
     doc["ai_model"] = XiaoZhiClient::getAiModel();
     doc["tts_voice"] = XiaoZhiClient::getTtsVoice();
+    doc["ai_name"] = XiaoZhiClient::getAiName();
+    doc["wake_word"] = XiaoZhiClient::getWakeWord();
+    doc["voice_wake_enabled"] = XiaoZhiClient::isVoiceWakeEnabled();
 
     String response;
     serializeJson(doc, response);
@@ -219,9 +223,54 @@ namespace ApiXiaoZhi {
     http.end();
   }
 
+  void handleMcpToolsList(WebServer& server) {
+    JsonDocument doc;
+    doc["status"] = "ok";
+    JsonArray tools = doc["tools"].to<JsonArray>();
+    McpTools::appendDefinitions(tools);
+    String out;
+    serializeJson(doc, out);
+    server.send(200, "application/json; charset=utf-8", out);
+  }
+
+  void handleMcpToolCall(WebServer& server) {
+    if (!server.hasArg("plain")) {
+      server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing JSON body\"}");
+      return;
+    }
+    JsonDocument reqDoc;
+    DeserializationError err = deserializeJson(reqDoc, server.arg("plain"));
+    if (err) {
+      server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Invalid JSON\"}");
+      return;
+    }
+
+    String toolName = reqDoc["name"] | reqDoc["tool"] | "";
+    JsonObjectConst args = reqDoc["arguments"].is<JsonObjectConst>()
+                             ? reqDoc["arguments"].as<JsonObjectConst>()
+                             : reqDoc["args"].as<JsonObjectConst>();
+    if (toolName.length() == 0) {
+      server.send(400, "application/json", "{\"status\":\"error\",\"message\":\"Missing tool name\"}");
+      return;
+    }
+
+    PeripheralControlResult outcome = McpTools::execute(toolName, args);
+    JsonDocument resDoc;
+    resDoc["status"] = outcome.success ? "ok" : "error";
+    resDoc["success"] = outcome.success;
+    resDoc["tool"] = toolName;
+    resDoc["message"] = outcome.message;
+    String out;
+    serializeJson(resDoc, out);
+    server.send(outcome.success ? 200 : 400, "application/json; charset=utf-8", out);
+  }
+
   void registerRoutes(WebServer& server) {
     server.on("/api/config/ai", HTTP_GET, [&server]() { handleGetAIConfig(server); });
     server.on("/api/config/ai", HTTP_POST, [&server]() { handleSaveAIConfig(server); });
+    server.on("/api/mcp/tools", HTTP_GET, [&server]() { handleMcpToolsList(server); });
+    server.on("/api/mcp/call", HTTP_POST, [&server]() { handleMcpToolCall(server); });
+    server.on("/api/mcp/execute", HTTP_POST, [&server]() { handleMcpToolCall(server); });
     server.on("/api/xiaozhi/ping_gateway", HTTP_GET, [&server]() { handlePingGateway(server); });
     server.on("/api/ai/ping_gateway", HTTP_GET, [&server]() { handlePingGateway(server); });
     server.on("/api/xiaozhi/gemini_models", HTTP_GET, [&server]() { handleGeminiModels(server); });

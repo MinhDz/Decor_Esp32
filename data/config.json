@@ -9,5 +9,8 @@
   "pc_gateway_ip": "192.168.1.8",
   "pc_gateway_port": 8765,
   "ai_model": "gemini-pro",
-  "tts_voice": "vi-VN-HoaiMyNeural"
+  "tts_voice": "vi-VN-HoaiMyNeural",
+  "ai_name": "XiaoZhi",
+  "wake_word": "XiaoZhi ơi",
+  "voice_wake_enabled": true
 }

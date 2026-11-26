@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 struct PeripheralControlResult {
   bool success;
@@ -28,4 +29,8 @@ namespace PeripheralControlService {
   // Điều khiển chức năng màn hình & giải trí đa phương tiện
   PeripheralControlResult cycleWallpaper(int dir = 1);
   PeripheralControlResult controlMedia(const String& action);
+  PeripheralControlResult setScreenBrightness(int brightnessPct);
+
+  // Điều khiển máy tính PC thông qua DecorSpaceCompanion (AI Gateway)
+  PeripheralControlResult controlPcAction(const String& action, JsonObjectConst params);
 }

@@ -3004,6 +3004,33 @@ static const char XIAOZHI_CHAT_INJECT_SCRIPT[] PROGMEM = R"rawliteral(
     }
     const modeToggle = document.querySelector('#tab-chat .ai-mode-toggle-group');
     if (modeToggle) modeToggle.style.display = 'none';
+
+    // 4. Đảm bảo trường Đặt Tên AI & Câu Đánh Thức AOD có mặt trong bảng Cấu Hình AI
+    const voiceSel = document.getElementById('ai-cfg-pc-voice');
+    if (voiceSel && !document.getElementById('ai-cfg-name')) {
+      const voiceGroup = voiceSel.closest('.form-group');
+      if (voiceGroup && voiceGroup.parentNode) {
+        const nameGroup = document.createElement('div');
+        nameGroup.className = 'form-group';
+        nameGroup.innerHTML = `
+          <label>🤖 Đặt Tên Cho Trợ Lý AI Trên Trạm:</label>
+          <input type="text" id="ai-cfg-name" value="XiaoZhi" placeholder="ví dụ: Jarvis, Gome, Na, XiaoZhi...">
+          <span style="font-size:0.71rem; color:#94a3b8; display:block; margin-top:3px;">Tên hiển thị trên màn hình trạm và cách AI tự xưng khi trò chuyện.</span>
+        `;
+        const wakeGroup = document.createElement('div');
+        wakeGroup.className = 'form-group';
+        wakeGroup.innerHTML = `
+          <label>🎙️ Câu Nói Đánh Thức AI (Từ Màn Hình Chờ / AOD):</label>
+          <input type="text" id="ai-cfg-wake-word" value="XiaoZhi ơi" placeholder="ví dụ: Jarvis ơi, Gome ơi, XiaoZhi ơi...">
+          <label style="display:flex; align-items:center; gap:6px; font-size:0.73rem; color:#10b981; margin-top:4px; cursor:pointer;">
+            <input type="checkbox" id="ai-cfg-voice-wake" checked>
+            <span>Tự động đánh thức trạm từ Always On Display chuyển thẳng sang Trò chuyện AI</span>
+          </label>
+        `;
+        voiceGroup.parentNode.insertBefore(wakeGroup, voiceGroup.nextSibling);
+        voiceGroup.parentNode.insertBefore(nameGroup, voiceGroup.nextSibling);
+      }
+    }
   }
 
   window.triggerXiaoZhiMicWeb = async function() {

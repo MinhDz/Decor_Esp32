@@ -1,5 +1,6 @@
 #include "client/McpTools.h"
 #include "drivers/CobLedDriver.h"
+#include "XiaoZhiClient.h"
 
 namespace {
 void addTool(JsonArray tools, const char* name, const char* description) {
@@ -83,6 +84,43 @@ void appendDefinitions(JsonArray tools) {
   addTool(tools, "self.media.control", "Điều khiển trình phát nhạc của trạm vũ trụ: play (phát), pause (tạm dừng), next (bài kế), prev (bài trước), open (mở màn hình nghe nhạc).");
   tool = tools[tools.size() - 1].as<JsonObject>();
   addProperty(tool, "action", "string", "Thao tác: play, pause, next, prev hoặc open.");
+
+  addTool(tools, "self.screen.set_brightness", "Điều chỉnh độ sáng đèn nền màn hình TFT của trạm từ 5 đến 100 phần trăm.");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "brightness", "integer", "Độ sáng màn hình từ 5 đến 100 phần trăm.");
+
+  addTool(tools, "self.ai.set_identity", "Đặt tên mới cho Trợ lý AI trên trạm hoặc đổi câu nói/từ khóa đánh thức AI (Wake Word) khi người dùng yêu cầu đổi tên AI.");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "ai_name", "string", "Tên mới của trợ lý AI trên trạm (ví dụ: Jarvis, Gome, Na, XiaoZhi).");
+  addProperty(tool, "wake_word", "string", "Câu nói đánh thức AI từ màn hình chờ/AOD (ví dụ: Jarvis ơi, Gome ơi).");
+
+  // --- CÔNG CỤ ĐIỀU KHIỂN MÁY TÍNH PC THÔNG QUA DECOR SPACE COMPANION ---
+  addTool(tools, "pc.system.schedule_shutdown", "Hẹn giờ tắt máy tính PC hoặc hủy hẹn giờ tắt máy tính PC (Windows).");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "minutes", "integer", "Số phút hẹn giờ trước khi tắt máy (ví dụ: 15, 30, 60). Đặt 0 nếu muốn tắt ngay.");
+  addProperty(tool, "cancel", "boolean", "Đặt true nếu muốn hủy lệnh hẹn giờ tắt máy đang chạy.");
+
+  addTool(tools, "pc.system.power", "Thực hiện thao tác nguồn hoặc khóa màn hình trên máy tính PC: lock (khóa máy), sleep (ngủ), restart (khởi động lại), cancel_shutdown (hủy tắt máy).");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "action", "string", "Thao tác: lock, sleep, restart hoặc cancel_shutdown.");
+
+  addTool(tools, "pc.clipboard.get", "Đọc nội dung văn bản hiện đang lưu trong Clipboard (bộ nhớ tạm) của máy tính PC để báo cáo hoặc tóm tắt cho người dùng.");
+
+  addTool(tools, "pc.clipboard.set", "Ghi hoặc sao chép một đoạn văn bản vào Clipboard (bộ nhớ tạm) của máy tính PC.");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "text", "string", "Nội dung văn bản cần chép vào Clipboard của PC.");
+
+  addTool(tools, "pc.app.open", "Mở một ứng dụng hoặc phần mềm trên máy tính PC (ví dụ: notepad, calculator, paint, explorer, cmd, powershell, taskmgr, settings, chrome, edge, coccoc, vscode, spotify, discord, zalo, word, excel).");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "app_name", "string", "Tên ứng dụng hoặc đường dẫn chương trình cần mở trên PC.");
+
+  addTool(tools, "pc.browser.open_youtube", "Mở YouTube trên trình duyệt máy tính PC để tìm kiếm hoặc phát video/nhạc theo yêu cầu (hoặc mở trang chủ YouTube nếu không có từ khóa).");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "query", "string", "Từ khóa tìm kiếm video/bài hát trên YouTube hoặc URL YouTube.");
+
+  addTool(tools, "pc.browser.open_url", "Mở một trang web bất kỳ hoặc tìm kiếm Google trên trình duyệt máy tính PC.");
+  tool = tools[tools.size() - 1].as<JsonObject>();
+  addProperty(tool, "url", "string", "Địa chỉ URL trang web (ví dụ: https://vnexpress.net, facebook.com) hoặc từ khóa tìm kiếm Google.");
 }
 
 PeripheralControlResult execute(const String& name, JsonObjectConst args) {
@@ -192,6 +230,54 @@ PeripheralControlResult execute(const String& name, JsonObjectConst args) {
     String action = "open";
     if (args["action"].is<const char*>()) action = args["action"].as<String>();
     return PeripheralControlService::controlMedia(action);
+  }
+
+  if (name == "self.screen.set_brightness") {
+    if (!args["brightness"].is<int>()) return invalidArguments("cần brightness dạng số nguyên (5-100).");
+    return PeripheralControlService::setScreenBrightness(args["brightness"].as<int>());
+  }
+
+  if (name == "self.ai.set_identity") {
+    String newName = args["ai_name"] | "";
+    String newWake = args["wake_word"] | "";
+    newName.trim();
+    newWake.trim();
+    if (newName.length() == 0 && newWake.length() == 0) {
+      return invalidArguments("cần cung cấp ai_name hoặc wake_word.");
+    }
+    if (newName.length() > 0) {
+      XiaoZhiClient::setAiName(newName);
+      if (newWake.length() == 0) {
+        XiaoZhiClient::setWakeWord(newName + " ơi");
+      }
+    }
+    if (newWake.length() > 0) {
+      XiaoZhiClient::setWakeWord(newWake);
+    }
+    return {true, "Đã cập nhật tên Trợ lý AI thành \"" + XiaoZhiClient::getAiName() + "\" và câu đánh thức là \"" + XiaoZhiClient::getWakeWord() + "\"."};
+  }
+
+  // Thực thi nhóm công cụ điều khiển máy tính PC qua DecorSpaceCompanion
+  if (name == "pc.system.schedule_shutdown") {
+    return PeripheralControlService::controlPcAction("schedule_shutdown", args);
+  }
+  if (name == "pc.system.power") {
+    return PeripheralControlService::controlPcAction("power_control", args);
+  }
+  if (name == "pc.clipboard.get") {
+    return PeripheralControlService::controlPcAction("get_clipboard", args);
+  }
+  if (name == "pc.clipboard.set") {
+    return PeripheralControlService::controlPcAction("set_clipboard", args);
+  }
+  if (name == "pc.app.open") {
+    return PeripheralControlService::controlPcAction("open_app", args);
+  }
+  if (name == "pc.browser.open_youtube") {
+    return PeripheralControlService::controlPcAction("open_youtube", args);
+  }
+  if (name == "pc.browser.open_url") {
+    return PeripheralControlService::controlPcAction("open_url", args);
   }
 
   return {false, "Không tìm thấy công cụ MCP: " + name};

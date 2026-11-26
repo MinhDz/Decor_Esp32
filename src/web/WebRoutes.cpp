@@ -95,10 +95,7 @@ void WebRoutes::begin() {
     if (server.client()) {
       AudioDriver::setLastClientIp(server.client().remoteIP().toString());
     }
-    if (TestSDCard::isMounted() && StorageDriver::isHealthy() && SD.exists("/recording/rec_latest.wav")) {
-      StorageDriver::streamFileSafely(server, "/recording/rec_latest.wav", "audio/wav", true);
-      return;
-    }
+    // Ưu tiên truyền trực tiếp từ bộ đệm PSRAM siêu tốc (Zero SD contention, zero lock timeout)
     size_t sc = AudioDriver::getRecordedSampleCount();
     const int16_t* pcm = AudioDriver::getRecordedPcmBuffer();
     if (sc > 0 && pcm) {
@@ -137,12 +134,30 @@ void WebRoutes::begin() {
       header[43] = (uint8_t)((dataBytes >> 24) & 0xFF);
 
       server.sendHeader("Content-Disposition", "inline; filename=\"rec_latest.wav\"");
-      server.sendHeader("Cache-Control", "no-cache");
-      WiFiClient client = server.client();
+      server.sendHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+      server.sendHeader("Pragma", "no-cache");
+      server.sendHeader("Expires", "0");
+      server.sendHeader("Access-Control-Allow-Origin", "*");
       server.setContentLength(44 + dataBytes);
       server.send(200, "audio/wav", "");
-      client.write(header, 44);
-      client.write((const uint8_t*)pcm, dataBytes);
+      WiFiClient client = server.client();
+      if (client) {
+        client.write(header, 44);
+        const uint8_t* bytePtr = (const uint8_t*)pcm;
+        size_t sent = 0;
+        const size_t CHUNK_SIZE = 1460;
+        while (sent < dataBytes && client.connected()) {
+          size_t toWrite = (dataBytes - sent > CHUNK_SIZE) ? CHUNK_SIZE : (dataBytes - sent);
+          client.write(bytePtr + sent, toWrite);
+          sent += toWrite;
+          vTaskDelay(pdMS_TO_TICKS(1));
+        }
+      }
+      return;
+    }
+
+    if (TestSDCard::isMounted() && StorageDriver::isHealthy() && SD.exists("/recording/rec_latest.wav")) {
+      StorageDriver::streamFileSafely(server, "/recording/rec_latest.wav", "audio/wav", false);
       return;
     }
     server.send(404, "text/plain", "Chưa có bản thu âm nào trong bộ nhớ!");
@@ -185,7 +200,7 @@ void WebRoutes::begin() {
       "<div class='row'><span>Thời lượng:</span><span class='val'>" + String(dur, 2) + " giây (" + String((unsigned)samples) + " mẫu)</span></div>"
       "<div class='row'><span>Biên độ đỉnh (Peak):</span><span class='val'>" + String(peak) + "</span></div>"
       "<div class='row'><span>Mức VU tối đa:</span><span class='val'>" + String(vu) + "%</span></div>"
-      "<audio controls autoplay src='/api/audio/latest.wav?t=" + String(millis()) + "'></audio>"
+      "<audio controls preload='metadata' src='/api/audio/latest.wav?t=" + String(millis()) + "'></audio>"
       "<div style='display:flex;gap:10px;margin-top:12px;'>"
       "<a class='btn' href='/api/audio/latest.wav' download='rec_latest.wav'>⬇️ Tải tệp WAV</a>"
       "<a class='btn' style='background:#1f6feb;' href='/mic_test'>🔄 Làm mới trang</a>"

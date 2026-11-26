@@ -940,7 +940,7 @@ void WebStreamManager::startUnifiedStreamListener() {
     xTaskCreatePinnedToCore(
       unifiedStreamTask,
       "unifiedStreamTask",
-      8192,
+      4096,
       nullptr,
       3,
       &s_unifiedStreamTaskHandle,

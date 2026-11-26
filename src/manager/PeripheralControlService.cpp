@@ -9,6 +9,8 @@
 #include "tests/TestDisplay.h"
 #include "tests/TestSDCard.h"
 #include "SystemLogger.h"
+#include "XiaoZhiClient.h"
+#include "PcStatsManager.h"
 
 #include <WiFi.h>
 #include <HTTPClient.h>
@@ -418,6 +420,65 @@ PeripheralControlResult controlMedia(const String& action) {
   }
   TestDisplay::controlMediaPlayer(act, 0);
   return {true, "Đã thực hiện thao tác âm nhạc: " + act};
+}
+
+PeripheralControlResult setScreenBrightness(int brightnessPct) {
+  if (brightnessPct < 5 || brightnessPct > 100) {
+    return {false, "Độ sáng màn hình phải từ 5 đến 100%."};
+  }
+  TestDisplay::setBacklightBrightness(brightnessPct);
+  return {true, "Đã đặt độ sáng màn hình trạm ở mức " + String(brightnessPct) + "%."};
+}
+
+PeripheralControlResult controlPcAction(const String& action, JsonObjectConst params) {
+  if (WiFi.status() != WL_CONNECTED) {
+    return {false, "Trạm chưa kết nối Wi-Fi nên không thể gửi lệnh tới máy tính PC."};
+  }
+
+  String ip = XiaoZhiClient::getPcGatewayIp();
+  if (ip.length() == 0 || ip == "0.0.0.0") {
+    ip = PcStatsManager::getPcIp();
+  }
+  int port = XiaoZhiClient::getPcGatewayPort();
+  if (port <= 0) port = 8765;
+
+  String url = "http://" + ip + ":" + String(port) + "/api/pc/action";
+  WiFiClient client;
+  client.setTimeout(6000);
+  HTTPClient http;
+  http.setTimeout(6000);
+
+  if (!http.begin(client, url)) {
+    return {false, "Không thể khởi tạo kết nối HTTP tới DecorSpaceCompanion trên PC."};
+  }
+
+  http.addHeader("Content-Type", "application/json");
+  JsonDocument reqDoc;
+  reqDoc["action"] = action;
+  if (!params.isNull()) {
+    for (JsonPairConst kv : params) {
+      reqDoc[kv.key()] = kv.value();
+    }
+  }
+  String reqBody;
+  serializeJson(reqDoc, reqBody);
+
+  int httpCode = http.POST(reqBody);
+  if (httpCode > 0) {
+    String resp = http.getString();
+    http.end();
+    JsonDocument respDoc;
+    if (!deserializeJson(respDoc, resp)) {
+      bool ok = (respDoc["status"] == "ok" || respDoc["success"] == true);
+      String msg = respDoc["message"] | resp;
+      return {ok, msg};
+    }
+    return {httpCode == 200, resp};
+  }
+
+  String errStr = http.errorToString(httpCode);
+  http.end();
+  return {false, "Không thể kết nối tới DecorSpaceCompanion trên PC (" + ip + ":" + String(port) + "): " + errStr};
 }
 
 } // namespace PeripheralControlService

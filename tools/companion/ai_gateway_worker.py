@@ -27,6 +27,15 @@ from pathlib import Path
 from aiohttp import web
 import aiohttp
 
+from mcp_controller import (
+    MCP_TOOL_DEFINITIONS,
+    execute_pc_action,
+    execute_mcp_tool,
+    get_gemini_function_declarations,
+    get_openai_tools_schema,
+    restore_mcp_tool_name,
+)
+
 logger = logging.getLogger("AiGatewayWorker")
 
 # Tìm đường dẫn FFmpeg thực thi
@@ -458,8 +467,8 @@ def fetch_and_test_gemini_models(api_key: str) -> dict:
         "all_models": all_content_models
     }
 
-def extract_json_user_and_reply(raw_text: str) -> tuple[str, str]:
-    """Trích xuất user_text và reply từ JSON (hoặc markdown codeblock) do Gemini trả về."""
+def extract_json_user_and_reply(raw_text: str) -> tuple[str, str, list[dict]]:
+    """Trích xuất user_text, reply và tool_calls từ JSON (hoặc markdown codeblock) do Gemini trả về."""
     clean = raw_text.strip()
     if clean.startswith("```json"):
         clean = clean[7:]
@@ -473,8 +482,11 @@ def extract_json_user_and_reply(raw_text: str) -> tuple[str, str]:
         if isinstance(data, dict):
             user_text = str(data.get("user_text", "")).strip()
             reply = str(data.get("reply", "")).strip()
-            if reply:
-                return (user_text, reply)
+            tool_calls = data.get("tool_calls", [])
+            if not isinstance(tool_calls, list):
+                tool_calls = []
+            if reply or tool_calls:
+                return (user_text, reply, tool_calls)
     except Exception:
         pass
 
@@ -483,9 +495,104 @@ def extract_json_user_and_reply(raw_text: str) -> tuple[str, str]:
     m_reply = re.search(r'["\']reply["\']\s*:\s*["\'](.*?)["\']', clean, re.DOTALL)
     if m_reply:
         u = m_user.group(1).strip() if m_user else ""
-        return (u, m_reply.group(1).strip())
+        return (u, m_reply.group(1).strip(), [])
 
-    return ("", clean)
+    return ("", clean, [])
+
+
+def build_mcp_system_catalog_prompt() -> str:
+    """Tạo bảng mô tả công cụ MCP ngắn gọn để nhúng vào prompt giúp Gemini chọn tool chính xác trong 1 lượt."""
+    lines = ["DANH SÁCH CÔNG CỤ MCP CÓ THỂ GỌI (Đặt trong mảng \"tool_calls\" nếu người dùng yêu cầu điều khiển Trạm Decor hoặc Máy tính PC):"]
+    for t in MCP_TOOL_DEFINITIONS:
+        props = t.get("inputSchema", {}).get("properties", {})
+        arg_desc = ", ".join([f"{k}: {v.get('type', 'string')}" for k, v in props.items()])
+        lines.append(f"- {t['name']}({arg_desc}): {t['description']}")
+    return "\n".join(lines)
+
+
+async def run_mcp_tool_calls_and_summarize(cfg: dict, tool_calls: list[dict], initial_reply: str, user_text: str, try_model: str) -> str:
+    """Thực thi danh sách tool_calls (cả trên PC và trên Trạm ESP32) và tổng hợp câu trả lời tự nhiên."""
+    if not tool_calls:
+        return initial_reply
+
+    esp_ip = cfg.get("esp32_ip", "192.168.1.82")
+    results = []
+    need_followup_synthesis = False
+
+    for tc in tool_calls:
+        if not isinstance(tc, dict):
+            continue
+        t_name = str(tc.get("name") or tc.get("tool") or "").strip()
+        t_args = tc.get("arguments") or tc.get("args") or {}
+        if not t_name:
+            continue
+        t_name = restore_mcp_tool_name(t_name)
+        logger.info(f"🛠️ [AI MCP CALL] Executing {t_name} with args={t_args}")
+        if t_name == "self.ai.set_identity" and isinstance(t_args, dict):
+            if t_args.get("ai_name"):
+                cfg["ai_name"] = str(t_args["ai_name"]).strip()
+            if t_args.get("wake_word"):
+                cfg["wake_word"] = str(t_args["wake_word"]).strip()
+            elif t_args.get("ai_name"):
+                cfg["wake_word"] = f"{cfg['ai_name']} ơi"
+            try:
+                import config as cfg_mgr
+                c_saved = cfg_mgr.load_config()
+                c_saved["ai_name"] = cfg.get("ai_name", "XiaoZhi")
+                c_saved["wake_word"] = cfg.get("wake_word", "XiaoZhi ơi")
+                cfg_mgr.save_config(c_saved)
+            except Exception:
+                pass
+        res = await asyncio.to_thread(execute_mcp_tool, t_name, t_args, esp_ip)
+        msg = res.get("message", "")
+        results.append({"tool": t_name, "result": res, "message": msg})
+        # Nếu là các tool đọc dữ liệu (đọc clipboard, đọc thông số trạm, báo cáo trạm), cần kết hợp dữ liệu thực tế vào câu trả lời
+        if t_name in ("pc.clipboard.get", "self.station.get_report", "self.telemetry.get", "self.battery.get", "self.wifi.get", "self.storage.get"):
+            need_followup_synthesis = True
+
+    if not results:
+        return initial_reply
+
+    # Nếu có tool truy vấn dữ liệu (như đọc clipboard hoặc kiểm tra trạm), hoặc AI chưa có câu trả lời rõ ràng:
+    if need_followup_synthesis:
+        api_key = cfg.get("gemini_api_key", "").strip()
+        tool_summary = "\n".join([f"- Kết quả {r['tool']}: {r['message']}" for r in results])
+        if api_key and "YOUR_" not in api_key:
+            try:
+                url = f"https://generativelanguage.googleapis.com/v1beta/models/{try_model}:generateContent?key={api_key}"
+                synth_prompt = (
+                    f"Người dùng vừa yêu cầu: \"{user_text}\"\n"
+                    f"Hệ thống MCP đã thực thi công cụ và thu được kết quả thực tế sau:\n{tool_summary}\n\n"
+                    "Hãy trả lời trực tiếp, tự nhiên, ngắn gọn bằng tiếng Việt cho người dùng dựa trên kết quả trên (không dùng markdown)."
+                )
+                req_data = {"contents": [{"role": "user", "parts": [{"text": synth_prompt}]}]}
+                req = urllib.request.Request(
+                    url,
+                    data=json.dumps(req_data).encode("utf-8"),
+                    headers={"Content-Type": "application/json"}
+                )
+                def _call_synth():
+                    with urllib.request.urlopen(req, timeout=12) as r:
+                        return json.loads(r.read().decode("utf-8"))
+                resp_json = await asyncio.to_thread(_call_synth)
+                cands = resp_json.get("candidates", [])
+                if cands:
+                    pts = cands[0].get("content", {}).get("parts", [])
+                    if pts and pts[0].get("text", "").strip():
+                        return pts[0]["text"].strip()
+            except Exception as e:
+                logger.warning(f"Lỗi tổng hợp kết quả MCP: {e}")
+        return " ".join([r["message"] for r in results if r["message"]])
+
+    # Với các lệnh hành động (bật/tắt đèn, hẹn giờ tắt máy, mở app, mở youtube):
+    # Nếu có lỗi thực thi thì trả về thông báo lỗi thực tế, nếu thành công thì ưu tiên lời phản hồi của AI hoặc thông báo kết quả
+    failed = [r["message"] for r in results if not r["result"].get("success", True)]
+    if failed:
+        return " ".join(failed)
+
+    if initial_reply and len(initial_reply.strip()) > 5:
+        return initial_reply.strip()
+    return " ".join([r["message"] for r in results if r["message"]])
 
 async def transcribe_audio_gemini(cfg: dict, wav_bytes: bytes) -> str:
     """Sử dụng Gemini REST API để nhận diện giọng nói (STT)."""
@@ -536,16 +643,42 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
 
     import base64
     audio_b64 = base64.b64encode(wav_bytes).decode("ascii")
-    system_inst = cfg.get("system_prompt", "Bạn là Trợ lý AI Trạm Decor Vũ Trụ. Hãy nghe âm thanh câu hỏi và trả lời tự nhiên, thân thiện, súc tích bằng tiếng Việt.")
+    ai_name = (cfg.get("ai_name") or "XiaoZhi").strip()
+    wake_word = (cfg.get("wake_word") or f"{ai_name} ơi").strip()
+    is_wake_check = bool(cfg.get("_wake_check", False))
+    system_inst = cfg.get(
+        "system_prompt",
+        f"Bạn là {ai_name}, Trợ lý AI thông minh trên Trạm Decor Vũ Trụ. Tên của bạn là {ai_name} và câu đánh thức của bạn là \"{wake_word}\". Hãy trả lời tự nhiên, thân thiện, súc tích bằng tiếng Việt."
+    )
+    if ai_name.lower() not in system_inst.lower():
+        system_inst = f"Tên của bạn là {ai_name} (Trợ lý AI trên Trạm Decor Vũ Trụ, câu đánh thức: \"{wake_word}\"). " + system_inst
+    mcp_catalog = build_mcp_system_catalog_prompt()
+
+    wake_rule = ""
+    if is_wake_check:
+        wake_rule = (
+            f"\nLƯU Ý ĐẶC BIỆT (CHẾ ĐỘ ĐÁNH THỨC TỪ MÀN HÌNH KHÓA ALWAYS ON DISPLAY):\n"
+            f"- Trạm đang ở màn hình chờ Always On Display. Chỉ khi người dùng gọi tên bạn (\"{ai_name}\"), nói câu đánh thức (\"{wake_word}\") hoặc ra lệnh trực tiếp cho trợ lý AI thì mới đánh thức trạm.\n"
+            f"- Nếu âm thanh chỉ là tạp âm, tiếng ồn xung quanh hoặc nói chuyện không gọi đến \"{ai_name}\" / \"{wake_word}\", BẮT BUỘC đặt \"user_text\": \"\" và \"reply\": \"\".\n"
+        )
 
     prompt = (
-        f"{system_inst}\n\n"
+        f"{system_inst}\n"
+        f"{wake_rule}\n"
+        f"{mcp_catalog}\n\n"
         "Nhiệm vụ:\n"
         "1. Nghe tệp âm thanh đính kèm và nhận diện chính xác từng từ tiếng Việt người dùng vừa nói (STT). "
         "Nếu trong audio không có tiếng người nói rõ ràng hoặc im lặng, đặt user_text là \"\".\n"
-        "2. Trả lời câu hỏi đó một cách tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt.\n\n"
+        "2. Nếu người dùng yêu cầu điều khiển Trạm Decor (bật/tắt đèn Edison, đèn COB, cối xay gió, chỉnh âm lượng, chuyển màn hình, mở nhạc, đổi biểu cảm, đổi tên AI, báo cáo tình trạng trạm...) "
+        "HOẶC yêu cầu thao tác trên máy tính PC (hẹn giờ tắt máy, hủy tắt máy, khóa máy, đọc nội dung clipboard, chép vào clipboard, mở ứng dụng/app trên PC, mở YouTube tìm video/nhạc, mở trang web...), "
+        "hãy điền danh sách công cụ cần gọi vào mảng \"tool_calls\" theo đúng tên và tham số.\n"
+        f"3. Viết câu trả lời xác nhận tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt (xưng là {ai_name}) trong \"reply\".\n\n"
         "BẮT BUỘC trả về định dạng JSON thuần túy (response_mime_type: application/json):\n"
-        "{\"user_text\": \"<câu người dùng nói>\", \"reply\": \"<câu trả lời của AI>\"}"
+        "{\n"
+        "  \"user_text\": \"<câu người dùng nói>\",\n"
+        "  \"tool_calls\": [{\"name\": \"<tên_công_cụ_mcp>\", \"arguments\": {<các_tham_số>}}],\n"
+        "  \"reply\": \"<câu trả lời của AI>\"\n"
+        "}"
     )
 
     last_err = ""
@@ -579,7 +712,9 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
                 if parts:
                     raw_text = parts[0].get("text", "").strip()
                     if raw_text:
-                        user_text, reply = extract_json_user_and_reply(raw_text)
+                        user_text, reply, tool_calls = extract_json_user_and_reply(raw_text)
+                        if tool_calls:
+                            reply = await run_mcp_tool_calls_and_summarize(cfg, tool_calls, reply, user_text, try_model)
                         if reply:
                             return (user_text, reply, f"Google Gemini ({try_model})")
         except Exception as e:
@@ -591,10 +726,17 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
 async def process_with_gemini(cfg: dict, model_id: str, wav_bytes: bytes, enable_search: bool, ws: web.WebSocketResponse):
     """Xử lý âm thanh hỏi đáp bằng Google Gemini."""
     voice = cfg.get("ai_gateway_voice", "vi-VN-HoaiMyNeural")
-    await ws.send_str(json.dumps({"type": "thinking", "text": f"{model_id} đang nghe và suy luận..."}))
+    is_wake_check = bool(cfg.get("_wake_check", False))
+    if not is_wake_check:
+        await ws.send_str(json.dumps({"type": "thinking", "text": f"{model_id} đang nghe và suy luận..."}))
 
     user_text, reply, sources = await ask_gemini_internal(cfg, model_id, wav_bytes, enable_search)
-    
+
+    # Nếu đang ở chế độ kiểm tra đánh thức từ màn hình khóa AOD mà không có câu gọi hợp lệ -> bỏ qua êm ái, không bật sáng màn hình
+    if is_wake_check and (not user_text.strip() or not reply.strip()):
+        logger.info("🌙 [AOD WAKE CHECK] Âm thanh không chứa câu đánh thức AI -> Giữ nguyên màn hình AOD.")
+        return
+
     # Gửi gói STT tới ESP32 ngay khi nhận diện được câu hỏi của người dùng
     if user_text:
         logger.info(f"🗣️ [STT GEMINI]: \"{user_text}\"")
@@ -603,9 +745,12 @@ async def process_with_gemini(cfg: dict, model_id: str, wav_bytes: bytes, enable
         logger.info(f"🗣️ [STT GEMINI]: Không có nội dung lời nói rõ ràng")
         await ws.send_str(json.dumps({"type": "stt", "text": "(Giọng nói)"}, ensure_ascii=False))
 
+    if is_wake_check:
+        await ws.send_str(json.dumps({"type": "wake", "user_text": user_text, "reply": reply}, ensure_ascii=False))
+
     logger.info(f"🤖 [{model_id}] Phản hồi: {reply}")
     emotion = detect_emotion_from_text(reply)
-    await ws.send_str(json.dumps({"type": "answer", "text": reply, "sources": sources, "emotion": emotion}, ensure_ascii=False))
+    await ws.send_str(json.dumps({"type": "answer", "text": reply, "sources": sources, "emotion": emotion, "wake_triggered": is_wake_check}, ensure_ascii=False))
 
     sentences = split_into_smart_sentences(reply, max_chars=130)
     logger.info(f"⚡ [STREAMING] Đã chia thành {len(sentences)} câu. Bắt đầu Pipelined TTS...")
@@ -641,6 +786,13 @@ async def process_with_openai_compat(cfg: dict, wav_bytes: bytes, enable_search:
     await ws.send_str(json.dumps({"type": "thinking", "text": f"{model_name} đang suy luận..."}))
 
     oai_client = OpenAI(api_key=oai_key, base_url=base_url)
+    mcp_catalog = build_mcp_system_catalog_prompt()
+    sys_content = (
+        f"{cfg.get('system_prompt', 'Trả lời súc tích bằng tiếng Việt.')}\n\n"
+        f"{mcp_catalog}\n\n"
+        "Nếu người dùng yêu cầu điều khiển Trạm Decor hoặc thao tác trên PC, hãy trả về JSON: "
+        "{\"tool_calls\": [{\"name\": \"<tên_công_cụ>\", \"arguments\": {}}], \"reply\": \"<câu trả lời>\"}"
+    )
     prompt_content = user_text
     if web_ctx:
         prompt_content = f"Thông tin cập nhật thời gian thực ({time.strftime('%d/%m/%Y %H:%M')}):\n{web_ctx}\n\nCâu hỏi: {user_text}"
@@ -649,14 +801,19 @@ async def process_with_openai_compat(cfg: dict, wav_bytes: bytes, enable_search:
         return oai_client.chat.completions.create(
             model=model_name,
             messages=[
-                {"role": "system", "content": cfg.get("system_prompt", "Trả lời súc tích bằng tiếng Việt.")},
+                {"role": "system", "content": sys_content},
                 {"role": "user", "content": prompt_content}
             ]
         )
 
     try:
         comp = await asyncio.to_thread(call_llm)
-        reply = (comp.choices[0].message.content or "").strip()
+        raw_reply = (comp.choices[0].message.content or "").strip()
+        _, extracted_reply, tool_calls = extract_json_user_and_reply(raw_reply)
+        if tool_calls:
+            reply = await run_mcp_tool_calls_and_summarize(cfg, tool_calls, extracted_reply, user_text, "gemini-3-flash-preview")
+        else:
+            reply = extracted_reply or raw_reply
     except Exception as e:
         logger.error(f"Lỗi LLM {model_name}: {e}")
         await ws.send_str(json.dumps({"type": "error", "text": f"Lỗi LLM: {e}"}))
@@ -672,12 +829,28 @@ async def process_with_openai_compat(cfg: dict, wav_bytes: bytes, enable_search:
 
 async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemini-flash-lite-latest") -> tuple[str, str]:
     """
-    Gọi mô hình LLM từ text thuần (Chat WebControl / Companion Chat).
+    Gọi mô hình LLM từ text thuần (Chat WebControl / Companion Chat), hỗ trợ đầy đủ MCP Tool Calling cho Trạm và PC.
     Trả về: (reply_text, emotion)
     """
     gemini_key = cfg.get("gemini_api_key", "").strip()
     oai_key = cfg.get("openai_api_key", "").strip()
-    system_prompt = cfg.get("system_prompt", "Bạn là Trợ lý AI trên Trạm Decor ESP32. Hãy trả lời súc tích, tự nhiên, sinh động bằng tiếng Việt.")
+    ai_name = (cfg.get("ai_name") or "XiaoZhi").strip()
+    wake_word = (cfg.get("wake_word") or f"{ai_name} ơi").strip()
+    system_prompt = cfg.get(
+        "system_prompt",
+        f"Bạn là {ai_name}, Trợ lý AI trên Trạm Decor ESP32 (câu đánh thức: \"{wake_word}\"). Hãy trả lời súc tích, tự nhiên, sinh động bằng tiếng Việt."
+    )
+    if ai_name.lower() not in system_prompt.lower():
+        system_prompt = f"Tên của bạn là {ai_name} (câu đánh thức: \"{wake_word}\"). " + system_prompt
+    mcp_catalog = build_mcp_system_catalog_prompt()
+    structured_instruction = (
+        f"{system_prompt}\n\n"
+        f"{mcp_catalog}\n\n"
+        "Nếu người dùng yêu cầu điều khiển Trạm Decor hoặc thao tác trên máy tính PC (hẹn giờ tắt máy, hủy tắt máy, đọc clipboard, mở ứng dụng, mở YouTube, mở web...), "
+        "hãy thêm công cụ cần gọi vào mảng \"tool_calls\". Nếu chỉ trò chuyện thông thường, để \"tool_calls\": [].\n"
+        "BẮT BUỘC trả về JSON hợp lệ:\n"
+        "{\"tool_calls\": [{\"name\": \"<tên_công_cụ>\", \"arguments\": {}}], \"reply\": \"<câu trả lời tiếng Việt tự nhiên>\"}"
+    )
 
     # 1. Nếu chọn DeepSeek hoặc có OpenAI key
     if model_id == "deepseek-r1" or (oai_key and not gemini_key):
@@ -691,18 +864,22 @@ async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemi
                     comp = client.chat.completions.create(
                         model=model_name,
                         messages=[
-                            {"role": "system", "content": system_prompt},
+                            {"role": "system", "content": structured_instruction},
                             {"role": "user", "content": prompt_text}
                         ]
                     )
                     return comp.choices[0].message.content or ""
-                reply = await asyncio.to_thread(_call_oai)
-                if reply.strip():
-                    return (reply.strip(), detect_emotion_from_text(reply))
+                raw_reply = await asyncio.to_thread(_call_oai)
+                if raw_reply.strip():
+                    _, reply, tool_calls = extract_json_user_and_reply(raw_reply)
+                    if tool_calls:
+                        reply = await run_mcp_tool_calls_and_summarize(cfg, tool_calls, reply, prompt_text, "gemini-3-flash-preview")
+                    final_reply = (reply or raw_reply).strip()
+                    return (final_reply, detect_emotion_from_text(final_reply))
             except Exception as e:
                 logger.error(f"Lỗi gọi OpenAI/DeepSeek: {e}")
 
-    # 2. Mặc định gọi Gemini
+    # 2. Mặc định gọi Gemini kèm MCP Tools
     if gemini_key and "YOUR_" not in gemini_key:
         chosen_model = normalize_gemini_model(model_id or cfg.get("gemini_model") or "gemini-flash-lite-latest")
         candidate_models = []
@@ -717,8 +894,11 @@ async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemi
                 url = f"https://generativelanguage.googleapis.com/v1beta/models/{try_model}:generateContent?key={gemini_key}"
                 req_data = {
                     "contents": [
-                        {"role": "user", "parts": [{"text": f"{system_prompt}\n\nNgười dùng: {prompt_text}"}]}
-                    ]
+                        {"role": "user", "parts": [{"text": f"{structured_instruction}\n\nNgười dùng: {prompt_text}"}]}
+                    ],
+                    "generationConfig": {
+                        "response_mime_type": "application/json"
+                    }
                 }
                 req = urllib.request.Request(
                     url,
@@ -733,11 +913,15 @@ async def call_llm_text_async(cfg: dict, prompt_text: str, model_id: str = "gemi
                 if candidates:
                     parts = candidates[0].get("content", {}).get("parts", [])
                     if parts:
-                        reply = parts[0].get("text", "").strip()
-                        if reply:
-                            if try_model != chosen_model:
-                                logger.info(f"Model {chosen_model} không phản hồi, tự động dùng {try_model} thành công!")
-                            return (reply, detect_emotion_from_text(reply))
+                        raw_text = parts[0].get("text", "").strip()
+                        if raw_text:
+                            _, reply, tool_calls = extract_json_user_and_reply(raw_text)
+                            if tool_calls:
+                                reply = await run_mcp_tool_calls_and_summarize(cfg, tool_calls, reply, prompt_text, try_model)
+                            if reply:
+                                if try_model != chosen_model:
+                                    logger.info(f"Model {chosen_model} không phản hồi, tự động dùng {try_model} thành công!")
+                                return (reply, detect_emotion_from_text(reply))
             except urllib.error.HTTPError as he:
                 err_body = he.read().decode("utf-8", errors="ignore")
                 last_error = f"HTTP {he.code}: {err_body[:100]}"
@@ -801,12 +985,15 @@ class AiGatewayServer:
             try:
                 body = await request.json()
                 changed = False
-                for k in ["gemini_api_key", "openai_api_key", "openai_base_url", "openai_model", "gemini_model", "ai_gateway_voice"]:
+                for k in ["gemini_api_key", "openai_api_key", "openai_base_url", "openai_model", "gemini_model", "ai_gateway_voice", "ai_name", "wake_word"]:
                     if k in body and body[k] is not None:
                         val = str(body[k]).strip()
-                        if val != "" or k in ["openai_base_url", "openai_model", "gemini_model", "ai_gateway_voice"]:
+                        if val != "" or k in ["openai_base_url", "openai_model", "gemini_model", "ai_gateway_voice", "ai_name", "wake_word"]:
                             cfg[k] = val
                             changed = True
+                if "voice_wake_enabled" in body:
+                    cfg["voice_wake_enabled"] = bool(body["voice_wake_enabled"])
+                    changed = True
                 if changed and self.cfg_setter and callable(self.cfg_setter):
                     self.cfg_setter(cfg)
                 return web.json_response({
@@ -831,7 +1018,10 @@ class AiGatewayServer:
             "deepseek_masked": (o_key[:4] + "..." + o_key[-4:]) if len(o_key) > 8 else ("***" if o_key else ""),
             "openai_base_url": cfg.get("openai_base_url", "https://api.deepseek.com"),
             "openai_model": cfg.get("openai_model", "gemini-flash-lite-latest"),
-            "voice": cfg.get("ai_gateway_voice", "vi-VN-HoaiMyNeural")
+            "voice": cfg.get("ai_gateway_voice", "vi-VN-HoaiMyNeural"),
+            "ai_name": cfg.get("ai_name", "XiaoZhi"),
+            "wake_word": cfg.get("wake_word", "XiaoZhi ơi"),
+            "voice_wake_enabled": cfg.get("voice_wake_enabled", True)
         }, headers={"Access-Control-Allow-Origin": "*"})
 
     async def handle_http_gemini_models(self, request: web.Request) -> web.Response:
@@ -963,6 +1153,56 @@ class AiGatewayServer:
             "Access-Control-Allow-Private-Network": "true"
         })
 
+    async def handle_http_pc_action(self, request: web.Request) -> web.Response:
+        """API nhận lệnh điều khiển PC từ Trạm ESP32 (McpTools) hoặc Web UI."""
+        params = dict(request.query)
+        if request.method == "POST":
+            try:
+                body = await request.json()
+                if isinstance(body, dict):
+                    params.update(body)
+            except Exception:
+                pass
+
+        action = params.get("action") or params.get("tool") or ""
+        if not action:
+            return web.json_response({
+                "status": "error",
+                "success": False,
+                "message": "Thiếu tham số 'action'"
+            }, status=400)
+
+        logger.info(f"🖥️ [HTTP PC ACTION] action={action} | params={params}")
+        result = await asyncio.to_thread(execute_pc_action, action, params)
+        status_code = 200 if result.get("success", False) else 400
+        return web.json_response(result, status=status_code)
+
+    async def handle_http_mcp_tools(self, request: web.Request) -> web.Response:
+        """Trả về danh sách toàn bộ công cụ MCP (Trạm ESP32 + PC Companion)."""
+        return web.json_response({
+            "status": "ok",
+            "count": len(MCP_TOOL_DEFINITIONS),
+            "tools": MCP_TOOL_DEFINITIONS
+        })
+
+    async def handle_http_mcp_call(self, request: web.Request) -> web.Response:
+        """Thực thi trực tiếp một công cụ MCP bất kỳ (pc.* hoặc self.*)."""
+        cfg = self.get_cfg()
+        esp_ip = cfg.get("esp32_ip", "192.168.1.82")
+        try:
+            body = await request.json()
+        except Exception:
+            return web.json_response({"status": "error", "success": False, "message": "Invalid JSON body"}, status=400)
+
+        tool_name = body.get("name") or body.get("tool") or ""
+        arguments = body.get("arguments") or body.get("args") or {}
+        if not tool_name:
+            return web.json_response({"status": "error", "success": False, "message": "Missing tool 'name'"}, status=400)
+
+        result = await asyncio.to_thread(execute_mcp_tool, tool_name, arguments, esp_ip)
+        status_code = 200 if result.get("success", False) else 400
+        return web.json_response(result, status=status_code)
+
     async def handle_http_chat(self, request: web.Request) -> web.Response:
         cfg = self.get_cfg()
         message = ""
@@ -1049,6 +1289,9 @@ class AiGatewayServer:
         enable_search = True
         sample_rate = 16000
         is_mic_test = False
+        is_wake_check = False
+        session_ai_name = ""
+        session_wake_word = ""
         rec_filename = ""
 
         try:
@@ -1062,13 +1305,21 @@ class AiGatewayServer:
                         pcm_buf.clear()
                         await cancel_existing_ws_stream(ws)
                         is_mic_test = (msg_type == "mic_record")
+                        is_wake_check = bool(data.get("wake_check", False))
+                        session_ai_name = str(data.get("ai_name") or "").strip()
+                        session_wake_word = str(data.get("wake_word") or "").strip()
                         rec_filename = data.get("filename", "")
                         model_key = data.get("model", "gemini-pro")
                         enable_search = bool(data.get("search", True))
                         sample_rate = int(data.get("sample_rate", 16000))
-                        logger.info(f"🎙️ Phiên mới: type={msg_type}, model={model_key}, search={enable_search}, sr={sample_rate}")
+                        logger.info(f"🎙️ Phiên mới: type={msg_type}, model={model_key}, wake_check={is_wake_check}, ai_name={session_ai_name or cfg.get('ai_name', 'XiaoZhi')}")
                     elif msg_type == "end":
-                        cfg = self.get_cfg()
+                        cfg = dict(self.get_cfg())
+                        if session_ai_name:
+                            cfg["ai_name"] = session_ai_name
+                        if session_wake_word:
+                            cfg["wake_word"] = session_wake_word
+                        cfg["_wake_check"] = is_wake_check
                         logger.info(f"📦 Đã nhận xong {len(pcm_buf)} bytes PCM từ Mic ESP32. Bắt đầu xử lý...")
                         wav_bytes = pcm_to_wav_bytes(bytes(pcm_buf), sample_rate)
                         rec_dir = Path(__file__).resolve().parent.parent / "gateway" / "recordings"
@@ -1194,6 +1445,13 @@ def create_aiohttp_app(server_handler):
     app.router.add_get("/api/models", server_handler.handle_http_gemini_models)
     app.router.add_post("/api/models", server_handler.handle_http_gemini_models)
     app.router.add_options("/api/models", server_handler.handle_http_options)
+    app.router.add_get("/api/pc/action", server_handler.handle_http_pc_action)
+    app.router.add_post("/api/pc/action", server_handler.handle_http_pc_action)
+    app.router.add_options("/api/pc/action", server_handler.handle_http_options)
+    app.router.add_get("/api/mcp/tools", server_handler.handle_http_mcp_tools)
+    app.router.add_options("/api/mcp/tools", server_handler.handle_http_options)
+    app.router.add_post("/api/mcp/call", server_handler.handle_http_mcp_call)
+    app.router.add_options("/api/mcp/call", server_handler.handle_http_options)
     app.router.add_get("/ws", server_handler.handle_websocket)
     app.router.add_get("/", server_handler.handle_websocket)
     return app
