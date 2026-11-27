@@ -1,9 +1,9 @@
-﻿{
-    "version":  "v3.4.0",
-    "name":  "Space OS",
-    "build_date":  "2026-11-27",
-    "bin_url":  "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
-    "release_url":  "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.4.0/firmware.bin",
-    "size":  2253488,
-    "changelog":  "ðŸš€ Space OS v3.4.0 - Live 2-Way AI Conversation (Smart VAD), Standby Voice Wake \u0026 Voice Exit:\n- Há»— trá»£ gá»i tÃªn AI / cÃ¢u Ä‘Ã¡nh thá»©c trá»±c tiáº¿p ngay tá»« MÃ n hÃ¬nh chá» (Standby) vÃ  MÃ n hÃ¬nh khÃ³a (AOD) Ä‘á»ƒ truy cáº­p tháº³ng vÃ o Trá»£ lÃ½ AI.\n- Bá»• sung cháº¿ Ä‘á»™ Há»™i thoáº¡i Trá»±c tiáº¿p (LIVE Mode): Tá»± Ä‘á»™ng láº¯ng nghe liÃªn tá»¥c, tá»± nháº­n diá»‡n khi ngÆ°á»i dÃ¹ng ngá»«ng nÃ³i (Smart VAD) Ä‘á»ƒ tráº£ lá»i vÃ  tá»± Ä‘á»™ng má»Ÿ láº¡i Mic ngay sau khi AI dá»©t lá»i nhÆ° má»™t cuá»™c trÃ² chuyá»‡n 2 ngÆ°á»i.\n- Há»— trá»£ kháº©u lá»‡nh giá»ng nÃ³i \"ThoÃ¡t\" / \"ThoÃ¡t vá» mÃ n hÃ¬nh chá»\" Ä‘á»ƒ Ä‘Ã³ng cháº¿ Ä‘á»™ Trá»£ lÃ½ AI vÃ  quay vá» MÃ n hÃ¬nh chá» tá»©c thÃ¬."
+{
+  "version": "v3.4.0",
+  "name": "Space OS",
+  "build_date": "2026-11-27",
+  "bin_url": "https://raw.githubusercontent.com/MinhDz/Decor_Esp32/main/release/firmware.bin",
+  "release_url": "https://github.com/MinhDz/Decor_Esp32/releases/download/v3.4.0/firmware.bin",
+  "size": 2251968,
+  "changelog": "🚀 Space OS v3.4.0 (2026-11-27):\n- feat(v3.4.0): add Standby voice wake, Live 2-way VAD conversation & voice exit to standby"
 }
