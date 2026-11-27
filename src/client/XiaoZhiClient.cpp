@@ -54,7 +54,9 @@ static String s_ttsVoice = "vi-VN-HoaiMyNeural";
 static String s_aiName = "XiaoZhi";
 static String s_wakeWord = "XiaoZhi ơi";
 static bool s_voiceWakeEnabled = true;
+static bool s_liveModeEnabled = true;
 static volatile bool s_voiceWakeTriggered = false;
+static volatile bool s_voiceExitTriggered = false;
 static bool s_aiConfigLoaded = false;
 
 static void loadAIConfigIfNeeded() {
@@ -96,6 +98,9 @@ static void loadAIConfigIfNeeded() {
       }
       if (doc["voice_wake_enabled"].is<bool>()) {
         s_voiceWakeEnabled = doc["voice_wake_enabled"].as<bool>();
+      }
+      if (doc["live_mode_enabled"].is<bool>()) {
+        s_liveModeEnabled = doc["live_mode_enabled"].as<bool>();
       }
     }
   }
@@ -309,6 +314,7 @@ void XiaoZhiClient::getAIConfig(JsonDocument& doc) {
   doc["ai_name"] = s_aiName;
   doc["wake_word"] = s_wakeWord;
   doc["voice_wake_enabled"] = s_voiceWakeEnabled;
+  doc["live_mode_enabled"] = s_liveModeEnabled;
 }
 
 bool XiaoZhiClient::saveAIConfig(const String& body) {
@@ -348,10 +354,14 @@ bool XiaoZhiClient::saveAIConfig(const String& body) {
   if (fullDoc["voice_wake_enabled"].is<bool>()) {
     s_voiceWakeEnabled = fullDoc["voice_wake_enabled"].as<bool>();
   }
+  if (fullDoc["live_mode_enabled"].is<bool>()) {
+    s_liveModeEnabled = fullDoc["live_mode_enabled"].as<bool>();
+  }
 
   fullDoc["ai_name"] = s_aiName;
   fullDoc["wake_word"] = s_wakeWord;
   fullDoc["voice_wake_enabled"] = s_voiceWakeEnabled;
+  fullDoc["live_mode_enabled"] = s_liveModeEnabled;
 
   File file = LittleFS.open(FILE_CONFIG, "w");
   if (!file) return false;
@@ -443,6 +453,23 @@ void XiaoZhiClient::triggerVoiceWake(const String& replyText, const String& user
     s_lastAiReplyTime = millis();
   }
   s_voiceWakeTriggered = true;
+}
+bool XiaoZhiClient::isLiveModeEnabled() {
+  loadAIConfigIfNeeded();
+  return s_liveModeEnabled;
+}
+void XiaoZhiClient::setLiveModeEnabled(bool enabled) {
+  loadAIConfigIfNeeded();
+  s_liveModeEnabled = enabled;
+}
+bool XiaoZhiClient::isVoiceExitTriggered() {
+  return s_voiceExitTriggered;
+}
+void XiaoZhiClient::clearVoiceExitTrigger() {
+  s_voiceExitTriggered = false;
+}
+void XiaoZhiClient::triggerVoiceExit() {
+  s_voiceExitTriggered = true;
 }
 bool XiaoZhiClient::isPcGatewayMode() { loadAIConfigIfNeeded(); return (s_aiBackend == 1); }
 
@@ -1028,10 +1055,16 @@ static bool executeLocalVoiceIntent(const String& rawText, bool isFromAi = false
   }
 
   // 5. Chuyển chế độ màn hình SpaceOS & Ứng dụng chức năng (CHỈ KHI NGƯỜI DÙNG RA LỆNH QUA MIC - KHÔNG ÁP DỤNG KHI AI NÓI/ĐỌC TIN TỨC)
-  else if (!isFromAi && (s.indexOf("man hinh cho") >= 0 || s.indexOf("ve man hinh cho") >= 0 ||
+  else if (!isFromAi && (s == "thoat" || s == "thoat." || s == "thoat!" ||
+                         s.indexOf("thoat ve man hinh cho") >= 0 || s.indexOf("thoat man hinh cho") >= 0 ||
+                         s.indexOf("thoat tro ly") >= 0 || s.indexOf("thoat ai") >= 0 ||
+                         s.indexOf("thoat che do") >= 0 || s.indexOf("ket thuc tro chuyen") >= 0 ||
+                         s.indexOf("dung tro chuyen") >= 0 || s.indexOf("tam biet") >= 0 ||
+                         s.indexOf("man hinh cho") >= 0 || s.indexOf("ve man hinh cho") >= 0 ||
                          s.indexOf("chuyen ve man hinh cho") >= 0 || s.indexOf("bat man hinh cho") >= 0)) {
+    XiaoZhiClient::triggerVoiceExit();
     TestDisplay::setScreenMode("standby");
-    replyMsg = "Da chuyen ve man hinh cho!";
+    replyMsg = "Da thoat ve man hinh cho!";
     handled = true;
   } else if (!isFromAi && (s.indexOf("man hinh pc") >= 0 || s.indexOf("thong so pc") >= 0 ||
                            s.indexOf("kiem tra may tinh") >= 0 || s.indexOf("pc hud") >= 0)) {
@@ -1294,8 +1327,9 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 s_lastSttText = String(txt);
                 s_sttReceived = true;
                 Serial.printf("🎤 [XIAOZHI WS STT]: \"%s\"\n", s_lastSttText.c_str());
-                // Kiểm tra xem câu STT có chứa từ khóa đánh thức (Wake Word) hoặc tên AI không khi đang ở chế độ AOD / Sleep
-                if (DisplayDriver::isSleeping() && XiaoZhiClient::isVoiceWakeEnabled()) {
+                // Kiểm tra xem câu STT có chứa từ khóa đánh thức (Wake Word) hoặc tên AI không khi đang ở chế độ AOD / Sleep hoặc Màn hình chờ (Standby Mode 0)
+                bool isSleepingOrStandby = DisplayDriver::isSleeping() || (TestDisplay::getCurrentMode() == 0);
+                if (isSleepingOrStandby && XiaoZhiClient::isVoiceWakeEnabled()) {
                   String sttNorm = XiaoZhiClient::stripVietnameseToAscii(s_lastSttText);
                   sttNorm.toLowerCase();
                   String wkNorm = XiaoZhiClient::stripVietnameseToAscii(XiaoZhiClient::getWakeWord());
@@ -1306,7 +1340,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                       (nameNorm.length() >= 2 && sttNorm.indexOf(nameNorm) >= 0) ||
                       sttNorm.indexOf("tro ly") >= 0 || sttNorm.indexOf("thuc day") >= 0) {
                     s_voiceWakeTriggered = true;
-                    Serial.printf("🔆 [STT WAKE MATCH] Phát hiện câu nói đánh thức \"%s\" từ AOD!\n", s_lastSttText.c_str());
+                    Serial.printf("🔆 [STT WAKE MATCH] Phát hiện câu nói đánh thức \"%s\" từ Màn hình chờ / AOD!\n", s_lastSttText.c_str());
                   }
                 }
                 executeLocalVoiceIntent(s_lastSttText);
@@ -1418,6 +1452,7 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
             } else if (strcmp(type, "answer") == 0) {
               TestAudio::stopStreamPcmAsync(); // Xóa sạch bộ đệm âm thanh cũ để tránh phát đè hoặc tồn đọng
               bool wakeTriggered = doc["wake_triggered"] | false;
+              bool exitStandby = doc["exit_to_standby"] | false;
               const char* txt = doc["text"] | "";
               if (strlen(txt) > 0) {
                 s_lastAiFullReply = String(txt);
@@ -1430,10 +1465,12 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
                 } else {
                   s_lastEmotion = XiaoZhiClient::detectEmotionFromText(s_lastAiFullReply);
                 }
-                if (wakeTriggered || DisplayDriver::isSleeping()) {
+                if (exitStandby) {
+                  s_voiceExitTriggered = true;
+                } else if (wakeTriggered || DisplayDriver::isSleeping() || TestDisplay::getCurrentMode() == 0) {
                   s_voiceWakeTriggered = true;
                 }
-                Serial.printf("🤖 [PC GATEWAY ANSWER]: \"%s\" | Emotion: %s | Wake=%d\n", s_lastAiFullReply.c_str(), s_lastEmotion.c_str(), wakeTriggered);
+                Serial.printf("🤖 [PC GATEWAY ANSWER]: \"%s\" | Emotion: %s | Wake=%d | Exit=%d\n", s_lastAiFullReply.c_str(), s_lastEmotion.c_str(), wakeTriggered, exitStandby);
                 executeLocalVoiceIntent(s_lastAiFullReply, true);
               }
             } else if (strcmp(type, "wake") == 0) {
@@ -1441,6 +1478,9 @@ static void ws_event_handler(void *handler_args, esp_event_base_t base, int32_t 
               const char* rTxt = doc["reply"] | "";
               XiaoZhiClient::triggerVoiceWake(String(rTxt), String(uTxt));
               Serial.printf("🔆 [VOICE WAKE WS] Nhận tín hiệu đánh thức AI từ AOD/Standby: user=\"%s\"\n", uTxt);
+            } else if (strcmp(type, "exit_ai") == 0) {
+              XiaoZhiClient::triggerVoiceExit();
+              Serial.println("🚪 [VOICE EXIT WS] Nhận tín hiệu thoát Trợ lý AI về Màn hình chờ!");
             } else if (strcmp(type, "done") == 0) {
               s_ttsFinished = true;
               Serial.println("⏹️ [PC GATEWAY DONE]: Đã nhận xong toàn bộ câu thoại từ PC Gateway.");
@@ -1797,7 +1837,7 @@ bool XiaoZhiClient::sendAudioToXiaoZhi(const int16_t* pcmSamples, size_t sampleC
     TestAudio::stopStreamPcmAsync(); // Dừng phát âm thanh cũ khi người dùng bắt đầu nói câu mới
     String aiName = getAiName();
     String wakeW = getWakeWord();
-    bool isWakeCheck = DisplayDriver::isSleeping();
+    bool isWakeCheck = DisplayDriver::isSleeping() || (TestDisplay::getCurrentMode() == 0);
     String startMsg = "{\"type\":\"start\",\"model\":\"" + s_aiModel + "\",\"search\":true,\"sample_rate\":" + String(sampleRate) +
                       ",\"ai_name\":\"" + aiName + "\",\"wake_word\":\"" + wakeW + "\",\"wake_check\":" + (isWakeCheck ? "true" : "false") + "}";
     int retStart = esp_websocket_client_send_text(s_wsClient, startMsg.c_str(), startMsg.length(), pdMS_TO_TICKS(1500));

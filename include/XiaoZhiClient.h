@@ -78,6 +78,11 @@ public:
   static bool isVoiceWakeTriggered();
   static void clearVoiceWakeTrigger();
   static void triggerVoiceWake(const String& replyText = "", const String& userText = "");
+  static bool isLiveModeEnabled();
+  static void setLiveModeEnabled(bool enabled);
+  static bool isVoiceExitTriggered();
+  static void clearVoiceExitTrigger();
+  static void triggerVoiceExit();
   static bool isPcGatewayMode();
   static bool updatePcGatewayIpDynamic(const String& newIp, int newPort = 8765);
 };

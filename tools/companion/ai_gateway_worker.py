@@ -657,9 +657,9 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
     wake_rule = ""
     if is_wake_check:
         wake_rule = (
-            f"\nLƯU Ý ĐẶC BIỆT (CHẾ ĐỘ ĐÁNH THỨC TỪ MÀN HÌNH KHÓA ALWAYS ON DISPLAY):\n"
-            f"- Trạm đang ở màn hình chờ Always On Display. Chỉ khi người dùng gọi tên bạn (\"{ai_name}\"), nói câu đánh thức (\"{wake_word}\") hoặc ra lệnh trực tiếp cho trợ lý AI thì mới đánh thức trạm.\n"
-            f"- Nếu âm thanh chỉ là tạp âm, tiếng ồn xung quanh hoặc nói chuyện không gọi đến \"{ai_name}\" / \"{wake_word}\", BẮT BUỘC đặt \"user_text\": \"\" và \"reply\": \"\".\n"
+            f"\nLƯU Ý ĐẶC BIỆT (CHẾ ĐỘ GỌI TÊN AI TỪ MÀN HÌNH CHỜ STANDBY / ALWAYS ON DISPLAY):\n"
+            f"- Trạm đang ở Màn hình chờ (Standby) hoặc Màn hình khóa (Always On Display). Khi người dùng gọi tên bạn (\"{ai_name}\"), nói câu đánh thức (\"{wake_word}\") hoặc hỏi/ra lệnh trực tiếp cho trợ lý AI thì hãy trả lời tự nhiên để trạm mở giao diện Trợ lý AI.\n"
+            f"- Nếu âm thanh chỉ là tạp âm, tiếng ồn xung quanh hoặc tiếng thở/tiếng gõ phím không có lời nói rõ ràng gọi đến \"{ai_name}\" / \"{wake_word}\", BẮT BUỘC đặt \"user_text\": \"\" và \"reply\": \"\".\n"
         )
 
     prompt = (
@@ -669,10 +669,11 @@ async def ask_gemini_internal(cfg: dict, model_id: str, wav_bytes: bytes, enable
         "Nhiệm vụ:\n"
         "1. Nghe tệp âm thanh đính kèm và nhận diện chính xác từng từ tiếng Việt người dùng vừa nói (STT). "
         "Nếu trong audio không có tiếng người nói rõ ràng hoặc im lặng, đặt user_text là \"\".\n"
-        "2. Nếu người dùng yêu cầu điều khiển Trạm Decor (bật/tắt đèn Edison, đèn COB, cối xay gió, chỉnh âm lượng, chuyển màn hình, mở nhạc, đổi biểu cảm, đổi tên AI, báo cáo tình trạng trạm...) "
+        "2. Nếu người dùng nói \"thoát\", \"thoát về màn hình chờ\", \"về màn hình chờ\", \"tạm biệt\" hoặc yêu cầu thoát chế độ trợ lý AI: hãy gọi công cụ MCP `self.screen.set_mode` với `{\"mode\": \"standby\"}` trong `tool_calls` và trả lời ngắn gọn (ví dụ: \"Đã thoát về màn hình chờ, hẹn gặp lại bạn nhé!\").\n"
+        "3. Nếu người dùng yêu cầu điều khiển Trạm Decor (bật/tắt đèn Edison, đèn COB, cối xay gió, chỉnh âm lượng, chuyển màn hình, mở nhạc, đổi biểu cảm, đổi tên AI, báo cáo tình trạng trạm...) "
         "HOẶC yêu cầu thao tác trên máy tính PC (hẹn giờ tắt máy, hủy tắt máy, khóa máy, đọc nội dung clipboard, chép vào clipboard, mở ứng dụng/app trên PC, mở YouTube tìm video/nhạc, mở trang web...), "
         "hãy điền danh sách công cụ cần gọi vào mảng \"tool_calls\" theo đúng tên và tham số.\n"
-        f"3. Viết câu trả lời xác nhận tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt (xưng là {ai_name}) trong \"reply\".\n\n"
+        f"4. Viết câu trả lời xác nhận tự nhiên, thân thiện, ngắn gọn bằng tiếng Việt (xưng là {ai_name}) trong \"reply\".\n\n"
         "BẮT BUỘC trả về định dạng JSON thuần túy (response_mime_type: application/json):\n"
         "{\n"
         "  \"user_text\": \"<câu người dùng nói>\",\n"
@@ -737,13 +738,35 @@ async def process_with_gemini(cfg: dict, model_id: str, wav_bytes: bytes, enable
         logger.info("🌙 [AOD WAKE CHECK] Âm thanh không chứa câu đánh thức AI -> Giữ nguyên màn hình AOD.")
         return
 
+    # Kiểm tra nếu người dùng ra lệnh "thoát" / "thoát về màn hình chờ"
+    u_norm = (user_text or "").strip().lower()
+    u_clean = re.sub(r'[.?!,;]+$', '', u_norm).strip()
+    is_exit_cmd = (
+        u_clean in ("thoát", "thoat", "thoát đi", "thoat di", "tạm biệt", "tam biet", "dừng trò chuyện", "ket thuc tro chuyen")
+        or any(k in u_clean for k in [
+            "thoát về màn hình chờ", "thoat ve man hinh cho",
+            "về màn hình chờ", "ve man hinh cho",
+            "thoát trợ lý", "thoat tro ly",
+            "thoát chế độ", "thoat che do",
+            "tắt trợ lý", "tat tro ly"
+        ])
+    )
+    if is_exit_cmd:
+        logger.info(f"🚪 [VOICE EXIT] Phát hiện lệnh thoát từ người dùng: \"{user_text}\" -> Chuyển trạm về Màn hình chờ!")
+        if not reply or len(reply.strip()) < 2:
+            reply = "Đã thoát về màn hình chờ. Hẹn gặp lại bạn nhé!"
+        await ws.send_str(json.dumps({"type": "stt", "text": user_text}, ensure_ascii=False))
+        await ws.send_str(json.dumps({"type": "exit_ai", "user_text": user_text, "reply": reply}, ensure_ascii=False))
+        await ws.send_str(json.dumps({"type": "answer", "text": reply, "sources": sources, "emotion": "happy", "exit_to_standby": True}, ensure_ascii=False))
+        return
+
     # Gửi gói STT tới ESP32 ngay khi nhận diện được câu hỏi của người dùng
     if user_text:
         logger.info(f"🗣️ [STT GEMINI]: \"{user_text}\"")
         await ws.send_str(json.dumps({"type": "stt", "text": user_text}, ensure_ascii=False))
     else:
         logger.info(f"🗣️ [STT GEMINI]: Không có nội dung lời nói rõ ràng")
-        await ws.send_str(json.dumps({"type": "stt", "text": "(Giọng nói)"}, ensure_ascii=False))
+        return
 
     if is_wake_check:
         await ws.send_str(json.dumps({"type": "wake", "user_text": user_text, "reply": reply}, ensure_ascii=False))
